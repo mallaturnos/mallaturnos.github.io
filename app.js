@@ -493,7 +493,8 @@ async function pintarTrabajador(token) {
       <div class="diahead">
         <div><div class="diafecha">${DIAS[i]} ${ddmm(x.fecha)}</div>
           <div class="diaturno">${trabaja ? esc(x.turno) : (AUSENCIAS[x.ausencia] || 'Libre')}</div></div>
-        <div class="diahoras">${trabaja ? hhmm(x.inicio)+'–'+hhmm(x.fin)+' · '+hfmt(hs)+' h' : ''}</div>
+        <div class="diahoras">${trabaja ? hhmm(x.inicio)+'–'+hhmm(x.fin)+' · '+hfmt(hs)+' h' : ''}
+          ${x.propina ? `<span class="prop">${clp(x.propina)} de propina</span>` : ''}</div>
       </div>` +
       (trabaja ? `<div class="btns">
         <button data-a="confirmo" data-v="1" aria-pressed="${x.confirmo === true}">Confirmo</button>
@@ -514,11 +515,13 @@ async function pintarTrabajador(token) {
   });
   $('#tTotal').textContent = 'Total de la semana: ' + hfmt(horasSem) + ' horas.';
 
-  const totalProp = props.reduce((s,p) => s + (p.efectivo||0) + (p.tarjeta||0), 0);
-  $('#tPropina').innerHTML = totalProp
-    ? `<div class="platita"><div class="k">Propina del local esta semana</div><div class="v">${clp(totalProp)}</div>
-       <div class="n">Tu factor acordado es <b>${hfmt(d.factor)}</b>. Se reparte día por día entre los que
-       trabajaron ese día, por horas × factor. El factor lo acuerda el equipo, no el jefe (art. 64).</div></div>`
+  const miProp = dias.reduce((s,x) => s + (x.propina || 0), 0);
+  const porHora = horasSem ? miProp / horasSem : 0;
+  $('#tPropina').innerHTML = miProp
+    ? `<div class="platita"><div class="k">Tu propina de la semana</div><div class="v">${clp(miProp)}</div>
+       <div class="n">Son <b>${clp(porHora)} por hora</b> sobre tus ${hfmt(horasSem)} h.
+       Se reparte día por día entre los que trabajaron ese día, por horas × factor; el tuyo es
+       <b>${hfmt(d.factor)}</b>. El factor lo acuerda el equipo, no el jefe (art. 64).</div></div>`
     : '';
 
   const ab = $('#tAbiertos'); ab.innerHTML = '';

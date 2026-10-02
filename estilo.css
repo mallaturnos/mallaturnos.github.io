@@ -204,3 +204,4 @@ textarea.out{width:100%;font-family:var(--font-mono);font-size:.6875rem;padding:
 tr.grupo th{background:var(--surface-3);font-size:.6875rem;font-weight:700;letter-spacing:.09em;
   text-transform:uppercase;color:var(--fg-dim);padding:7px 10px;min-width:0}
 tr.grupo th span{font-family:var(--font-mono);font-weight:500;opacity:.6;margin-left:6px;letter-spacing:0}
+.diahoras .prop{display:block;color:var(--accent);font-weight:600;margin-top:3px}
