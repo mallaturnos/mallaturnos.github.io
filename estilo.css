@@ -208,11 +208,16 @@ tr.grupo th span{font-family:var(--font-mono);font-weight:500;opacity:.6;margin-
 table.conf{min-width:660px}
 table.conf td{padding:6px;text-align:center}
 table.conf th.r{padding:8px 10px;font-size:.8125rem;font-weight:500;min-width:140px}
-.mk{display:inline-flex;flex-direction:column;gap:2px;align-items:center;font-family:var(--font-mono);line-height:1.3}
-.mk b{font-size:.6875rem;padding:2px 6px;border-radius:3px;font-weight:600}
-.mk b.si{background:var(--ok-soft);color:var(--ok)}
-.mk b.no{background:var(--bad-soft);color:var(--bad)}
-.mk b.esp{background:var(--surface-3);color:var(--fg-faint)}
+.mk{display:inline-flex;flex-direction:column;gap:1px;align-items:center;line-height:1.2}
+.mk b{font-size:.9375rem;font-weight:700;letter-spacing:-.04em}
+.mk em{font-style:normal;font-size:.625rem;letter-spacing:.02em}
+.mk.llego  b,.mk.llego  em{color:var(--ok)}
+.mk.conf   b,.mk.conf   em{color:var(--accent)}
+.mk.nopuede b,.mk.nopuede em{color:var(--bad)}
+.mk.nada   b,.mk.nada   em{color:var(--fg-faint)}
+.mk.alerta b,.mk.alerta em{color:var(--warn)}
+.mk.alerta{background:var(--warn-soft);border-radius:4px}
+.leyenda{display:flex;flex-wrap:wrap;gap:16px;padding:10px 12px;background:var(--surface-2);border-radius:5px;margin-bottom:4px}
 .soloHoy{margin:0;font-size:.75rem;color:var(--fg-faint)}
 .mk[data-p]{cursor:pointer;border-radius:4px;padding:3px 5px}
 .mk[data-p]:hover{background:var(--surface-2)}

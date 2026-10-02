@@ -525,6 +525,11 @@ const marcaDe = (pid, f) => S.marcas[pid + '|' + f] || {};
 
 function pintarConf() {
   const f = fechas();
+  $('#confLeyenda').innerHTML =
+    '<span class="mk conf"><b>✓</b><em>confirmó</em></span>' +
+    '<span class="mk llego"><b>✓✓</b><em>llegó</em></span>' +
+    '<span class="mk nopuede"><b>✕</b><em>no puede</em></span>' +
+    '<span class="mk nada"><b>·</b><em>sin responder</em></span>';
   $('#confCab').innerHTML = '<th>Persona</th>' + DIAS.map((d,i) => `<th>${d}<span class="num">${ddmm(f[i])}</span></th>`).join('');
   const cuerpo = $('#confCuerpo'); cuerpo.innerHTML = '';
   const avisos = [];
@@ -539,12 +544,17 @@ function pintarConf() {
         avisos.push({ n:'bad', t:`${p.nombre}: dijo «no puedo» el ${DIAS[i]} y llegó igual` });
       else if (m.llego === true && m.confirmo !== true)
         avisos.push({ n:'warn', t:`${p.nombre}: llegó el ${DIAS[i]} sin haber confirmado` });
-      const c = m.confirmo === true ? '<b class="si">C</b>'
-              : m.confirmo === false ? '<b class="no">no puede</b>' : '<b class="esp">C</b>';
-      const l = m.llego === true ? '<b class="si">LL</b>' : '<b class="esp">LL</b>';
-      const porJefe = m.marcado_por === 'jefe' ? '<i class="porjefe" title="marcado por ti">tú</i>' : '';
-      return `<td><span class="mk" data-p="${p.id}" data-f="${fe}" role="button" tabindex="0"
-               title="Marcar por esta persona">${c}${l}${porJefe}</span></td>`;
+      // Un solo estado por celda, el que de verdad importa, con el doble check
+      // de WhatsApp: todos saben que ✓ es "dijo que sí" y ✓✓ es "pasó de verdad".
+      let est;
+      if (m.llego === true && m.confirmo === false) est = { c:'alerta', i:'✓✓', t:'llegó igual' };
+      else if (m.llego === true)                    est = { c:'llego',  i:'✓✓', t:'llegó' };
+      else if (m.confirmo === true)                 est = { c:'conf',   i:'✓',  t:'confirmó' };
+      else if (m.confirmo === false)                est = { c:'nopuede',i:'✕',  t:'no puede' };
+      else                                          est = { c:'nada',   i:'·',  t:'sin responder' };
+      const porJefe = m.marcado_por === 'jefe' ? '<i class="porjefe" title="lo marcaste tú">tú</i>' : '';
+      return `<td><span class="mk ${est.c}" data-p="${p.id}" data-f="${fe}" role="button" tabindex="0"
+               title="Clic para marcar por esta persona"><b>${est.i}</b><em>${est.t}</em>${porJefe}</span></td>`;
     }).join('') + '</tr>';
   });
 

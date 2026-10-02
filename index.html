@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=11">
+<link rel="stylesheet" href="estilo.css?v=12">
 </head>
 <body>
 
@@ -169,7 +169,8 @@
       <div class="card">
         <h2>Qué contestó cada uno</h2>
         <p class="hint">Se actualiza solo cuando alguien marca desde su teléfono.
-          <b>C</b> es «confirmo el turno», <b>LL</b> es «llegué a trabajar».</p>
+          Aprieta cualquier casilla para marcar tú por esa persona.</p>
+        <div class="leyenda" id="confLeyenda"></div>
         <div id="confAlertas"></div>
         <div class="scroll" style="margin-top:12px"><table class="conf"><thead><tr id="confCab"></tr></thead><tbody id="confCuerpo"></tbody></table></div>
       </div>
@@ -196,8 +197,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=11"></script>
-<script src="datos.js?v=11"></script>
-<script src="app.js?v=11"></script>
+<script src="config.js?v=12"></script>
+<script src="datos.js?v=12"></script>
+<script src="app.js?v=12"></script>
 </body>
 </html>
