@@ -285,3 +285,23 @@ td.mcel.aus{background:var(--surface-3);font-style:italic}
   border-radius:4px;background:var(--surface);color:var(--fg);max-width:190px}
 #filtroPuesto.activo{border-color:var(--accent);color:var(--accent);font-weight:600;background:var(--accent-soft)}
 #filtroPuesto:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ===== cobertura hora por hora ===== */
+.cov{display:flex;flex-direction:column;gap:6px;min-width:540px}
+.covrow{display:grid;grid-template-columns:38px 1fr;gap:8px;align-items:center}
+.covday{font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-dim);text-transform:uppercase}
+.covbars{display:grid;gap:1px}
+.covbars span{height:24px;border-radius:2px;background:var(--surface-3);display:flex;align-items:center;
+  justify-content:center;font-family:var(--font-mono);font-size:.625rem;color:var(--fg-faint)}
+.covbars span.over{background:var(--accent);color:var(--accent-fg)}
+.covbars span.justo{background:var(--warn-soft);color:var(--warn);font-weight:600}
+.covbars span.falta{background:var(--bad-soft);color:var(--bad);font-weight:700}
+.covscale{display:grid;grid-template-columns:38px 1fr;gap:8px;margin-top:3px;min-width:540px}
+.covscale div:last-child{display:grid;gap:1px;font-family:var(--font-mono);font-size:.5625rem;
+  color:var(--fg-faint);text-align:center}
+.needrow{display:grid;grid-template-columns:38px 1fr;gap:8px;align-items:center;min-width:540px;margin-bottom:6px}
+.needrow>div:last-child{display:grid;gap:1px}
+.needrow input{width:100%;font-family:var(--font-mono);font-size:.6875rem;padding:5px 0;text-align:center;
+  border:1px solid var(--line);border-radius:2px;background:var(--bg);color:var(--fg);-moz-appearance:textfield}
+.needrow input::-webkit-outer-spin-button,.needrow input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.needrow input:focus-visible{outline:2px solid var(--accent);outline-offset:0}

@@ -128,6 +128,14 @@
     pedir(sb.from('dias').upsert(Object.assign({ local_id: localId, fecha }, campos),
                                  { onConflict: 'local_id,fecha' }).select().single());
 
+  /* ---------- dotación necesaria por hora ---------- */
+  const dotacion = (localId) =>
+    pedir(sb.from('dotacion').select('*').eq('local_id', localId));
+
+  const guardarDotacion = (localId, perfil, hora, cantidad) =>
+    pedir(sb.from('dotacion').upsert({ local_id: localId, perfil, hora, cantidad },
+      { onConflict: 'local_id,perfil,hora' }).select().single());
+
   /* ---------- turnos abiertos ---------- */
   const abiertos = (localId, desde) =>
     pedir(sb.from('turnos_abiertos').select('*').eq('local_id', localId)
@@ -163,7 +171,7 @@
     personas, crearPersona, guardarPersona, quitarPersona,
     turnos, crearTurno, guardarTurno, quitarTurno,
     asignaciones, ponerTurno, marcas, marcarComoJefe, copiarSemana,
-    dias, guardarDia,
+    dias, guardarDia, dotacion, guardarDotacion,
     abiertos, abrirTurno, cerrarTurno,
     miSemana, marcar, tomarTurno,
     escuchar,

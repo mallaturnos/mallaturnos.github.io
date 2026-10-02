@@ -32,7 +32,26 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
-            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', canal:null };
+            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', dotacion:{}, canal:null };
+
+// La franja horaria no se fija a mano: sale de los turnos que tenga el local.
+// Un café que cierra a las 19 no tiene por qué mirar columnas hasta la 1 AM.
+function franja() {
+  if (!S.turnos.length) return { h0: 8, h1: 24 };
+  const ini = Math.floor(Math.min(...S.turnos.map(t => Number(t.inicio))));
+  const fin = Math.ceil(Math.max(...S.turnos.map(t => Number(t.fin))));
+  return { h0: Math.max(0, ini), h1: Math.min(ini + 24, Math.max(fin, ini + 1)) };
+}
+const perfilDe = fecha => {
+  const d = new Date(fecha + 'T00:00:00'), i = (d.getDay() + 6) % 7;
+  return i <= 3 ? 'semana' : 'finde';          // L–J y V–D, como en el prototipo
+};
+const necesita = (perfil, hora) => (S.dotacion[perfil] || {})[hora] || 0;
+// cuánta gente hay en piso a esa hora, contando que un turno puede cruzar la medianoche
+const enPiso = (fecha, hora) => S.personas.reduce((n, p) => {
+  const a = asigDe(p.id, fecha); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
+  return n + (t && Number(t.inicio) <= hora && hora < Number(t.fin) ? 1 : 0);
+}, 0);
 
 // El filtro por puesto aplica a las tres vistas del plan. No toca las propinas
 // ni las confirmaciones: el reparto tiene que considerar SIEMPRE a todo el
@@ -121,15 +140,17 @@ function traducir(m) {
 /* ================= CARGAR TODO ================= */
 async function cargar() {
   const r = rango(), desde = r.desde, hasta = r.hasta;
-  const [personas, turnos, asign, marcas, dias, abiertos] = await Promise.all([
+  const [personas, turnos, asign, marcas, dias, abiertos, dot] = await Promise.all([
     DATOS.personas(S.local.id), DATOS.turnos(S.local.id),
     DATOS.asignaciones(S.local.id, desde, hasta), DATOS.marcas(S.local.id, desde, hasta),
     DATOS.dias(S.local.id, desde, hasta), DATOS.abiertos(S.local.id, desde),
+    DATOS.dotacion(S.local.id),
   ]);
   S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
   S.asign = {}; (asign||[]).forEach(a => { S.asign[a.persona_id + '|' + a.fecha] = a; });
   S.marcas = {}; (marcas||[]).forEach(m => { S.marcas[m.persona_id + '|' + m.fecha] = m; });
   S.dias = {};   (dias||[]).forEach(d => { S.dias[d.fecha] = d; });
+  S.dotacion = {}; (dot||[]).forEach(x => { (S.dotacion[x.perfil] = S.dotacion[x.perfil] || {})[x.hora] = x.cantidad; });
 }
 
 async function refrescar() { await cargar(); pintarTodo(); }
@@ -411,6 +432,86 @@ function pintarTurnos() {
       try { await DATOS.quitarTurno(t.id); await refrescar(); } catch (e) { error(e); }
     });
   });
+}
+
+/* ================= COBERTURA Y COSTO ================= */
+function pintarCobertura() {
+  const { h0, h1 } = franja(), f = fechas(), horas = [];
+  for (let h = h0; h < h1; h++) horas.push(h);
+
+  ['escala','escala2'].forEach(id => {
+    const e = $('#' + id); if (e) e.innerHTML = horas.map(h => `<div>${((h%24)+24)%24}</div>`).join('');
+  });
+  document.querySelectorAll('.covbars, .needrow>div:last-child, .covscale div:last-child')
+    .forEach(n => n.style.gridTemplateColumns = `repeat(${horas.length},1fr)`);
+
+  let faltan = 0, sobran = 0, hayDotacion = false;
+  const cont = $('#cobertura'); cont.innerHTML = '';
+  f.forEach((fe, d) => {
+    const perfil = perfilDe(fe);
+    const celdas = horas.map(h => {
+      const n = enPiso(fe, h), req = necesita(perfil, h);
+      if (req) hayDotacion = true;
+      let cls = '';
+      if (!req) cls = n ? 'over' : '';
+      else if (n < req) { cls = 'falta'; faltan += (req - n); }
+      else if (n === req) cls = 'justo';
+      else { cls = 'over'; sobran += (n - req); }
+      const t = req ? `${DIAS[d]} ${((h%24)+24)%24}:00 · ${n} en piso, necesita ${req}`
+                    : `${DIAS[d]} ${((h%24)+24)%24}:00 · ${n} en piso`;
+      return `<span class="${cls}" title="${t}">${n||''}</span>`;
+    }).join('');
+    cont.appendChild(el('div','covrow', `<div class="covday">${DIAS[d]}</div><div class="covbars">${celdas}</div>`));
+  });
+
+  // editores de dotación
+  [['needSem','semana'],['needFin','finde']].forEach(([id, perfil]) => {
+    const box = $('#' + id); box.innerHTML = '';
+    horas.forEach(h => {
+      const i = document.createElement('input');
+      i.type = 'number'; i.min = 0; i.max = 99; i.value = necesita(perfil, h);
+      i.setAttribute('aria-label', `Necesidad ${perfil === 'semana' ? 'lunes a jueves' : 'viernes a domingo'}, ${((h%24)+24)%24}:00`);
+      let t = null;
+      i.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          const v = Number(i.value) || 0;
+          (S.dotacion[perfil] = S.dotacion[perfil] || {})[h] = v;
+          try { await DATOS.guardarDotacion(S.local.id, perfil, h, v); pintarCobertura(); }
+          catch (e) { error(e); }
+        }, 600);
+      });
+      box.appendChild(i);
+    });
+  });
+
+  // costo sobre venta, día por día
+  const obj = Number(S.local.objetivo_pct) || 30;
+  const oi = $('#objetivoPct');
+  if (oi && document.activeElement !== oi) oi.value = obj;
+  let costoT = 0, ventaT = 0;
+  const lis = f.map((fe, d) => {
+    const costo = S.personas.reduce((s,p) => {
+      const a = asigDe(p.id, fe); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
+      return s + (t ? horasDe(t) * (p.valor_hora||0) : 0); }, 0);
+    const venta = (S.dias[fe]||{}).venta || 0;
+    costoT += costo; ventaT += venta;
+    const pct = venta ? (costo/venta)*100 : NaN;
+    const mal = isFinite(pct) && pct > obj;
+    return `<li><div class="prow"><span class="pname">${DIAS[d]} <span class="num">${ddmm(fe)}</span></span>
+      <span class="pstat">${clp(costo)} de ${clp(venta)} · <b style="color:${mal?'var(--bad)':'var(--ok)'}">${pfmt(pct)}</b></span></div>
+      <div class="bar"><i class="${mal?'over':''}" style="width:${isFinite(pct)?Math.min(100,pct):0}%"></i></div></li>`;
+  }).join('');
+  $('#cobDias').innerHTML = lis;
+
+  const pctT = ventaT ? (costoT/ventaT)*100 : NaN;
+  $('#cobKpis').innerHTML = [
+    { k:'Costo de personal', v:clp(costoT), n:'la semana completa' },
+    { k:'Sobre la venta', v:pfmt(pctT), n:`tu objetivo es ${obj} %`,
+      c: isFinite(pctT) ? (pctT > obj ? 'alert' : 'good') : '' },
+    { k:'Horas-persona que faltan', v: hayDotacion ? faltan : '—', n:'momentos con menos gente de la que pediste', c: faltan ? 'alert' : '' },
+    { k:'Horas-persona de sobra', v: hayDotacion ? sobran : '—', n:'momentos con más gente de la necesaria' },
+  ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
 }
 
 /* ================= PROPINAS ================= */
@@ -696,7 +797,7 @@ function pintarLinks() {
 /* ================= PINTAR TODO ================= */
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
-  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
+  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarCobertura(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
 }
 
 /* ================= VISTA DEL TRABAJADOR ================= */
@@ -865,7 +966,7 @@ async function verJefe() {
 
 function conectarApp() {
   // pestañas
-  const TABS = ['sem','eq','prop','abi','conf','link'];
+  const TABS = ['sem','eq','cob','prop','abi','conf','link'];
   TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
     TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
   }));
@@ -905,6 +1006,11 @@ function conectarApp() {
     setTimeout(() => { $('#msgSem').textContent = ''; }, 5000);
   });
 
+  $('#objetivoPct').addEventListener('change', async ev => {
+    const v = Number(ev.target.value) || 30;
+    try { S.local = await DATOS.guardarLocal(S.local.id, { objetivo_pct: v }); pintarCobertura(); pintarResumenSemana(); }
+    catch (e) { error(e); }
+  });
   $('#filtroPuesto').addEventListener('change', ev => { S.filtro = ev.target.value; pintarPlan(); });
   $('#btnImprimir').addEventListener('click', () => window.print());
   $('#btnIrPublicar').addEventListener('click', () => $('#tab-link').click());

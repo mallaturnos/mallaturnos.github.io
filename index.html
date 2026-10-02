@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=15">
+<link rel="stylesheet" href="estilo.css?v=16">
 </head>
 <body>
 
@@ -83,6 +83,7 @@
     <nav role="tablist" aria-label="Secciones">
       <button role="tab" id="tab-sem"  aria-selected="true"  aria-controls="p-sem">Semana</button>
       <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
+      <button role="tab" id="tab-cob" aria-selected="false" aria-controls="p-cob">Cobertura</button>
       <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
       <button role="tab" id="tab-abi"  aria-selected="false" aria-controls="p-abi">Turnos abiertos</button>
       <button role="tab" id="tab-conf" aria-selected="false" aria-controls="p-conf">Confirmaciones</button>
@@ -131,6 +132,36 @@
         <p class="hint">Si el fin es menor que el inicio, se entiende que cruza la medianoche.</p>
         <div id="eqTurnos"></div>
         <div class="acciones" style="margin-top:14px"><button class="act" id="btnTurno">Agregar turno</button></div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-cob" role="tabpanel" aria-labelledby="tab-cob" hidden>
+      <div class="card">
+        <h2>Cuánta gente tienes, hora por hora</h2>
+        <p class="hint">El número es la gente en piso. <b>Rojo</b> = falta, <b>ámbar</b> = va justo, <b>verde</b> = hay holgura. Se compara con lo que definas abajo.</p>
+        <div class="kpis" id="cobKpis" style="margin-bottom:14px"></div>
+        <div class="scroll" style="border:0;background:transparent">
+          <div class="cov" id="cobertura"></div>
+          <div class="covscale"><div></div><div id="escala"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Cuánta necesitas</h2>
+        <p class="hint">Dos perfiles, porque un martes no se parece a un sábado. Edita y la tabla de arriba se recalcula sola.</p>
+        <div class="scroll" style="border:0;background:transparent">
+          <div class="covscale"><div></div><div id="escala2"></div></div>
+          <div class="needrow"><div class="covday">L–J</div><div id="needSem"></div></div>
+          <div class="needrow"><div class="covday">V–D</div><div id="needFin"></div></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Costo de personal sobre la venta</h2>
+        <p class="hint">El indicador que de verdad mira un dueño. La venta se carga en la pestaña <b>Propinas</b>.</p>
+        <div class="grid2" style="max-width:220px">
+          <div class="fld"><label for="objetivoPct">Objetivo %</label>
+            <input class="n" type="number" id="objetivoPct" min="1" max="100" step="1"></div>
+        </div>
+        <ul class="people" id="cobDias" style="margin-top:14px"></ul>
       </div>
     </div>
 
@@ -202,8 +233,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=15"></script>
-<script src="datos.js?v=15"></script>
-<script src="app.js?v=15"></script>
+<script src="config.js?v=16"></script>
+<script src="datos.js?v=16"></script>
+<script src="app.js?v=16"></script>
 </body>
 </html>
