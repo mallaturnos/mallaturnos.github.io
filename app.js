@@ -415,6 +415,56 @@ function pintarAbiertos() {
   });
 }
 
+/* ================= CONFIRMACIONES ================= */
+const marcaDe = (pid, f) => S.marcas[pid + '|' + f] || {};
+
+function pintarConf() {
+  const f = fechas();
+  $('#confCab').innerHTML = '<th>Persona</th>' + DIAS.map((d,i) => `<th>${d}<span class="num">${ddmm(f[i])}</span></th>`).join('');
+  const cuerpo = $('#confCuerpo'); cuerpo.innerHTML = '';
+  const avisos = [];
+
+  S.personas.forEach(p => {
+    cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}</th>` + f.map((fe,i) => {
+      const a = asigDe(p.id, fe);
+      if (!a || !a.turno_id) return '<td><span class="mk"><b class="esp">libre</b></span></td>';
+      const m = marcaDe(p.id, fe);
+      // los dos casos que al dueño le interesa ver de inmediato
+      if (m.llego === true && m.confirmo === false)
+        avisos.push({ n:'bad', t:`${p.nombre}: dijo «no puedo» el ${DIAS[i]} y llegó igual` });
+      else if (m.llego === true && m.confirmo !== true)
+        avisos.push({ n:'warn', t:`${p.nombre}: llegó el ${DIAS[i]} sin haber confirmado` });
+      const c = m.confirmo === true ? '<b class="si">C</b>'
+              : m.confirmo === false ? '<b class="no">no puede</b>' : '<b class="esp">C</b>';
+      const l = m.llego === true ? '<b class="si">LL</b>' : '<b class="esp">LL</b>';
+      const porJefe = m.marcado_por === 'jefe' ? '<i class="porjefe" title="marcado por ti">tú</i>' : '';
+      return `<td><span class="mk" data-p="${p.id}" data-f="${fe}" role="button" tabindex="0"
+               title="Marcar por esta persona">${c}${l}${porJefe}</span></td>`;
+    }).join('') + '</tr>';
+  });
+
+  // el jefe puede marcar por alguien: un clic recorre confirmo -> llego -> limpiar
+  cuerpo.querySelectorAll('.mk[data-p]').forEach(celda => {
+    const accion = async () => {
+      const pid = celda.dataset.p, fe = celda.dataset.f, m = marcaDe(pid, fe);
+      let campo, valor;
+      if (m.confirmo !== true) { campo = 'confirmo'; valor = true; }
+      else if (m.llego !== true) { campo = 'llego'; valor = true; }
+      else { campo = 'confirmo'; valor = null; }
+      try {
+        S.marcas[pid + '|' + fe] = await DATOS.marcarComoJefe(pid, fe, campo, valor);
+        pintarConf();
+      } catch (e) { error(e); }
+    };
+    celda.addEventListener('click', accion);
+    celda.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); accion(); } });
+  });
+
+  $('#confAlertas').innerHTML = avisos.length
+    ? '<div class="flags">' + avisos.map(a => `<span class="flag ${a.n}">${esc(a.t)}</span>`).join('') + '</div>'
+    : '<p class="hint" style="margin:0">Sin novedades: nadie llegó sin confirmar.</p>';
+}
+
 /* ================= LINKS ================= */
 const linkDe = p => location.origin + location.pathname + '#' + p.token;
 
@@ -454,7 +504,7 @@ function pintarLinks() {
 /* ================= PINTAR TODO ================= */
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
-  pintarSemana(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarLinks();
+  pintarSemana(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
 }
 
 /* ================= VISTA DEL TRABAJADOR ================= */
@@ -484,6 +534,7 @@ async function pintarTrabajador(token) {
   let horasSem = 0;
   dias.forEach(x => { if (x.turno) horasSem += Number(x.fin) - Number(x.inicio) - Number(x.colacion); });
 
+  const hoy = iso(new Date());
   const cont = $('#tDias'); cont.innerHTML = '';
   dias.forEach(x => {
     const trabaja = !!x.turno;
@@ -499,8 +550,9 @@ async function pintarTrabajador(token) {
       (trabaja ? `<div class="btns">
         <button data-a="confirmo" data-v="1" aria-pressed="${x.confirmo === true}">Confirmo</button>
         <button class="no" data-a="confirmo" data-v="0" aria-pressed="${x.confirmo === false}">No puedo</button>
-        <button data-a="llego" data-v="1" aria-pressed="${x.llego === true}">Llegué</button>
-      </div>` : ''));
+        <button data-a="llego" data-v="1" aria-pressed="${x.llego === true}"
+          ${x.fecha === hoy ? '' : 'disabled title="Se activa el mismo día del turno"'}>Llegué</button>
+      </div>` + (x.fecha === hoy ? '' : '<p class="soloHoy">«Llegué» se activa el día del turno.</p>') : ''));
     cont.appendChild(card);
     card.querySelectorAll('button[data-a]').forEach(b => {
       b.addEventListener('click', async () => {
@@ -599,7 +651,7 @@ async function verJefe() {
 
 function conectarApp() {
   // pestañas
-  const TABS = ['sem','eq','prop','abi','link'];
+  const TABS = ['sem','eq','prop','abi','conf','link'];
   TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
     TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
   }));

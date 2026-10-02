@@ -92,6 +92,14 @@
             .eq('personas.local_id', localId).gte('fecha', desde).lte('fecha', hasta));
 
   /* ---------- plata del día ---------- */
+  // el jefe marca por alguien que perdio el telefono: queda registrado que fue EL
+  const marcarComoJefe = (personaId, fecha, campo, valor) =>
+    pedir(sb.from('marcas').upsert(
+      Object.assign({ persona_id: personaId, fecha, marcado_por: 'jefe' },
+                    { [campo]: valor },
+                    campo === 'llego' ? { hora_llego: valor ? new Date().toISOString() : null } : {}),
+      { onConflict: 'persona_id,fecha' }).select().single());
+
   const dias = (localId, desde, hasta) =>
     pedir(sb.from('dias').select('*').eq('local_id', localId).gte('fecha', desde).lte('fecha', hasta));
 
@@ -133,7 +141,7 @@
     miLocal, crearLocal, guardarLocal,
     personas, crearPersona, guardarPersona, quitarPersona,
     turnos, crearTurno, guardarTurno, quitarTurno,
-    asignaciones, ponerTurno, marcas,
+    asignaciones, ponerTurno, marcas, marcarComoJefe,
     dias, guardarDia,
     abiertos, abrirTurno, cerrarTurno,
     miSemana, marcar, tomarTurno,

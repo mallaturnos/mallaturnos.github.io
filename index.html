@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=7">
+<link rel="stylesheet" href="estilo.css?v=9">
 </head>
 <body>
 
@@ -84,6 +84,7 @@
       <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
       <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
       <button role="tab" id="tab-abi"  aria-selected="false" aria-controls="p-abi">Turnos abiertos</button>
+      <button role="tab" id="tab-conf" aria-selected="false" aria-controls="p-conf">Confirmaciones</button>
       <button role="tab" id="tab-link" aria-selected="false" aria-controls="p-link">Links</button>
     </nav>
 
@@ -152,6 +153,16 @@
       </div>
     </div>
 
+    <div class="panel" id="p-conf" role="tabpanel" aria-labelledby="tab-conf" hidden>
+      <div class="card">
+        <h2>Qué contestó cada uno</h2>
+        <p class="hint">Se actualiza solo cuando alguien marca desde su teléfono.
+          <b>C</b> es «confirmo el turno», <b>LL</b> es «llegué a trabajar».</p>
+        <div id="confAlertas"></div>
+        <div class="scroll" style="margin-top:12px"><table class="conf"><thead><tr id="confCab"></tr></thead><tbody id="confCuerpo"></tbody></table></div>
+      </div>
+    </div>
+
     <div class="panel" id="p-link" role="tabpanel" aria-labelledby="tab-link" hidden>
       <div class="card">
         <h2>El link de cada persona</h2>
@@ -173,8 +184,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=7"></script>
-<script src="datos.js?v=7"></script>
-<script src="app.js?v=7"></script>
+<script src="config.js?v=9"></script>
+<script src="datos.js?v=9"></script>
+<script src="app.js?v=9"></script>
 </body>
 </html>
