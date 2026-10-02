@@ -865,9 +865,8 @@ async function pintarTrabajador(token) {
       (trabaja ? `<div class="btns">
         <button data-a="confirmo" data-v="1" aria-pressed="${x.confirmo === true}">Confirmo</button>
         <button class="no" data-a="confirmo" data-v="0" aria-pressed="${x.confirmo === false}">No puedo</button>
-        <button data-a="llego" data-v="1" aria-pressed="${x.llego === true}"
-          ${x.fecha === hoy ? '' : 'disabled title="Se activa el mismo día del turno"'}>Llegué</button>
-      </div>` + (x.fecha === hoy ? '' : '<p class="soloHoy">«Llegué» se activa el día del turno.</p>') : ''));
+        <button data-a="llego" data-v="1" aria-pressed="${x.llego === true}">Llegué</button>
+      </div>` : ''));
     cont.appendChild(card);
     card.querySelectorAll('button[data-a]').forEach(b => {
       b.addEventListener('click', async () => {
