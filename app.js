@@ -37,7 +37,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
-            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', dotacion:{}, canal:null };
+            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', dotacion:{}, canal:null };
 
 // La franja horaria no se fija a mano: sale de los turnos que tenga el local.
 // Un café que cierra a las 19 no tiene por qué mirar columnas hasta la 1 AM.
@@ -62,9 +62,12 @@ const enPiso = (fecha, hora) => S.personas.reduce((n, p) => {
 // ni las confirmaciones: el reparto tiene que considerar SIEMPRE a todo el
 // equipo, aunque en pantalla estés mirando solo la cocina.
 const puestos = () => [...new Set(S.personas.map(p => (p.rol||'').trim() || 'Sin puesto'))].sort();
-const personasVisibles = () => S.filtro
-  ? S.personas.filter(p => ((p.rol||'').trim() || 'Sin puesto') === S.filtro)
-  : S.personas;
+// "equipo" es una segunda dimensión, aparte del puesto: un garzón part-time
+// sigue siendo garzón. Mezclar las dos cosas en un campo pierde información.
+const equipos = () => [...new Set(S.personas.map(p => (p.equipo||'').trim()).filter(Boolean))].sort();
+const personasVisibles = () => S.personas.filter(p =>
+  (!S.filtro  || ((p.rol||'').trim() || 'Sin puesto') === S.filtro) &&
+  (!S.filtroE || (p.equipo||'').trim() === S.filtroE));
 const fechas = () => Array.from({length:7}, (_,i) => iso(masDias(S.lunes, i)));
 
 // El rango que hay que traer de la base depende de la vista: un dia, una
@@ -210,6 +213,16 @@ function pintarPlan() {
     sel.value = S.filtro;
     sel.classList.toggle('activo', !!S.filtro);
   }
+  const selE = $('#filtroEquipo');
+  if (selE) {
+    const es = equipos();
+    selE.hidden = !es.length;                 // si nadie tiene equipo, no estorba
+    selE.innerHTML = '<option value="">Todos los equipos</option>' +
+      es.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    if (S.filtroE && !es.includes(S.filtroE)) S.filtroE = '';
+    selE.value = S.filtroE;
+    selE.classList.toggle('activo', !!S.filtroE);
+  }
   $('#cajaSemana').hidden = S.modo !== 'semana';
   $('#cajaDia').hidden    = S.modo !== 'dia';
   $('#cajaMes').hidden    = S.modo !== 'mes';
@@ -228,8 +241,8 @@ function pintarSemana() {
   const cuerpo = $('#semCuerpo'); cuerpo.innerHTML = '';
   const gente = personasVisibles();
   if (!gente.length) {
-    cuerpo.innerHTML = `<tr><td colspan="9" class="vacio">${S.filtro
-      ? 'Nadie en «' + esc(S.filtro) + '». Cambia el filtro arriba.'
+    cuerpo.innerHTML = `<tr><td colspan="9" class="vacio">${(S.filtro || S.filtroE)
+      ? 'Nadie con esos filtros. Cámbialos arriba.'
       : 'Todavía no tienes a nadie. Anda a <b>Equipo</b> y agrega tu primera persona.'}</td></tr>`;
     $('#semPie').innerHTML = ''; $('#semPersonas').innerHTML = ''; return;
   }
@@ -418,7 +431,8 @@ function pintarEquipo() {
   S.personas.forEach(p => {
     const row = el('div','rowline', `
       ${filaCampo('Nombre','text',p.nombre,'data-k="nombre"')}
-      ${filaCampo('Puesto','text',p.rol||'','data-k="rol"')}
+      ${filaCampo('Puesto','text',p.rol||'','data-k="rol" placeholder="Garzón"')}
+      ${filaCampo('Equipo','text',p.equipo||'','data-k="equipo" placeholder="Fijos / Por llamado"')}
       ${filaCampo('Valor hora','plata',p.valor_hora,'data-k="valor_hora" class="n"')}
       ${filaCampo('Horas contrato','number',p.horas_contrato,'data-k="horas_contrato" class="n" min="0" max="60" step="1"')}
       ${filaCampo('Factor propina','number',p.factor_propina,'data-k="factor_propina" class="n" min="0" max="3" step="0.1"')}
@@ -435,7 +449,7 @@ function pintarEquipo() {
         t = setTimeout(async () => {
           const k = inp.dataset.k;
           let v;
-          if (k === 'nombre' || k === 'rol') v = inp.value;
+          if (k === 'nombre' || k === 'rol' || k === 'equipo') v = inp.value;
           else if (k === 'valor_hora') { v = dePlata(inp.value); inp.value = aPlata(v); }
           else v = Number(inp.value) || 0;
           try { Object.assign(p, await DATOS.guardarPersona(p.id, { [k]: v })); pintarSemana(); pintarPropinas(); pintarLinks(); }
@@ -1116,6 +1130,7 @@ function conectarApp() {
     catch (e) { error(e); }
   });
   on('#filtroPuesto', 'change', ev => { S.filtro = ev.target.value; pintarPlan(); });
+  on('#filtroEquipo', 'change', ev => { S.filtroE = ev.target.value; pintarPlan(); });
   on('#btnImprimir', 'click', () => window.print());
   on('#btnIrPublicar', 'click', () => $('#tab-link').click());
 

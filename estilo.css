@@ -281,10 +281,10 @@ td.mcel.aus{background:var(--surface-3);font-style:italic}
 #tConfTodo{margin-bottom:4px}
 #tConfTodo button{width:100%;padding:13px;font-size:.9375rem}
 #tConfTodo button span{display:block;font-size:.75rem;font-weight:400;opacity:.85;margin-top:2px}
-#filtroPuesto{font-family:var(--font-body);font-size:.8125rem;padding:9px 10px;border:1px solid var(--line);
+#filtroPuesto,#filtroEquipo{font-family:var(--font-body);font-size:.8125rem;padding:9px 10px;border:1px solid var(--line);
   border-radius:4px;background:var(--surface);color:var(--fg);max-width:190px}
-#filtroPuesto.activo{border-color:var(--accent);color:var(--accent);font-weight:600;background:var(--accent-soft)}
-#filtroPuesto:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+#filtroPuesto.activo,#filtroEquipo.activo{border-color:var(--accent);color:var(--accent);font-weight:600;background:var(--accent-soft)}
+#filtroPuesto:focus-visible,#filtroEquipo:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* ===== cobertura hora por hora ===== */
 .cov{display:flex;flex-direction:column;gap:6px;min-width:540px}
