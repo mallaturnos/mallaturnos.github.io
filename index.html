@@ -5,21 +5,39 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=2">
+<link rel="stylesheet" href="estilo.css?v=3">
 </head>
 <body>
-<div class="wrap">
+
+<!-- ====================== VISTA DEL TRABAJADOR (con #token) ====================== -->
+<div class="wrap" id="vistaTrab" hidden>
+  <p class="eyebrow">Mi semana</p>
+  <h1 id="tNombre">—</h1>
+  <p class="sub" id="tSub"></p>
+  <div id="tAviso"></div>
+  <div id="tPropina"></div>
+  <h2 class="secc">Mis turnos</h2>
+  <div id="tDias"></div>
+  <p class="sub" id="tTotal"></p>
+  <h2 class="secc">Turnos disponibles</h2>
+  <p class="sub" style="margin:0 0 10px">Turnos que quedaron sin nadie. <b>El primero que lo toma se lo queda.</b></p>
+  <div id="tAbiertos"></div>
+  <footer>Malla de Turnos</footer>
+</div>
+
+<!-- ====================== VISTA DEL DUEÑO ====================== -->
+<div class="wrap" id="vistaJefe" hidden>
 
   <header>
     <div>
-      <p class="eyebrow">Tamarama</p>
+      <p class="eyebrow" id="hLocal">—</p>
       <h1>Malla de Turnos</h1>
-      <p class="sub">Planifica la semana, reparte las propinas y publica los turnos al equipo.</p>
     </div>
+    <div class="acciones" id="hAcciones"></div>
   </header>
 
-  <!-- ===== estado de la conexión: la primera prueba de que todo el camino funciona ===== -->
-  <div class="card" id="diag">
+  <!-- diagnóstico: solo aparece si algo falla -->
+  <div class="card" id="diag" hidden>
     <h2>Estado</h2>
     <ul class="checks">
       <li id="c-web"><span class="pt">…</span> La página se publicó y cargó</li>
@@ -30,7 +48,7 @@
     <p class="hint" id="diagNota"></p>
   </div>
 
-  <!-- ===== entrar (dueño) ===== -->
+  <!-- entrar -->
   <div class="card" id="cardLogin" hidden>
     <h2>Entrar</h2>
     <p class="hint">Solo para el dueño o el encargado. El equipo entra con su propio link, sin clave.</p>
@@ -47,20 +65,116 @@
     </form>
   </div>
 
-  <!-- ===== panel (cuando hay sesión) ===== -->
-  <div id="panel" hidden>
-    <div class="card">
-      <h2 id="hola">—</h2>
-      <p class="hint">Acá va a vivir la malla. Por ahora esto confirma que la sesión funciona.</p>
-      <div class="acciones"><button class="act" id="btnSalir">Cerrar sesión</button></div>
+  <!-- primer uso: crear el local -->
+  <div class="card" id="cardLocal" hidden>
+    <h2>¿Cómo se llama tu local?</h2>
+    <p class="hint">Es lo único que te pido para empezar. Lo demás lo agregas cuando lo necesites.</p>
+    <form id="formLocal" class="form">
+      <div class="fld"><label for="nombreLocal">Nombre</label>
+        <input type="text" id="nombreLocal" placeholder="Café Las Rosas" required></div>
+      <div class="acciones"><button class="act primary" type="submit">Crear</button></div>
+      <p class="msg" id="msgLocal" role="status"></p>
+    </form>
+  </div>
+
+  <!-- la app -->
+  <div id="app" hidden>
+    <nav role="tablist" aria-label="Secciones">
+      <button role="tab" id="tab-sem"  aria-selected="true"  aria-controls="p-sem">Semana</button>
+      <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
+      <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
+      <button role="tab" id="tab-abi"  aria-selected="false" aria-controls="p-abi">Turnos abiertos</button>
+      <button role="tab" id="tab-link" aria-selected="false" aria-controls="p-link">Links</button>
+    </nav>
+
+    <div class="panel" id="p-sem" role="tabpanel" aria-labelledby="tab-sem">
+      <div class="card">
+        <div class="semnav">
+          <button class="act" id="semAnt">←</button>
+          <b id="semTitulo">—</b>
+          <button class="act" id="semSig">→</button>
+          <button class="act" id="semHoy">Esta semana</button>
+        </div>
+        <div class="scroll"><table id="tablaSem"><thead><tr id="semCab"></tr></thead><tbody id="semCuerpo"></tbody><tfoot id="semPie"></tfoot></table></div>
+        <p class="hint" style="margin-top:12px">Cambia cualquier celda y se guarda solo. Las alertas aparecen al lado de cada persona.</p>
+      </div>
+      <div class="card">
+        <h2>Por persona</h2>
+        <ul class="people" id="semPersonas"></ul>
+      </div>
+    </div>
+
+    <div class="panel" id="p-eq" role="tabpanel" aria-labelledby="tab-eq" hidden>
+      <div class="card">
+        <h2>Equipo</h2>
+        <p class="hint">Sin RUT, sin dirección, sin teléfono: solo lo que hace falta para armar turnos y repartir propinas.</p>
+        <div id="eqLista"></div>
+        <div class="acciones" style="margin-top:14px"><button class="act" id="btnPersona">Agregar persona</button></div>
+      </div>
+      <div class="card">
+        <h2>Turnos del local</h2>
+        <p class="hint">Si el fin es menor que el inicio, se entiende que cruza la medianoche.</p>
+        <div id="eqTurnos"></div>
+        <div class="acciones" style="margin-top:14px"><button class="act" id="btnTurno">Agregar turno</button></div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-prop" role="tabpanel" aria-labelledby="tab-prop" hidden>
+      <p class="note"><b>Esto no lo decide el jefe.</b> Por el <b>art. 64</b> del Código del Trabajo, cómo se reparte la propina lo acuerdan los trabajadores. Esta pantalla solo aplica el acuerdo: horas × factor, día por día.</p>
+      <div class="card">
+        <h2>Lo que se juntó</h2>
+        <p class="hint">Separado en efectivo y tarjeta: la de tarjeta sale del cierre de la máquina y el equipo la puede contrastar.</p>
+        <div id="propDias"></div>
+        <div class="kpis" id="propKpis" style="margin-top:16px"></div>
+      </div>
+      <div class="card">
+        <h2>El reparto</h2>
+        <div class="scroll"><table class="prop" id="tablaProp"><thead><tr id="propCab"></tr></thead><tbody id="propCuerpo"></tbody><tfoot id="propPie"></tfoot></table></div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-abi" role="tabpanel" aria-labelledby="tab-abi" hidden>
+      <p class="note"><b>Se te enfermó uno a las once.</b> En vez de llamar a seis personas, publicas el turno y el primero que lo toma se lo queda.</p>
+      <div class="card">
+        <h2>Publicar un turno abierto</h2>
+        <div class="grid2">
+          <div class="fld"><label for="abiDia">Día</label><select id="abiDia"></select></div>
+          <div class="fld"><label for="abiTurno">Turno</label><select id="abiTurno"></select></div>
+          <div class="fld"><label for="abiPuesto">Puesto</label><input type="text" id="abiPuesto" placeholder="Garzón"></div>
+          <div class="fld"><label for="abiNota">Nota</label><input type="text" id="abiNota" placeholder="reemplazo por licencia"></div>
+        </div>
+        <div class="acciones" style="margin-top:14px"><button class="act primary" id="btnAbrir">Publicar</button></div>
+      </div>
+      <div class="card">
+        <h2>Publicados</h2>
+        <p class="hint">Se actualiza solo cuando alguien lo toma desde su teléfono.</p>
+        <div class="abi" id="abiLista"></div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-link" role="tabpanel" aria-labelledby="tab-link" hidden>
+      <div class="card">
+        <h2>El link de cada persona</h2>
+        <p class="hint">Cada uno abre <b>solo su semana</b>, sin cuenta ni clave. Mándalo por WhatsApp.</p>
+        <div id="linkLista"></div>
+      </div>
+      <div class="card">
+        <h2>Mensaje para WhatsApp</h2>
+        <div class="acciones">
+          <button class="act primary" id="btnCopiarPub">Copiar todos</button>
+          <span class="msg" id="msgPub"></span>
+        </div>
+        <textarea class="out" id="salidaPub" readonly aria-label="Mensajes por persona"></textarea>
+      </div>
     </div>
   </div>
 
-  <footer>Versión de trabajo · <span id="pie"></span></footer>
+  <footer>Malla de Turnos · <span id="pie"></span></footer>
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=2"></script>
-<script src="app.js?v=2"></script>
+<script src="config.js?v=3"></script>
+<script src="datos.js?v=3"></script>
+<script src="app.js?v=3"></script>
 </body>
 </html>
