@@ -265,7 +265,10 @@ function pintarDia() {
       </div>
       <ul>${gente.map(p => {
         const m = marcaDe(p.id, fe);
-        const et = m.llego === true ? '<span class="flag ok">llegó</span>'
+        const hl = horaLlegada(m);
+        const tarde = hl !== null ? Math.round((hl - Number(t.inicio))*60) : null;
+        const et = m.llego === true
+                 ? `<span class="flag ok">llegó${hl !== null ? ' ' + hhmm(hl) : ''}${tarde > 5 ? ' · '+tarde+' min tarde' : ''}</span>`
                  : m.confirmo === true ? '<span class="flag info">confirmó</span>'
                  : m.confirmo === false ? '<span class="flag bad">no puede</span>' : '';
         return `<li><b>${esc(p.nombre)}</b> <span class="rol">${esc(p.rol||'')}</span> ${et}</li>`;
@@ -522,6 +525,38 @@ function pintarAbiertos() {
 
 /* ================= CONFIRMACIONES ================= */
 const marcaDe = (pid, f) => S.marcas[pid + '|' + f] || {};
+const horaLlegada = m => {
+  if (!m || !m.hora_llego) return null;
+  const d = new Date(m.hora_llego);
+  return d.getHours() + d.getMinutes()/60;
+};
+
+/* Planificado contra real.
+   OJO: esto NO son "horas trabajadas" para liquidar sueldos — eso seria el
+   registro legal de asistencia y necesita certificacion de la DT. Esto es
+   cobertura y puntualidad: cuanto de lo que planifique tiene a alguien que
+   dijo que llego, y a que hora llego respecto de su turno. */
+function planContraReal() {
+  const f = fechas();
+  return S.personas.map(p => {
+    let plan = 0, conLlegada = 0, atrasoMin = 0, atrasos = 0, sinMarca = 0;
+    f.forEach(fe => {
+      const a = asigDe(p.id, fe); if (!a || !a.turno_id) return;
+      const t = turnoDe(a.turno_id); if (!t) return;
+      plan += horasDe(t);
+      const m = marcaDe(p.id, fe);
+      if (m.llego === true) {
+        conLlegada += horasDe(t);
+        const h = horaLlegada(m);
+        if (h !== null) {
+          const dif = Math.round((h - Number(t.inicio)) * 60);
+          if (dif > 5) { atrasoMin += dif; atrasos++; }
+        }
+      } else sinMarca += horasDe(t);
+    });
+    return { p, plan, conLlegada, sinMarca, atrasoMin, atrasos };
+  });
+}
 
 function pintarConf() {
   const f = fechas();
@@ -574,6 +609,27 @@ function pintarConf() {
     celda.addEventListener('click', accion);
     celda.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); accion(); } });
   });
+
+  // resumen planificado contra real
+  const pcr = planContraReal();
+  const plan = pcr.reduce((s,x) => s + x.plan, 0);
+  const conf = pcr.reduce((s,x) => s + x.conLlegada, 0);
+  const sinM = pcr.reduce((s,x) => s + x.sinMarca, 0);
+  const atr  = pcr.reduce((s,x) => s + x.atrasoMin, 0);
+  const pct  = plan ? (conf/plan)*100 : NaN;
+  $('#pcrKpis').innerHTML = [
+    { k:'Horas planificadas', v:hfmt(plan)+' h', n:'lo que armaste esta semana' },
+    { k:'Con alguien que llegó', v:hfmt(conf)+' h', n:pfmt(pct)+' de lo planificado',
+      c: isFinite(pct) ? (pct >= 80 ? 'good' : '') : '' },
+    { k:'Sin marca de llegada', v:hfmt(sinM)+' h', n:'nadie dijo que llegó', c: sinM ? 'alert' : '' },
+    { k:'Atrasos', v:atr ? atr+' min' : '—', n:'acumulados sobre la hora de entrada' },
+  ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
+
+  $('#pcrDetalle').innerHTML = pcr.filter(x => x.plan > 0).map(x =>
+    `<li><div class="prow"><span class="pname">${esc(x.p.nombre)}</span>
+       <span class="pstat">${hfmt(x.conLlegada)} de ${hfmt(x.plan)} h${x.atrasos ? ' · '+x.atrasoMin+' min tarde' : ''}</span></div>
+     <div class="bar"><i style="width:${x.plan ? Math.min(100,(x.conLlegada/x.plan)*100) : 0}%"></i></div></li>`).join('')
+    || '<li class="vacio">Todavía nadie ha marcado que llegó.</li>';
 
   $('#confAlertas').innerHTML = avisos.length
     ? '<div class="flags">' + avisos.map(a => `<span class="flag ${a.n}">${esc(a.t)}</span>`).join('') + '</div>'
