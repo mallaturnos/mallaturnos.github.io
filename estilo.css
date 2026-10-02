@@ -278,3 +278,6 @@ td.mcel.aus{background:var(--surface-3);font-style:italic}
   tbody th::after{content:"";display:block;border-bottom:1px solid #999;width:70%;margin-top:14pt}
   tbody th{padding-bottom:4pt}
 }
+#tConfTodo{margin-bottom:4px}
+#tConfTodo button{width:100%;padding:13px;font-size:.9375rem}
+#tConfTodo button span{display:block;font-size:.75rem;font-weight:400;opacity:.85;margin-top:2px}

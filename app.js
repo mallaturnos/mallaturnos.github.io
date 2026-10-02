@@ -706,6 +706,28 @@ async function pintarTrabajador(token) {
   dias.forEach(x => { if (x.turno) horasSem += Number(x.fin) - Number(x.inicio) - Number(x.colacion); });
 
   const hoy = iso(new Date());
+
+  // Confirmar toda la semana de una: la mayoría de las semanas puede con todo,
+  // y pedirle 5 toques para decir que sí es la mejor forma de que no lo haga.
+  const porConfirmar = dias.filter(x => x.turno && x.confirmo !== true);
+  const btnTodo = $('#tConfTodo');
+  if (porConfirmar.length > 1) {
+    btnTodo.hidden = false;
+    btnTodo.innerHTML = `<button class="act primary" id="btnTodaSemana">Confirmo toda la semana
+      <span>${porConfirmar.length} turnos</span></button>
+      <p class="soloHoy">Si alguno no puedes, lo cambias después uno por uno.</p>`;
+    $('#btnTodaSemana').addEventListener('click', async ev => {
+      const b = ev.currentTarget; b.disabled = true; b.textContent = 'Confirmando…';
+      try {
+        for (const x of porConfirmar) await DATOS.marcar(token, x.fecha, 'confirmo', true);
+        await pintarTrabajador(token);
+      } catch (e) {
+        b.disabled = false;
+        $('#tAviso').innerHTML = `<div class="avisoro">No se pudo confirmar todo: ${esc(e.message)}</div>`;
+      }
+    });
+  } else btnTodo.hidden = true;
+
   const cont = $('#tDias'); cont.innerHTML = '';
   dias.forEach(x => {
     const trabaja = !!x.turno;
