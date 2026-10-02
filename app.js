@@ -142,6 +142,40 @@ function traducir(m) {
   return m;
 }
 
+/* ---------- varios locales: un selector, cada uno con su gente ---------- */
+function pintarLocales() {
+  const caja = $('#hLocales'); if (!caja) return;
+  caja.innerHTML = '';
+  if (!S.locales || !S.locales.length) return;
+
+  if (S.locales.length > 1) {
+    const sel = el('select'); sel.id = 'selLocal'; sel.setAttribute('aria-label','Local');
+    sel.innerHTML = S.locales.map(l => `<option value="${l.id}">${esc(l.nombre)}</option>`).join('');
+    sel.value = S.local.id;
+    sel.addEventListener('change', async () => {
+      try { localStorage.setItem('malla-local', sel.value); } catch (e) {}
+      S.local = S.locales.find(l => l.id === sel.value);
+      DATOS.dejarDeEscuchar(S.canal); S.canal = null;
+      try {
+        await cargar(); pintarTodo();
+        S.canal = DATOS.escuchar(S.local.id, () => { cargar().then(pintarTodo).catch(()=>{}); });
+      } catch (e) { error(e); }
+    });
+    caja.appendChild(sel);
+  }
+
+  const mas = el('button','act','+ Local');
+  mas.title = 'Agregar otro local';
+  mas.addEventListener('click', () => {
+    $('#cardLocal').hidden = false;
+    $('#app').hidden = true;
+    $('#nombreLocal').value = '';
+    $('#nombreLocal').focus();
+    $('#cancelarLocal').hidden = S.locales.length === 0;
+  });
+  caja.appendChild(mas);
+}
+
 /* ================= CARGAR TODO ================= */
 async function cargar() {
   const r = rango(), desde = r.desde, hasta = r.hasta;
@@ -1011,18 +1045,22 @@ async function verJefe() {
   salir.addEventListener('click', () => sb.auth.signOut());
   $('#hAcciones').appendChild(salir);
 
-  try { S.local = await DATOS.miLocal(); }
+  try { S.locales = await DATOS.misLocales() || []; }
   catch (e) {
-    // pasa, por ejemplo, si a la base le faltan los permisos del dueño
-    $('#diag').hidden = false;
-    marca('#c-db','bad','La base rechazó la consulta');
+    $('#diag').hidden = false; marca('#c-db','bad','La base rechazó la consulta');
     $('#diagNota').textContent = e.message;
-    $('#cardLocal').hidden = true; $('#app').hidden = true;
-    return;
+    $('#cardLocal').hidden = true; $('#app').hidden = true; return;
   }
 
-  if (!S.local) { $('#cardLocal').hidden = false; $('#app').hidden = true; return; }
+  // ¿cuál local estaba mirando? se recuerda por navegador
+  let elegido = null;
+  try { elegido = localStorage.getItem('malla-local'); } catch (e) {}
+  S.local = S.locales.find(l => l.id === elegido) || S.locales[0] || null;
+
+
+  if (!S.local) { $('#cardLocal').hidden = false; $('#app').hidden = true; pintarLocales(); return; }
   $('#cardLocal').hidden = true; $('#app').hidden = false;
+  pintarLocales();
 
   await cargar();
   pintarTodo();
@@ -1093,7 +1131,9 @@ function conectarApp() {
         DATOS.crearTurno(S.local.id, { nombre:'Tarde',    inicio:13, fin:21.5, colacion:0.5, orden:2 }),
         DATOS.crearTurno(S.local.id, { nombre:'Cierre',   inicio:17, fin:25,   colacion:0.5, orden:3 }),
       ]);
+      try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
       $('#msgLocal').textContent = '';
+      $('#nombreLocal').value = '';
       await verJefe();
     } catch (e) { $('#msgLocal').textContent = e.message; $('#msgLocal').className = 'msg bad'; }
   });
@@ -1110,6 +1150,7 @@ function conectarApp() {
       await refrescar();
     } catch (e) { error(e); }
   });
+  on('#cancelarLocal', 'click', () => { $('#cardLocal').hidden = true; $('#app').hidden = false; });
   on('#btnPersona', 'click', async () => {
     try { await DATOS.crearPersona(S.local.id, { nombre:'Nueva persona', rol:'', valor_hora:2900,
             horas_contrato:42, factor_propina:1 }); await refrescar(); } catch (e) { error(e); }

@@ -320,3 +320,7 @@ button.ofrecer{width:100%;font-family:var(--font-body);font-size:.8125rem;paddin
 button.ofrecer:hover{border-color:var(--accent);color:var(--accent)}
 .ofrecido{margin:0;font-size:.75rem;color:var(--warn);background:var(--warn-soft);
   padding:8px 10px;border-radius:4px}
+#hLocales{gap:6px}
+#selLocal{font-family:var(--font-body);font-size:.875rem;font-weight:600;padding:9px 10px;
+  border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--fg);max-width:220px}
+#selLocal:focus-visible{outline:2px solid var(--accent);outline-offset:1px}

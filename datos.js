@@ -37,6 +37,7 @@
 
   /* ---------- local ---------- */
   const miLocal = () => pedir(sb.from('locales').select('*').limit(1).maybeSingle());
+  const misLocales = () => pedir(sb.from('locales').select('*').order('creado'));
 
   const crearLocal = async (nombre) => {
     const { data: s } = await sb.auth.getUser();
@@ -160,6 +161,8 @@
     pedir(sb.rpc('tomar_turno', { p_token: token, p_abierto: abiertoId }));
 
   /* ---------- en vivo: que al jefe se le actualice solo ---------- */
+  const dejarDeEscuchar = canal => { try { if (canal) sb.removeChannel(canal); } catch (e) {} };
+
   function escuchar(localId, alCambiar) {
     return sb.channel('local-' + localId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marcas' }, alCambiar)
@@ -170,7 +173,7 @@
 
   global.DATOS = {
     init, explicar,
-    miLocal, crearLocal, guardarLocal,
+    miLocal, misLocales, crearLocal, guardarLocal, dejarDeEscuchar,
     personas, crearPersona, guardarPersona, quitarPersona,
     turnos, crearTurno, guardarTurno, quitarTurno,
     asignaciones, ponerTurno, marcas, marcarComoJefe, copiarSemana,
