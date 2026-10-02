@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=19">
+<link rel="stylesheet" href="estilo.css?v=20">
 </head>
 <body>
 
@@ -194,6 +194,11 @@
           <div class="fld"><label for="abiNota">Nota</label><input type="text" id="abiNota" placeholder="reemplazo por licencia"></div>
         </div>
         <div class="acciones" style="margin-top:14px"><button class="act primary" id="btnAbrir">Publicar</button></div>
+        <label class="ctrl" style="margin-top:12px;display:flex;gap:8px;align-items:flex-start;max-width:60ch">
+          <input type="checkbox" id="bloqTope" style="width:auto;margin-top:3px">
+          <span>No dejar que alguien tome un turno si <b>se pasa de sus horas contratadas</b>.
+          <i>Si lo dejas apagado, igual te aviso quién quedaría pasado, pero lo puede tomar.</i></span>
+        </label>
       </div>
       <div class="card">
         <h2>Publicados</h2>
@@ -237,8 +242,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=19"></script>
-<script src="datos.js?v=19"></script>
-<script src="app.js?v=19"></script>
+<script src="config.js?v=20"></script>
+<script src="datos.js?v=20"></script>
+<script src="app.js?v=20"></script>
 </body>
 </html>

@@ -6,6 +6,11 @@
 'use strict';
 
 const $ = s => document.querySelector(s);
+const on = (sel, ev, fn) => {
+  const n = document.querySelector(sel);
+  if (n) n.addEventListener(ev, fn);
+  else console.warn('falta el elemento', sel, '— sigo igual');
+};
 const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
 
@@ -113,12 +118,12 @@ function error(e) {
 function avisoLogin(t, c) { const m = $('#msgLogin'); m.textContent = t; m.className = 'msg ' + (c||''); }
 
 function conectarLogin() {
-  $('#formLogin').addEventListener('submit', async ev => {
+  on('#formLogin', 'submit', async ev => {
     ev.preventDefault(); avisoLogin('Entrando…');
     const { error: e } = await sb.auth.signInWithPassword({ email: $('#email').value.trim(), password: $('#clave').value });
     avisoLogin(e ? traducir(e.message) : '', e ? 'bad' : '');
   });
-  $('#btnCrear').addEventListener('click', async () => {
+  on('#btnCrear', 'click', async () => {
     const email = $('#email').value.trim(), password = $('#clave').value;
     if (!email || password.length < 8) return avisoLogin('Pon tu correo y una clave de al menos 8 caracteres.','bad');
     avisoLogin('Creando la cuenta…');
@@ -880,7 +885,7 @@ async function pintarTrabajador(token) {
     btnTodo.innerHTML = `<button class="act primary" id="btnTodaSemana">Confirmo toda la semana
       <span>${porConfirmar.length} turnos</span></button>
       <p class="soloHoy">Si alguno no puedes, lo cambias después uno por uno.</p>`;
-    $('#btnTodaSemana').addEventListener('click', async ev => {
+    on('#btnTodaSemana', 'click', async ev => {
       const b = ev.currentTarget; b.disabled = true; b.textContent = 'Confirmando…';
       try {
         for (const x of porConfirmar) await DATOS.marcar(token, x.fecha, 'confirmo', true);
@@ -1034,9 +1039,9 @@ function conectarApp() {
 
   // modos de vista
   const irA = modo => { S.modo = modo; refrescar().catch(error); };
-  $('#modoDia').addEventListener('click', () => irA('dia'));
-  $('#modoSemana').addEventListener('click', () => irA('semana'));
-  $('#modoMes').addEventListener('click', () => irA('mes'));
+  on('#modoDia', 'click', () => irA('dia'));
+  on('#modoSemana', 'click', () => irA('semana'));
+  on('#modoMes', 'click', () => irA('mes'));
 
   // navegar: el paso depende de la vista en la que estés
   const mover = n => {
@@ -1045,14 +1050,14 @@ function conectarApp() {
     else S.lunes = masDias(S.lunes, n * 7);
     refrescar().catch(error);
   };
-  $('#semAnt').addEventListener('click', () => mover(-1));
-  $('#semSig').addEventListener('click', () => mover(1));
-  $('#semHoy').addEventListener('click', () => {
+  on('#semAnt', 'click', () => mover(-1));
+  on('#semSig', 'click', () => mover(1));
+  on('#semHoy', 'click', () => {
     S.dia = new Date(); S.lunes = lunesDe(new Date()); refrescar().catch(error);
   });
 
   // copiar la semana anterior sobre esta
-  $('#btnCopiarSem').addEventListener('click', async () => {
+  on('#btnCopiarSem', 'click', async () => {
     const m = $('#msgSem');
     const anterior = iso(masDias(S.lunes, -7));
     if (!confirm('Copiar los turnos de la semana del ' + ddmm(anterior) + ' sobre esta.\n\n'
@@ -1067,17 +1072,17 @@ function conectarApp() {
     setTimeout(() => { $('#msgSem').textContent = ''; }, 5000);
   });
 
-  $('#objetivoPct').addEventListener('change', async ev => {
+  on('#objetivoPct', 'change', async ev => {
     const v = Number(ev.target.value) || 30;
     try { S.local = await DATOS.guardarLocal(S.local.id, { objetivo_pct: v }); pintarCobertura(); pintarResumenSemana(); }
     catch (e) { error(e); }
   });
-  $('#filtroPuesto').addEventListener('change', ev => { S.filtro = ev.target.value; pintarPlan(); });
-  $('#btnImprimir').addEventListener('click', () => window.print());
-  $('#btnIrPublicar').addEventListener('click', () => $('#tab-link').click());
+  on('#filtroPuesto', 'change', ev => { S.filtro = ev.target.value; pintarPlan(); });
+  on('#btnImprimir', 'click', () => window.print());
+  on('#btnIrPublicar', 'click', () => $('#tab-link').click());
 
   // crear local, con turnos de partida para que no arranque en blanco
-  $('#formLocal').addEventListener('submit', async ev => {
+  on('#formLocal', 'submit', async ev => {
     ev.preventDefault();
     const nombre = $('#nombreLocal').value.trim(); if (!nombre) return;
     $('#msgLocal').textContent = 'Creando…';
@@ -1093,7 +1098,7 @@ function conectarApp() {
     } catch (e) { $('#msgLocal').textContent = e.message; $('#msgLocal').className = 'msg bad'; }
   });
 
-  $('#btnCerrarSemana').addEventListener('click', async () => {
+  on('#btnCerrarSemana', 'click', async () => {
     const lista = S.personas.map(p => ({ p, dif: analizar(p).dif })).filter(x => Math.abs(x.dif) >= 0.01);
     if (!lista.length) return alert('No hay diferencias que sumar esta semana.');
     const detalle = lista.map(x => `· ${x.p.nombre}: ${x.dif>0?'+':''}${hfmt(x.dif)} h`).join('\n');
@@ -1105,15 +1110,15 @@ function conectarApp() {
       await refrescar();
     } catch (e) { error(e); }
   });
-  $('#btnPersona').addEventListener('click', async () => {
+  on('#btnPersona', 'click', async () => {
     try { await DATOS.crearPersona(S.local.id, { nombre:'Nueva persona', rol:'', valor_hora:2900,
             horas_contrato:42, factor_propina:1 }); await refrescar(); } catch (e) { error(e); }
   });
-  $('#btnTurno').addEventListener('click', async () => {
+  on('#btnTurno', 'click', async () => {
     try { await DATOS.crearTurno(S.local.id, { nombre:'Turno '+(S.turnos.length+1), inicio:9, fin:17,
             colacion:0.5, orden:S.turnos.length+1 }); await refrescar(); } catch (e) { error(e); }
   });
-  $('#btnAbrir').addEventListener('click', async () => {
+  on('#btnAbrir', 'click', async () => {
     const turnoId = $('#abiTurno').value; if (!turnoId) return alert('Primero crea un turno en Equipo.');
     try {
       await DATOS.abrirTurno(S.local.id, { fecha:$('#abiDia').value, turno_id:turnoId,
@@ -1121,11 +1126,11 @@ function conectarApp() {
       $('#abiNota').value = ''; await refrescar();
     } catch (e) { error(e); }
   });
-  $('#bloqTope').addEventListener('change', async ev => {
+  on('#bloqTope', 'change', async ev => {
     try { S.local = await DATOS.guardarLocal(S.local.id, { bloquear_sobre_tope: ev.target.checked }); }
     catch (e) { error(e); }
   });
-  $('#btnCopiarPub').addEventListener('click', async () => {
+  on('#btnCopiarPub', 'click', async () => {
     const m = $('#msgPub');
     try { await navigator.clipboard.writeText($('#salidaPub').value); m.textContent = 'Copiado'; }
     catch (e) { $('#salidaPub').select(); m.textContent = 'Selecciónalo y copia con el teclado'; }
