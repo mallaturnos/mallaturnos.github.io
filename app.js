@@ -32,7 +32,15 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
-            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), canal:null };
+            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', canal:null };
+
+// El filtro por puesto aplica a las tres vistas del plan. No toca las propinas
+// ni las confirmaciones: el reparto tiene que considerar SIEMPRE a todo el
+// equipo, aunque en pantalla estés mirando solo la cocina.
+const puestos = () => [...new Set(S.personas.map(p => (p.rol||'').trim() || 'Sin puesto'))].sort();
+const personasVisibles = () => S.filtro
+  ? S.personas.filter(p => ((p.rol||'').trim() || 'Sin puesto') === S.filtro)
+  : S.personas;
 const fechas = () => Array.from({length:7}, (_,i) => iso(masDias(S.lunes, i)));
 
 // El rango que hay que traer de la base depende de la vista: un dia, una
@@ -132,6 +140,16 @@ function pintarPlan() {
     const b = $('#modo' + m[0].toUpperCase() + m.slice(1));
     if (b) b.setAttribute('aria-pressed', String(S.modo === m));
   });
+  // selector de puesto, con aviso cuando hay uno puesto
+  const sel = $('#filtroPuesto');
+  if (sel) {
+    const ps = puestos();
+    sel.innerHTML = '<option value="">Todos los puestos</option>' +
+      ps.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    if (S.filtro && !ps.includes(S.filtro)) S.filtro = '';
+    sel.value = S.filtro;
+    sel.classList.toggle('activo', !!S.filtro);
+  }
   $('#cajaSemana').hidden = S.modo !== 'semana';
   $('#cajaDia').hidden    = S.modo !== 'dia';
   $('#cajaMes').hidden    = S.modo !== 'mes';
@@ -148,8 +166,11 @@ function pintarSemana() {
     DIAS.map((d,i) => `<th class="${i>=4?'fin':''}">${d}<span class="num">${ddmm(f[i])}</span></th>`).join('') + '<th>Horas</th>';
 
   const cuerpo = $('#semCuerpo'); cuerpo.innerHTML = '';
-  if (!S.personas.length) {
-    cuerpo.innerHTML = `<tr><td colspan="9" class="vacio">Todavía no tienes a nadie. Anda a <b>Equipo</b> y agrega tu primera persona.</td></tr>`;
+  const gente = personasVisibles();
+  if (!gente.length) {
+    cuerpo.innerHTML = `<tr><td colspan="9" class="vacio">${S.filtro
+      ? 'Nadie en «' + esc(S.filtro) + '». Cambia el filtro arriba.'
+      : 'Todavía no tienes a nadie. Anda a <b>Equipo</b> y agrega tu primera persona.'}</td></tr>`;
     $('#semPie').innerHTML = ''; $('#semPersonas').innerHTML = ''; return;
   }
 
@@ -157,12 +178,12 @@ function pintarSemana() {
     + Object.entries(AUSENCIAS).map(([k,v]) => `<option value="a:${k}">${k==='L'?'—':k} ${v}</option>`).join('');
 
   let grupoActual = null;
-  S.personas.forEach(p => {
+  gente.forEach(p => {
     // una fila de titulo cada vez que cambia el puesto: cocina, mesas, barra…
     const g = (p.rol || '').trim() || 'Sin puesto';
     if (g !== grupoActual) {
       grupoActual = g;
-      const n = S.personas.filter(x => ((x.rol||'').trim() || 'Sin puesto') === g).length;
+      const n = gente.filter(x => ((x.rol||'').trim() || 'Sin puesto') === g).length;
       cuerpo.appendChild(el('tr','grupo', `<th colspan="9">${esc(g)} <span>${n}</span></th>`));
     }
     const tr = el('tr');
@@ -214,7 +235,7 @@ function analizar(p) {
 function pintarResumenSemana() {
   const lista = $('#semPersonas'); lista.innerHTML = '';
   let horasT = 0, costoT = 0;
-  S.personas.forEach(p => {
+  personasVisibles().forEach(p => {
     const a = analizar(p); horasT += a.horas; costoT += a.costo;
     const h = $('#h-' + p.id);
     if (h) { h.textContent = hfmt(a.horas) + ' h'; h.classList.toggle('over', a.horas > a.tope); }
@@ -244,7 +265,7 @@ function pintarDia() {
   $('#semTitulo').textContent = DIAS[i] + ' ' + ddmm(fe);
 
   const caja = $('#cajaDia'); caja.innerHTML = '';
-  const conTurno = S.personas.map(p => ({ p, a: asigDe(p.id, fe) }))
+  const conTurno = personasVisibles().map(p => ({ p, a: asigDe(p.id, fe) }))
     .filter(x => x.a && x.a.turno_id);
 
   if (!conTurno.length) {
@@ -275,7 +296,7 @@ function pintarDia() {
       }).join('')}</ul>`));
   });
 
-  const ausentes = S.personas.map(p => ({ p, a: asigDe(p.id, fe) }))
+  const ausentes = personasVisibles().map(p => ({ p, a: asigDe(p.id, fe) }))
     .filter(x => x.a && x.a.ausencia && x.a.ausencia !== 'L');
   if (ausentes.length) caja.appendChild(el('div','turnodia', `
     <div class="turnodia-h"><b>Ausencias</b></div>
@@ -296,7 +317,7 @@ function pintarMes() {
   }).join('') + '<th>Horas</th>';
 
   const cuerpo = $('#mesCuerpo'); cuerpo.innerHTML = '';
-  S.personas.forEach(p => {
+  personasVisibles().forEach(p => {
     let horas = 0;
     const celdas = ds.map(f => {
       const a = asigDe(p.id, f);
@@ -884,6 +905,7 @@ function conectarApp() {
     setTimeout(() => { $('#msgSem').textContent = ''; }, 5000);
   });
 
+  $('#filtroPuesto').addEventListener('change', ev => { S.filtro = ev.target.value; pintarPlan(); });
   $('#btnImprimir').addEventListener('click', () => window.print());
   $('#btnIrPublicar').addEventListener('click', () => $('#tab-link').click());
 
