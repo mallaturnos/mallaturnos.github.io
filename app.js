@@ -528,10 +528,23 @@ async function pintarTrabajador(token) {
 }
 
 /* ================= ARRANQUE ================= */
+// Si la lectura de la sesion falla o se cuelga, NUNCA dejar la pantalla en blanco:
+// mejor mostrar el formulario de entrar que un vacio que no explica nada.
+async function sesionSegura() {
+  try {
+    const r = await Promise.race([
+      sb.auth.getSession(),
+      new Promise(res => setTimeout(() => res({ data:null, lenta:true }), 6000)),
+    ]);
+    if (r && r.lenta) { console.warn('getSession no respondio en 6 s'); return null; }
+    return (r && r.data && r.data.session) || null;
+  } catch (e) { console.warn('getSession fallo', e); return null; }
+}
+
 async function verJefe() {
   $('#vistaJefe').hidden = false; $('#vistaTrab').hidden = true;
-  const { data } = await sb.auth.getSession();
-  const hay = !!(data && data.session);
+  const sesion = await sesionSegura();
+  const hay = !!sesion;
   $('#cardLogin').hidden = hay;
   $('#hAcciones').innerHTML = '';
   if (!hay) { $('#cardLocal').hidden = true; $('#app').hidden = true; return; }
@@ -540,7 +553,15 @@ async function verJefe() {
   salir.addEventListener('click', () => sb.auth.signOut());
   $('#hAcciones').appendChild(salir);
 
-  try { S.local = await DATOS.miLocal(); } catch (e) { return error(e); }
+  try { S.local = await DATOS.miLocal(); }
+  catch (e) {
+    // pasa, por ejemplo, si a la base le faltan los permisos del dueño
+    $('#diag').hidden = false;
+    marca('#c-db','bad','La base rechazó la consulta');
+    $('#diagNota').textContent = e.message;
+    $('#cardLocal').hidden = true; $('#app').hidden = true;
+    return;
+  }
 
   if (!S.local) { $('#cardLocal').hidden = false; $('#app').hidden = true; return; }
   $('#cardLocal').hidden = true; $('#app').hidden = false;
@@ -621,4 +642,10 @@ async function arrancar() {
   });
 }
 
-arrancar();
+arrancar().catch(e => {
+  // ultimo recurso: que la pagina diga algo en vez de quedarse muda
+  const d = document.getElementById('diag');
+  if (d) { d.hidden = false; document.getElementById('diagNota').textContent = 'Error al arrancar: ' + (e && e.message ? e.message : e); }
+  const v = document.getElementById('vistaJefe'); if (v) v.hidden = false;
+  console.error(e);
+});
