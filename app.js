@@ -31,8 +31,26 @@ const masDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
-const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[], lunes:lunesDe(new Date()), canal:null };
+const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
+            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), canal:null };
 const fechas = () => Array.from({length:7}, (_,i) => iso(masDias(S.lunes, i)));
+
+// El rango que hay que traer de la base depende de la vista: un dia, una
+// semana o un mes entero. Todo lo demas se calcula sobre lo que ya esta cargado.
+function rango() {
+  if (S.modo === 'dia')  return { desde: iso(S.dia), hasta: iso(S.dia) };
+  if (S.modo === 'mes') {
+    const a = new Date(S.lunes.getFullYear(), S.lunes.getMonth(), 1);
+    const b = new Date(S.lunes.getFullYear(), S.lunes.getMonth() + 1, 0);
+    return { desde: iso(a), hasta: iso(b) };
+  }
+  const f = fechas(); return { desde: f[0], hasta: f[6] };
+}
+const diasDelMes = () => {
+  const r = rango(), a = new Date(r.desde + 'T00:00:00'), b = new Date(r.hasta + 'T00:00:00'), out = [];
+  for (let d = new Date(a); d <= b; d = masDias(d, 1)) out.push(iso(d));
+  return out;
+};
 const turnoDe = id => S.turnos.find(t => t.id === id) || null;
 const horasDe = t => t ? Number(t.fin) - Number(t.inicio) - Number(t.colacion) : 0;
 const asigDe = (pid, f) => S.asign[pid + '|' + f] || null;
@@ -94,7 +112,7 @@ function traducir(m) {
 
 /* ================= CARGAR TODO ================= */
 async function cargar() {
-  const f = fechas(), desde = f[0], hasta = f[6];
+  const r = rango(), desde = r.desde, hasta = r.hasta;
   const [personas, turnos, asign, marcas, dias, abiertos] = await Promise.all([
     DATOS.personas(S.local.id), DATOS.turnos(S.local.id),
     DATOS.asignaciones(S.local.id, desde, hasta), DATOS.marcas(S.local.id, desde, hasta),
@@ -109,6 +127,20 @@ async function cargar() {
 async function refrescar() { await cargar(); pintarTodo(); }
 
 /* ================= SEMANA ================= */
+function pintarPlan() {
+  ['semana','dia','mes'].forEach(m => {
+    const b = $('#modo' + m[0].toUpperCase() + m.slice(1));
+    if (b) b.setAttribute('aria-pressed', String(S.modo === m));
+  });
+  $('#cajaSemana').hidden = S.modo !== 'semana';
+  $('#cajaDia').hidden    = S.modo !== 'dia';
+  $('#cajaMes').hidden    = S.modo !== 'mes';
+  $('#btnCopiarSem').hidden = S.modo !== 'semana';
+  if (S.modo === 'dia')  return pintarDia();
+  if (S.modo === 'mes')  return pintarMes();
+  return pintarSemana();
+}
+
 function pintarSemana() {
   const f = fechas();
   $('#semTitulo').textContent = ddmm(f[0]) + ' al ' + ddmm(f[6]);
@@ -203,6 +235,79 @@ function pintarResumenSemana() {
       const col = !isFinite(pd) ? 'var(--fg-faint)' : (pd > Number(S.local.objetivo_pct) ? 'var(--bad)' : 'var(--fg-dim)');
       return `<td style="color:${col}">${clp(c)}<br><span style="font-size:.6875rem">${pfmt(pd)}</span></td>`;
     }).join('') + `<td>${clp(costoT)}<br><span style="font-size:.6875rem">${pfmt(pct)}</span></td></tr>`;
+}
+
+/* ---------- vista del día: quién está hoy, por turno ---------- */
+function pintarDia() {
+  const fe = iso(S.dia);
+  const i = (S.dia.getDay() + 6) % 7;
+  $('#semTitulo').textContent = DIAS[i] + ' ' + ddmm(fe);
+
+  const caja = $('#cajaDia'); caja.innerHTML = '';
+  const conTurno = S.personas.map(p => ({ p, a: asigDe(p.id, fe) }))
+    .filter(x => x.a && x.a.turno_id);
+
+  if (!conTurno.length) {
+    caja.innerHTML = '<p class="vacio">Nadie tiene turno este día.</p>';
+    $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = ''; return;
+  }
+
+  // agrupados por turno y ordenados por hora de entrada: así se lee como el día real
+  const porTurno = {};
+  conTurno.forEach(x => { (porTurno[x.a.turno_id] = porTurno[x.a.turno_id] || []).push(x.p); });
+  S.turnos.slice().sort((a,b) => Number(a.inicio) - Number(b.inicio)).forEach(t => {
+    const gente = porTurno[t.id]; if (!gente) return;
+    const costo = gente.reduce((s,p) => s + horasDe(t) * (p.valor_hora||0), 0);
+    caja.appendChild(el('div','turnodia', `
+      <div class="turnodia-h">
+        <b>${esc(t.nombre)}</b>
+        <span>${hhmm(t.inicio)}–${hhmm(t.fin)} · ${hfmt(horasDe(t))} h · ${gente.length} ${gente.length===1?'persona':'personas'} · ${clp(costo)}</span>
+      </div>
+      <ul>${gente.map(p => {
+        const m = marcaDe(p.id, fe);
+        const et = m.llego === true ? '<span class="flag ok">llegó</span>'
+                 : m.confirmo === true ? '<span class="flag info">confirmó</span>'
+                 : m.confirmo === false ? '<span class="flag bad">no puede</span>' : '';
+        return `<li><b>${esc(p.nombre)}</b> <span class="rol">${esc(p.rol||'')}</span> ${et}</li>`;
+      }).join('')}</ul>`));
+  });
+
+  const ausentes = S.personas.map(p => ({ p, a: asigDe(p.id, fe) }))
+    .filter(x => x.a && x.a.ausencia && x.a.ausencia !== 'L');
+  if (ausentes.length) caja.appendChild(el('div','turnodia', `
+    <div class="turnodia-h"><b>Ausencias</b></div>
+    <ul>${ausentes.map(x => `<li><b>${esc(x.p.nombre)}</b> <span class="rol">${AUSENCIAS[x.a.ausencia]}</span></li>`).join('')}</ul>`));
+
+  pintarResumenSemana();
+}
+
+/* ---------- vista del mes: el patrón de la dotación de un vistazo ---------- */
+function pintarMes() {
+  const ds = diasDelMes();
+  const ref = new Date(ds[0] + 'T00:00:00');
+  $('#semTitulo').textContent = ref.toLocaleDateString('es-CL', { month:'long', year:'numeric' });
+
+  $('#mesCab').innerHTML = '<th>Persona</th>' + ds.map(f => {
+    const d = new Date(f + 'T00:00:00'), i = (d.getDay() + 6) % 7;
+    return `<th class="${i>=5?'fin':''}">${d.getDate()}<span class="dsem">${DIAS[i][0]}</span></th>`;
+  }).join('') + '<th>Horas</th>';
+
+  const cuerpo = $('#mesCuerpo'); cuerpo.innerHTML = '';
+  S.personas.forEach(p => {
+    let horas = 0;
+    const celdas = ds.map(f => {
+      const a = asigDe(p.id, f);
+      const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
+      if (t) { horas += horasDe(t); 
+        const ci = (S.turnos.findIndex(x => x.id === t.id) % 4) + 1;
+        return `<td class="mcel" data-c="${ci}" title="${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}">${esc(t.nombre[0])}</td>`; }
+      if (a && a.ausencia && a.ausencia !== 'L')
+        return `<td class="mcel aus" title="${AUSENCIAS[a.ausencia]}">${a.ausencia}</td>`;
+      return '<td class="mcel"></td>';
+    }).join('');
+    cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')}</span></th>${celdas}<td class="tot">${hfmt(horas)} h</td></tr>`;
+  });
+  $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = '';
 }
 
 /* ================= EQUIPO ================= */
@@ -504,7 +609,7 @@ function pintarLinks() {
 /* ================= PINTAR TODO ================= */
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
-  pintarSemana(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
+  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
 }
 
 /* ================= VISTA DEL TRABAJADOR ================= */
@@ -656,10 +761,43 @@ function conectarApp() {
     TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
   }));
 
-  // semana
-  $('#semAnt').addEventListener('click', () => { S.lunes = masDias(S.lunes,-7); refrescar().catch(error); });
-  $('#semSig').addEventListener('click', () => { S.lunes = masDias(S.lunes, 7); refrescar().catch(error); });
-  $('#semHoy').addEventListener('click', () => { S.lunes = lunesDe(new Date()); refrescar().catch(error); });
+  // modos de vista
+  const irA = modo => { S.modo = modo; refrescar().catch(error); };
+  $('#modoDia').addEventListener('click', () => irA('dia'));
+  $('#modoSemana').addEventListener('click', () => irA('semana'));
+  $('#modoMes').addEventListener('click', () => irA('mes'));
+
+  // navegar: el paso depende de la vista en la que estés
+  const mover = n => {
+    if (S.modo === 'dia') S.dia = masDias(S.dia, n);
+    else if (S.modo === 'mes') S.lunes = new Date(S.lunes.getFullYear(), S.lunes.getMonth() + n, 1);
+    else S.lunes = masDias(S.lunes, n * 7);
+    refrescar().catch(error);
+  };
+  $('#semAnt').addEventListener('click', () => mover(-1));
+  $('#semSig').addEventListener('click', () => mover(1));
+  $('#semHoy').addEventListener('click', () => {
+    S.dia = new Date(); S.lunes = lunesDe(new Date()); refrescar().catch(error);
+  });
+
+  // copiar la semana anterior sobre esta
+  $('#btnCopiarSem').addEventListener('click', async () => {
+    const m = $('#msgSem');
+    const anterior = iso(masDias(S.lunes, -7));
+    if (!confirm('Copiar los turnos de la semana del ' + ddmm(anterior) + ' sobre esta.\n\n'
+               + 'Se pisan los turnos que ya pusiste. Las ausencias NO se copian.')) return;
+    m.textContent = 'Copiando…'; m.className = 'msg';
+    try {
+      const n = await DATOS.copiarSemana(S.local.id, anterior, iso(S.lunes));
+      await refrescar();
+      m.textContent = n ? `Listo: ${n} turnos copiados.` : 'La semana anterior estaba vacía.';
+      m.className = 'msg ' + (n ? 'ok' : '');
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { $('#msgSem').textContent = ''; }, 5000);
+  });
+
+  $('#btnImprimir').addEventListener('click', () => window.print());
+  $('#btnIrPublicar').addEventListener('click', () => $('#tab-link').click());
 
   // crear local, con turnos de partida para que no arranque en blanco
   $('#formLocal').addEventListener('submit', async ev => {

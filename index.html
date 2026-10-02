@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=9">
+<link rel="stylesheet" href="estilo.css?v=11">
 </head>
 <body>
 
@@ -91,12 +91,24 @@
     <div class="panel" id="p-sem" role="tabpanel" aria-labelledby="tab-sem">
       <div class="card">
         <div class="semnav">
-          <button class="act" id="semAnt">←</button>
+          <div class="modos" role="group" aria-label="Vista">
+            <button class="act" id="modoDia">Día</button>
+            <button class="act" id="modoSemana" aria-pressed="true">Semana</button>
+            <button class="act" id="modoMes">Mes</button>
+          </div>
+          <button class="act" id="semAnt" aria-label="Anterior">←</button>
           <b id="semTitulo">—</b>
-          <button class="act" id="semSig">→</button>
-          <button class="act" id="semHoy">Esta semana</button>
+          <button class="act" id="semSig" aria-label="Siguiente">→</button>
+          <button class="act" id="semHoy">Hoy</button>
+          <span class="sep"></span>
+          <button class="act" id="btnCopiarSem">Copiar la anterior</button>
+          <button class="act" id="btnImprimir">Imprimir</button>
+          <button class="act primary" id="btnIrPublicar">Publicar</button>
         </div>
-        <div class="scroll"><table id="tablaSem"><thead><tr id="semCab"></tr></thead><tbody id="semCuerpo"></tbody><tfoot id="semPie"></tfoot></table></div>
+        <p class="msg" id="msgSem"></p>
+        <div class="scroll" id="cajaSemana"><table id="tablaSem"><thead><tr id="semCab"></tr></thead><tbody id="semCuerpo"></tbody><tfoot id="semPie"></tfoot></table></div>
+        <div id="cajaDia" hidden></div>
+        <div class="scroll" id="cajaMes" hidden><table class="mes"><thead><tr id="mesCab"></tr></thead><tbody id="mesCuerpo"></tbody></table></div>
         <p class="hint" style="margin-top:12px">Cambia cualquier celda y se guarda solo. Las alertas aparecen al lado de cada persona.</p>
       </div>
       <div class="card">
@@ -184,8 +196,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=9"></script>
-<script src="datos.js?v=9"></script>
-<script src="app.js?v=9"></script>
+<script src="config.js?v=11"></script>
+<script src="datos.js?v=11"></script>
+<script src="app.js?v=11"></script>
 </body>
 </html>

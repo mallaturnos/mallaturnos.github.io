@@ -87,6 +87,27 @@
                     { onConflict: 'persona_id,fecha' })
             .select().single());
 
+  // Copia la semana anterior sobre la actual. A PROPOSITO no copia ausencias:
+  // si se copiaran, las vacaciones de la semana pasada se repetirian para siempre.
+  // (El propio tutorial de Skello advierte de eso con sus plantillas.)
+  const copiarSemana = async (localId, desdeAnterior, desdeActual) => {
+    const hastaAnterior = new Date(desdeAnterior + 'T00:00:00');
+    hastaAnterior.setDate(hastaAnterior.getDate() + 6);
+    const previas = await pedir(sb.from('asignaciones').select('*').eq('local_id', localId)
+      .gte('fecha', desdeAnterior)
+      .lte('fecha', hastaAnterior.toISOString().slice(0,10))
+      .not('turno_id', 'is', null));
+    if (!previas || !previas.length) return 0;
+    const corrimiento = (new Date(desdeActual + 'T00:00:00') - new Date(desdeAnterior + 'T00:00:00')) / 86400000;
+    const filas = previas.map(a => {
+      const d = new Date(a.fecha + 'T00:00:00'); d.setDate(d.getDate() + corrimiento);
+      return { local_id: localId, persona_id: a.persona_id,
+               fecha: d.toISOString().slice(0,10), turno_id: a.turno_id, ausencia: null };
+    });
+    await pedir(sb.from('asignaciones').upsert(filas, { onConflict: 'persona_id,fecha' }).select());
+    return filas.length;
+  };
+
   const marcas = (localId, desde, hasta) =>
     pedir(sb.from('marcas').select('*, personas!inner(local_id)')
             .eq('personas.local_id', localId).gte('fecha', desde).lte('fecha', hasta));
@@ -141,7 +162,7 @@
     miLocal, crearLocal, guardarLocal,
     personas, crearPersona, guardarPersona, quitarPersona,
     turnos, crearTurno, guardarTurno, quitarTurno,
-    asignaciones, ponerTurno, marcas, marcarComoJefe,
+    asignaciones, ponerTurno, marcas, marcarComoJefe, copiarSemana,
     dias, guardarDia,
     abiertos, abrirTurno, cerrarTurno,
     miSemana, marcar, tomarTurno,

@@ -218,3 +218,58 @@ table.conf th.r{padding:8px 10px;font-size:.8125rem;font-weight:500;min-width:14
 .mk[data-p]:hover{background:var(--surface-2)}
 .mk[data-p]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .porjefe{font-size:.5625rem;font-style:normal;color:var(--fg-faint);letter-spacing:.06em;text-transform:uppercase}
+
+/* ===== modos de vista ===== */
+.modos{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.modos button{border:0;border-radius:0;padding:8px 13px;font-size:.8125rem;background:var(--surface);color:var(--fg-dim)}
+.modos button + button{border-left:1px solid var(--line)}
+.modos button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);font-weight:600}
+.semnav .sep{flex:1}
+
+/* ===== vista del día ===== */
+.turnodia{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:5px;padding:12px 14px;margin-bottom:10px}
+.turnodia-h{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:8px}
+.turnodia-h b{font-size:.9375rem}
+.turnodia-h span{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-dim)}
+.turnodia ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.turnodia li{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.875rem}
+.turnodia li .rol{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-faint)}
+
+/* ===== vista del mes ===== */
+table.mes{min-width:900px}
+table.mes thead th{padding:6px 2px;text-align:center;min-width:26px}
+table.mes thead th .dsem{display:block;font-weight:400;opacity:.5}
+table.mes th.r{padding:6px 10px;font-size:.8125rem;font-weight:500;min-width:150px}
+table.mes th.r .rol{display:block;font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
+td.mcel{text-align:center;font-family:var(--font-mono);font-size:.6875rem;font-weight:600;
+  padding:5px 2px;color:var(--fg-dim)}
+td.mcel[data-c="1"]{background:#cde3e5;color:#0f4247}
+td.mcel[data-c="2"]{background:#ecdcc0;color:#57411a}
+td.mcel[data-c="3"]{background:#d7d1e6;color:#37305a}
+td.mcel[data-c="4"]{background:#dde5cf;color:#3a4a26}
+td.mcel.aus{background:var(--surface-3);font-style:italic}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) td.mcel[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) td.mcel[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) td.mcel[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) td.mcel[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+
+/* ===== imprimir: solo la malla, con espacio para firmar ===== */
+@media print{
+  nav, .semnav, .note, .hint, #hAcciones, footer, #semPersonas, .panel[hidden],
+  #p-eq, #p-prop, #p-abi, #p-conf, #p-link, #diag, #cardLogin, #cardLocal { display:none !important }
+  body{background:#fff}
+  .wrap{max-width:none;padding:0}
+  .card{border:0;padding:0;margin:0}
+  .scroll{overflow:visible;border:0}
+  table{min-width:0;width:100%;font-size:10pt}
+  thead th{background:#eee !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  select.turno{appearance:none;border:0;background:transparent !important;color:#000 !important;
+    text-align:left;font-size:9pt;padding:2px}
+  td.cell{min-width:0}
+  tr{break-inside:avoid}
+  h1{font-size:14pt;margin-bottom:2pt}
+  /* columna para que cada persona firme su horario */
+  tbody th::after{content:"";display:block;border-bottom:1px solid #999;width:70%;margin-top:14pt}
+  tbody th{padding-bottom:4pt}
+}
