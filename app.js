@@ -17,6 +17,11 @@ const hfmt = n => (n || 0).toLocaleString('es-CL', { minimumFractionDigits:1, ma
 const pfmt = n => isFinite(n) ? n.toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1}) + ' %' : '—';
 const hhmm = h => { const t = ((h % 24) + 24) % 24, m = Math.round((t - Math.floor(t)) * 60);
   return String(Math.floor(t)).padStart(2,'0') + ':' + String(m).padStart(2,'0'); };
+// Campos de plata: se escriben y se leen como $20.000, no como 20000.
+const soloDigitos = v => String(v == null ? '' : v).replace(/[^\d]/g, '');
+const aPlata = n => '$' + Number(n || 0).toLocaleString('es-CL');
+const dePlata = v => Number(soloDigitos(v) || 0);
+
 const aDec = s => { const [h,m] = String(s||'0:00').split(':').map(Number); return h + (m||0)/60; };
 
 /* ---------- fechas: la semana empieza el lunes ---------- */
@@ -202,6 +207,9 @@ function pintarResumenSemana() {
 
 /* ================= EQUIPO ================= */
 function filaCampo(label, tipo, valor, attrs) {
+  if (tipo === 'plata')
+    return `<div class="fld"><label>${label}</label><input type="text" inputmode="numeric"
+      value="${esc(aPlata(valor))}" ${attrs||''}></div>`;
   return `<div class="fld"><label>${label}</label><input type="${tipo}" value="${esc(valor)}" ${attrs||''}></div>`;
 }
 
@@ -212,7 +220,7 @@ function pintarEquipo() {
     const row = el('div','rowline', `
       ${filaCampo('Nombre','text',p.nombre,'data-k="nombre"')}
       ${filaCampo('Puesto','text',p.rol||'','data-k="rol"')}
-      ${filaCampo('Valor hora','number',p.valor_hora,'data-k="valor_hora" class="n" min="0" step="50"')}
+      ${filaCampo('Valor hora','plata',p.valor_hora,'data-k="valor_hora" class="n"')}
       ${filaCampo('Horas contrato','number',p.horas_contrato,'data-k="horas_contrato" class="n" min="0" max="60" step="1"')}
       ${filaCampo('Factor propina','number',p.factor_propina,'data-k="factor_propina" class="n" min="0" max="3" step="0.1"')}
       <button class="mini" data-del="1">Quitar</button>`);
@@ -223,7 +231,10 @@ function pintarEquipo() {
         clearTimeout(t);
         t = setTimeout(async () => {
           const k = inp.dataset.k;
-          const v = (k === 'nombre' || k === 'rol') ? inp.value : (Number(inp.value) || 0);
+          let v;
+          if (k === 'nombre' || k === 'rol') v = inp.value;
+          else if (k === 'valor_hora') { v = dePlata(inp.value); inp.value = aPlata(v); }
+          else v = Number(inp.value) || 0;
           try { Object.assign(p, await DATOS.guardarPersona(p.id, { [k]: v })); pintarSemana(); pintarPropinas(); pintarLinks(); }
           catch (e) { error(e); }
         }, 600);
@@ -316,16 +327,19 @@ function pintarPropinas() {
     const d = S.dias[fe] || {};
     const w = el('div','diaplata', `
       <div class="diaplata-h">${DIAS[i]} <span class="num">${ddmm(fe)}</span></div>
-      <div class="fld"><label>Venta</label><input class="n" type="number" min="0" step="10000" value="${d.venta||0}" data-c="venta"></div>
-      <div class="fld"><label>Propina efectivo</label><input class="n" type="number" min="0" step="1000" value="${d.propina_efectivo||0}" data-c="propina_efectivo"></div>
-      <div class="fld"><label>Propina tarjeta</label><input class="n" type="number" min="0" step="1000" value="${d.propina_tarjeta||0}" data-c="propina_tarjeta"></div>`);
+      <div class="fld"><label>Venta</label><input class="n" type="text" inputmode="numeric" value="${aPlata(d.venta)}" data-c="venta"></div>
+      <div class="fld"><label>Propina efectivo</label><input class="n" type="text" inputmode="numeric" value="${aPlata(d.propina_efectivo)}" data-c="propina_efectivo"></div>
+      <div class="fld"><label>Propina tarjeta</label><input class="n" type="text" inputmode="numeric" value="${aPlata(d.propina_tarjeta)}" data-c="propina_tarjeta"></div>`);
     box.appendChild(w);
     let t = null;
     w.querySelectorAll('input[data-c]').forEach(inp => {
       inp.addEventListener('input', () => {
+        const v = dePlata(inp.value);
+        inp.value = aPlata(v);
+        try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {}
         clearTimeout(t);
         t = setTimeout(async () => {
-          try { S.dias[fe] = await DATOS.guardarDia(S.local.id, fe, { [inp.dataset.c]: Number(inp.value)||0 });
+          try { S.dias[fe] = await DATOS.guardarDia(S.local.id, fe, { [inp.dataset.c]: dePlata(inp.value) });
                 pintarPropinas(); pintarResumenSemana(); }
           catch (e) { error(e); }
         }, 700);
