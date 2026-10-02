@@ -153,6 +153,9 @@
   const marcar = (token, fecha, campo, valor) =>
     pedir(sb.rpc('marcar', { p_token: token, p_fecha: fecha, p_campo: campo, p_valor: valor }));
 
+  const ofrecerTurno = (token, fecha) =>
+    pedir(sb.rpc('ofrecer_turno', { p_token: token, p_fecha: fecha }));
+
   const tomarTurno = (token, abiertoId) =>
     pedir(sb.rpc('tomar_turno', { p_token: token, p_abierto: abiertoId }));
 
@@ -173,7 +176,7 @@
     asignaciones, ponerTurno, marcas, marcarComoJefe, copiarSemana,
     dias, guardarDia, dotacion, guardarDotacion,
     abiertos, abrirTurno, cerrarTurno,
-    miSemana, marcar, tomarTurno,
+    miSemana, marcar, tomarTurno, ofrecerTurno,
     escuchar,
   };
 })(window);

@@ -248,9 +248,17 @@ function analizar(p) {
   const tope = Number(p.horas_contrato) || Number(S.local.tope_semanal) || 42;
   if (horas > tope) alertas.push({ n:'bad', t:`${hfmt(horas)} h · ${hfmt(horas-tope)} sobre su contrato de ${hfmt(tope)}` });
   if (trabajados === 7) alertas.push({ n:'bad', t:'7 días seguidos' });
+  // disponibilidad: avisa, no bloquea. El encargado decide igual, pero viéndolo.
+  const nd = p.no_disponible || [];
+  f.forEach((fe, i) => {
+    const a = asigDe(p.id, fe);
+    if (a && a.turno_id && nd.includes(i))
+      alertas.push({ n:'warn', t:`${DIAS[i]}: dijo que no puede` });
+  });
   if (aus) alertas.push({ n:'info', t:`${aus} ${aus===1?'día':'días'} de ausencia` });
   if (!alertas.some(a => a.n==='bad' || a.n==='warn')) alertas.unshift({ n:'ok', t:'conforme' });
-  return { horas, trabajados, aus, costo: horas * (p.valor_hora||0), alertas, tope };
+  const dif = horas - (Number(p.horas_contrato) || 0);
+  return { horas, trabajados, aus, costo: horas * (p.valor_hora||0), alertas, tope, dif };
 }
 
 function pintarResumenSemana() {
@@ -262,7 +270,9 @@ function pintarResumenSemana() {
     if (h) { h.textContent = hfmt(a.horas) + ' h'; h.classList.toggle('over', a.horas > a.tope); }
     lista.appendChild(el('li', '', `
       <div class="prow"><span class="pname">${esc(p.nombre)}</span>
-        <span class="pstat">${hfmt(a.horas)} h · ${a.trabajados} d · ${clp(a.costo)}</span></div>
+        <span class="pstat">${hfmt(a.horas)} h · ${a.trabajados} d · ${clp(a.costo)}${
+          Math.abs(a.dif) >= 0.5 ? ` · <b style="color:${a.dif>0?'var(--warn)':'var(--fg-dim)'}">${a.dif>0?'+':''}${hfmt(a.dif)} h</b>` : ''}${
+          Number(p.saldo_horas) ? ` · saldo ${Number(p.saldo_horas)>0?'+':''}${hfmt(Number(p.saldo_horas))} h` : ''}</span></div>
       <div class="bar"><i class="${a.horas>a.tope?'over':''}" style="width:${Math.min(100,(a.horas/a.tope)*100)}%"></i></div>
       <div class="flags">${a.alertas.map(x => `<span class="flag ${x.n}">${esc(x.t)}</span>`).join('')}</div>`));
   });
@@ -373,7 +383,11 @@ function pintarEquipo() {
       ${filaCampo('Valor hora','plata',p.valor_hora,'data-k="valor_hora" class="n"')}
       ${filaCampo('Horas contrato','number',p.horas_contrato,'data-k="horas_contrato" class="n" min="0" max="60" step="1"')}
       ${filaCampo('Factor propina','number',p.factor_propina,'data-k="factor_propina" class="n" min="0" max="3" step="0.1"')}
-      <button class="mini" data-del="1">Quitar</button>`);
+      ${filaCampo('Saldo horas','number',p.saldo_horas,'data-k="saldo_horas" class="n" step="0.5"')}
+      <button class="mini" data-del="1">Quitar</button>
+      <div class="dispo"><span>No puede:</span>${DIAS.map((d,i) =>
+        `<button type="button" class="dia ${(p.no_disponible||[]).includes(i) ? 'no' : ''}" data-dia="${i}"
+          aria-pressed="${(p.no_disponible||[]).includes(i)}">${d}</button>`).join('')}</div>`);
     box.appendChild(row);
     let t = null;
     row.querySelectorAll('input[data-k]').forEach(inp => {
@@ -388,6 +402,16 @@ function pintarEquipo() {
           try { Object.assign(p, await DATOS.guardarPersona(p.id, { [k]: v })); pintarSemana(); pintarPropinas(); pintarLinks(); }
           catch (e) { error(e); }
         }, 600);
+      });
+    });
+    row.querySelectorAll('button.dia').forEach(b => {
+      b.addEventListener('click', async () => {
+        const i = Number(b.dataset.dia);
+        const nd = new Set(p.no_disponible || []);
+        nd.has(i) ? nd.delete(i) : nd.add(i);
+        try { Object.assign(p, await DATOS.guardarPersona(p.id, { no_disponible: [...nd].sort() }));
+              pintarEquipo(); pintarPlan(); }
+        catch (e) { error(e); }
       });
     });
     row.querySelector('[data-del]').addEventListener('click', async () => {
@@ -628,6 +652,7 @@ function pintarAbiertos() {
         ${a.nota ? `<em>${esc(a.nota)}</em>` : ''}
       </div>
       <div class="abiest">
+        ${a.ofrecido_por ? '<span class="flag info">cambio de turno</span>' : ''}
         ${a.tomado_por ? `<span class="flag ok">Lo tomó ${esc(quien ? quien.nombre : '—')}</span>` : '<span class="flag warn">Sin tomar</span>'}
         ${choque ? '<span class="flag bad">ya tiene turno ese día</span>' : ''}
         ${a.tomado_por && t && quien ? '<button class="act" data-pasar="1">Pasar a la malla</button>' : ''}
@@ -636,8 +661,13 @@ function pintarAbiertos() {
     lista.appendChild(card);
     const bp = card.querySelector('[data-pasar]');
     if (bp) bp.addEventListener('click', async () => {
-      try { await DATOS.ponerTurno(S.local.id, quien.id, a.fecha, a.turno_id, null);
-            await DATOS.cerrarTurno(a.id); await refrescar(); } catch (e) { error(e); }
+      try {
+        await DATOS.ponerTurno(S.local.id, quien.id, a.fecha, a.turno_id, null);
+        // si era un cambio ofrecido, al confirmarlo quien lo ofrecio queda libre
+        if (a.ofrecido_por && a.ofrecido_por !== quien.id)
+          await DATOS.ponerTurno(S.local.id, a.ofrecido_por, a.fecha, null, 'L');
+        await DATOS.cerrarTurno(a.id); await refrescar();
+      } catch (e) { error(e); }
     });
     card.querySelector('[data-quitar]').addEventListener('click', async () => {
       try { await DATOS.cerrarTurno(a.id); await refrescar(); } catch (e) { error(e); }
@@ -866,8 +896,18 @@ async function pintarTrabajador(token) {
         <button data-a="confirmo" data-v="1" aria-pressed="${x.confirmo === true}">Confirmo</button>
         <button class="no" data-a="confirmo" data-v="0" aria-pressed="${x.confirmo === false}">No puedo</button>
         <button data-a="llego" data-v="1" aria-pressed="${x.llego === true}">Llegué</button>
-      </div>` : ''));
+      </div>` + (x.ofrecido
+        ? '<p class="ofrecido">Ofreciste este turno. Si alguien lo toma, tu jefe confirma el cambio.</p>'
+        : `<button class="ofrecer" data-of="${x.fecha}">Ofrecer este turno a mis compañeros</button>`) : ''));
     cont.appendChild(card);
+    const bo = card.querySelector('[data-of]');
+    if (bo) bo.addEventListener('click', async () => {
+      if (!confirm('Vas a ofrecer este turno a tus compañeros.\n\n'
+                 + 'Sigue siendo tuyo hasta que alguien lo tome y tu jefe confirme el cambio.')) return;
+      bo.disabled = true;
+      try { await DATOS.ofrecerTurno(token, x.fecha); await pintarTrabajador(token); }
+      catch (e) { bo.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">${esc(e.message)}</div>`; }
+    });
     card.querySelectorAll('button[data-a]').forEach(b => {
       b.addEventListener('click', async () => {
         const campo = b.dataset.a, valor = b.dataset.v === '1';
@@ -879,7 +919,11 @@ async function pintarTrabajador(token) {
       });
     });
   });
-  $('#tTotal').textContent = 'Total de la semana: ' + hfmt(horasSem) + ' horas.';
+  const saldo = Number(d.saldo || 0);
+  $('#tTotal').innerHTML = 'Total de la semana: <b>' + hfmt(horasSem) + ' horas</b>.'
+    + (Math.abs(saldo) >= 0.5
+       ? ` Saldo acumulado: <b>${saldo > 0 ? '+' : ''}${hfmt(saldo)} h</b> ${saldo > 0 ? '<i>(te deben)</i>' : '<i>(debes)</i>'}.`
+       : '');
 
   const miProp = dias.reduce((s,x) => s + (x.propina || 0), 0);
   const porHora = horasSem ? miProp / horasSem : 0;
@@ -1031,6 +1075,18 @@ function conectarApp() {
     } catch (e) { $('#msgLocal').textContent = e.message; $('#msgLocal').className = 'msg bad'; }
   });
 
+  $('#btnCerrarSemana').addEventListener('click', async () => {
+    const lista = S.personas.map(p => ({ p, dif: analizar(p).dif })).filter(x => Math.abs(x.dif) >= 0.01);
+    if (!lista.length) return alert('No hay diferencias que sumar esta semana.');
+    const detalle = lista.map(x => `· ${x.p.nombre}: ${x.dif>0?'+':''}${hfmt(x.dif)} h`).join('\n');
+    if (!confirm('Sumar al saldo de cada uno la diferencia entre lo planificado y su contrato:\n\n'
+               + detalle + '\n\nEsto se hace una vez por semana.')) return;
+    try {
+      for (const x of lista)
+        await DATOS.guardarPersona(x.p.id, { saldo_horas: Number(x.p.saldo_horas || 0) + x.dif });
+      await refrescar();
+    } catch (e) { error(e); }
+  });
   $('#btnPersona').addEventListener('click', async () => {
     try { await DATOS.crearPersona(S.local.id, { nombre:'Nueva persona', rol:'', valor_hora:2900,
             horas_contrato:42, factor_propina:1 }); await refrescar(); } catch (e) { error(e); }

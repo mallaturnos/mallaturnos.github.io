@@ -305,3 +305,18 @@ td.mcel.aus{background:var(--surface-3);font-style:italic}
   border:1px solid var(--line);border-radius:2px;background:var(--bg);color:var(--fg);-moz-appearance:textfield}
 .needrow input::-webkit-outer-spin-button,.needrow input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
 .needrow input:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+
+/* ===== disponibilidad en el equipo ===== */
+.dispo{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:4px}
+.dispo span{font-size:.6875rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint)}
+.dispo .dia{font-family:var(--font-mono);font-size:.6875rem;padding:4px 8px;border:1px solid var(--line);
+  border-radius:3px;background:var(--surface);color:var(--fg-faint);cursor:pointer}
+.dispo .dia.no{background:var(--bad-soft);border-color:var(--bad);color:var(--bad);font-weight:700}
+.dispo .dia:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ===== ofrecer turno ===== */
+button.ofrecer{width:100%;font-family:var(--font-body);font-size:.8125rem;padding:9px;border-radius:4px;
+  border:1px dashed var(--line);background:transparent;color:var(--fg-dim);cursor:pointer}
+button.ofrecer:hover{border-color:var(--accent);color:var(--accent)}
+.ofrecido{margin:0;font-size:.75rem;color:var(--warn);background:var(--warn-soft);
+  padding:8px 10px;border-radius:4px}
