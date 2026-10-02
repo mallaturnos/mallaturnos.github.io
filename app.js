@@ -639,12 +639,22 @@ function pintarAbiertos() {
   if (dv && f.includes(dv)) sd.value = dv;
   if (tv && S.turnos.some(t => t.id === tv)) st.value = tv;
 
+  const bq = $('#bloqTope');
+  if (bq && document.activeElement !== bq) bq.checked = !!S.local.bloquear_sobre_tope;
+
   const lista = $('#abiLista'); lista.innerHTML = '';
   if (!S.abiertos.length) { lista.innerHTML = '<p class="vacio">No hay turnos abiertos. Publica uno cuando te falte gente.</p>'; return; }
   S.abiertos.forEach(a => {
     const t = turnoDe(a.turno_id);
     const quien = a.tomado_por ? S.personas.find(p => p.id === a.tomado_por) : null;
     const choque = quien && asigDe(quien.id, a.fecha) && asigDe(quien.id, a.fecha).turno_id;
+    // ¿quién del equipo quedaría sobre su contrato si tomara este turno?
+    const extra = horasDe(t);
+    const pasados = t ? S.personas.filter(p => {
+      const ya = analizar(p).horas;
+      return ya + extra > (Number(p.horas_contrato) || 0);
+    }) : [];
+    const quienPasa = quien && t && (analizar(quien).horas > (Number(quien.horas_contrato) || 0));
     const card = el('div','abicard' + (a.tomado_por ? ' tomado' : ''), `
       <div class="qué">
         <b>${ddmm(a.fecha)} · ${t ? esc(t.nombre)+' '+hhmm(t.inicio)+'–'+hhmm(t.fin) : 'turno borrado'}</b>
@@ -655,6 +665,8 @@ function pintarAbiertos() {
         ${a.ofrecido_por ? '<span class="flag info">cambio de turno</span>' : ''}
         ${a.tomado_por ? `<span class="flag ok">Lo tomó ${esc(quien ? quien.nombre : '—')}</span>` : '<span class="flag warn">Sin tomar</span>'}
         ${choque ? '<span class="flag bad">ya tiene turno ese día</span>' : ''}
+        ${quienPasa ? `<span class="flag bad">queda sobre su contrato</span>` : ''}
+        ${!a.tomado_por && pasados.length ? `<span class="flag warn" title="${esc(pasados.map(x=>x.nombre).join(', '))}">${pasados.length} ${pasados.length===1?'persona quedaría':'personas quedarían'} sobre su contrato</span>` : ''}
         ${a.tomado_por && t && quien ? '<button class="act" data-pasar="1">Pasar a la malla</button>' : ''}
         <button class="mini" data-quitar="1">Quitar</button>
       </div>`);
@@ -954,8 +966,14 @@ async function pintarTrabajador(token) {
     if (bt) bt.addEventListener('click', async () => {
       bt.disabled = true;
       try {
-        const ok = await DATOS.tomarTurno(token, a.id);
-        if (!ok) $('#tAviso').innerHTML = '<div class="avisoro">Alguien lo tomó primero.</div>';
+        const r = await DATOS.tomarTurno(token, a.id) || {};
+        if (!r.ok) {
+          const txt = r.motivo === 'tope'
+            ? `No puedes tomarlo: quedarías con ${hfmt(r.horas)} h esa semana y tu contrato es de ${hfmt(r.contrato)} h. Habla con tu jefe.`
+            : r.motivo === 'tomado' ? 'Alguien lo tomó primero.'
+            : 'No se pudo tomar el turno.';
+          $('#tAviso').innerHTML = `<div class="avisoro">${esc(txt)}</div>`;
+        }
         await pintarTrabajador(token);
       } catch (e) { bt.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">${esc(e.message)}</div>`; }
     });
@@ -1102,6 +1120,10 @@ function conectarApp() {
         puesto:$('#abiPuesto').value.trim(), nota:$('#abiNota').value.trim() });
       $('#abiNota').value = ''; await refrescar();
     } catch (e) { error(e); }
+  });
+  $('#bloqTope').addEventListener('change', async ev => {
+    try { S.local = await DATOS.guardarLocal(S.local.id, { bloquear_sobre_tope: ev.target.checked }); }
+    catch (e) { error(e); }
   });
   $('#btnCopiarPub').addEventListener('click', async () => {
     const m = $('#msgPub');
