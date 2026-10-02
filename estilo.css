@@ -199,3 +199,8 @@ textarea.out{width:100%;font-family:var(--font-mono);font-size:.6875rem;padding:
 .platita .k{font-size:.625rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--accent)}
 .platita .v{font-family:var(--font-mono);font-size:1.5rem;font-weight:600;color:var(--accent);line-height:1.2}
 .platita .n{font-size:.75rem;color:var(--fg-dim);margin-top:4px}
+
+/* fila que separa los puestos dentro de la malla */
+tr.grupo th{background:var(--surface-3);font-size:.6875rem;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--fg-dim);padding:7px 10px;min-width:0}
+tr.grupo th span{font-family:var(--font-mono);font-weight:500;opacity:.6;margin-left:6px;letter-spacing:0}

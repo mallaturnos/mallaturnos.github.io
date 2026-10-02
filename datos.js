@@ -49,7 +49,7 @@
 
   /* ---------- equipo ---------- */
   const personas = (localId) =>
-    pedir(sb.from('personas').select('*').eq('local_id', localId).eq('activo', true).order('nombre'));
+    pedir(sb.from('personas').select('*').eq('local_id', localId).eq('activo', true).order('rol').order('nombre'));
 
   const crearPersona = (localId, p) =>
     pedir(sb.from('personas').insert(Object.assign({ local_id: localId }, p)).select().single());

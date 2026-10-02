@@ -119,7 +119,15 @@ function pintarSemana() {
   const opciones = S.turnos.map(t => `<option value="${t.id}">${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('')
     + Object.entries(AUSENCIAS).map(([k,v]) => `<option value="a:${k}">${k==='L'?'—':k} ${v}</option>`).join('');
 
+  let grupoActual = null;
   S.personas.forEach(p => {
+    // una fila de titulo cada vez que cambia el puesto: cocina, mesas, barra…
+    const g = (p.rol || '').trim() || 'Sin puesto';
+    if (g !== grupoActual) {
+      grupoActual = g;
+      const n = S.personas.filter(x => ((x.rol||'').trim() || 'Sin puesto') === g).length;
+      cuerpo.appendChild(el('tr','grupo', `<th colspan="9">${esc(g)} <span>${n}</span></th>`));
+    }
     const tr = el('tr');
     tr.innerHTML = `<th scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')} · ${clp(p.valor_hora)}/h · ${hfmt(p.horas_contrato)} h</span></th>` +
       f.map(fe => {
