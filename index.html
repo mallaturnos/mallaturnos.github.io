@@ -1,0 +1,66 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Malla de Turnos</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="estilo.css">
+</head>
+<body>
+<div class="wrap">
+
+  <header>
+    <div>
+      <p class="eyebrow">Tamarama</p>
+      <h1>Malla de Turnos</h1>
+      <p class="sub">Planifica la semana, reparte las propinas y publica los turnos al equipo.</p>
+    </div>
+  </header>
+
+  <!-- ===== estado de la conexión: la primera prueba de que todo el camino funciona ===== -->
+  <div class="card" id="diag">
+    <h2>Estado</h2>
+    <ul class="checks">
+      <li id="c-web"><span class="pt">…</span> La página se publicó y cargó</li>
+      <li id="c-lib"><span class="pt">…</span> La librería de la base cargó</li>
+      <li id="c-cfg"><span class="pt">…</span> Hay datos de conexión configurados</li>
+      <li id="c-db"><span class="pt">…</span> La base responde</li>
+    </ul>
+    <p class="hint" id="diagNota"></p>
+  </div>
+
+  <!-- ===== entrar (dueño) ===== -->
+  <div class="card" id="cardLogin" hidden>
+    <h2>Entrar</h2>
+    <p class="hint">Solo para el dueño o el encargado. El equipo entra con su propio link, sin clave.</p>
+    <form id="formLogin" class="form">
+      <div class="fld"><label for="email">Correo</label>
+        <input type="email" id="email" autocomplete="username" required></div>
+      <div class="fld"><label for="clave">Contraseña</label>
+        <input type="password" id="clave" autocomplete="current-password" required minlength="8"></div>
+      <div class="acciones">
+        <button class="act primary" type="submit">Entrar</button>
+        <button class="act" type="button" id="btnCrear">Crear mi cuenta</button>
+      </div>
+      <p class="msg" id="msgLogin" role="status"></p>
+    </form>
+  </div>
+
+  <!-- ===== panel (cuando hay sesión) ===== -->
+  <div id="panel" hidden>
+    <div class="card">
+      <h2 id="hola">—</h2>
+      <p class="hint">Acá va a vivir la malla. Por ahora esto confirma que la sesión funciona.</p>
+      <div class="acciones"><button class="act" id="btnSalir">Cerrar sesión</button></div>
+    </div>
+  </div>
+
+  <footer>Versión de trabajo · <span id="pie"></span></footer>
+</div>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js"></script>
+<script src="app.js"></script>
+</body>
+</html>
