@@ -1110,6 +1110,24 @@ async function llenarEjemplo() {
       }
     }
 
+    // Cuanta gente necesita cada puesto en cada turno. SIN ESTO la cobertura
+    // compara contra cero y sale todo verde, que es peor que no mostrarla: dice
+    // «te alcanza» siempre. Lo cacho Pedro mirando el ejemplo.
+    const puestosEj = puestosConocidos();
+    const filasDot = [];
+    for (let d = 0; d < 7; d++) {
+      const finde = d >= 4;                       // viernes, sabado y domingo
+      for (const q of puestosEj) {
+        ts.forEach((t, k) => {
+          // apertura con poca gente, tarde y cierre con mas, y el finde sube
+          const base = k === 0 ? 1 : 2;
+          filasDot.push({ local_id:S.local.id, perfil:String(d), puesto:q,
+                          turno_id:t.id, cantidad: base + (finde && k > 0 ? 1 : 0) });
+        });
+      }
+    }
+    if (filasDot.length) await DATOS.guardarDotacionLote(filasDot);
+
     // Ventas y propinas, para que el reparto tenga de donde salir
     const venta = [380000, 420000, 395000, 460000, 610000, 840000, 520000];
     for (let d = 0; d < 7; d++)
