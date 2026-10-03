@@ -439,3 +439,5 @@ tr.grupo.sinpuesto th .ojo{font-family:var(--font-body);font-weight:500;text-tra
 .diapills .dia.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 .dlgpie{margin-top:16px;justify-content:flex-end}
 @media (max-width:560px){ .dlg form{padding:16px} }
+/* El día del propio turno va marcado y bloqueado: se ve que está incluido. */
+.diapills .dia:disabled{opacity:1;cursor:default}

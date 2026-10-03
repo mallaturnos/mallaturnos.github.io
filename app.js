@@ -443,10 +443,15 @@ function abrirTurno(p, fecha, asig) {
     .filter(([k]) => k !== 'L')
     .map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
 
-  // los otros días de la semana, para repetir el turno de una vez
+  // La semana COMPLETA, con el día que se está creando ya marcado y bloqueado.
+  // Antes se escondía ese día, y Pedro preguntó «¿por qué para Luz no me
+  // aparece el lunes?»: esconderlo hace pensar que falta algo. Skello los
+  // muestra los siete y deja marcado el del turno.
   const f = fechas();
-  $('#dRepetir').innerHTML = f.map((fe,i) => fe === fecha ? '' :
-    `<button type="button" class="act dia" data-fe="${fe}" aria-pressed="false">${DIAS[i]}</button>`).join('');
+  $('#dRepetir').innerHTML = f.map((fe,i) => fe === fecha
+    ? `<button type="button" class="act dia on" disabled aria-pressed="true"
+         title="Es el día de este turno">${DIAS[i]}</button>`
+    : `<button type="button" class="act dia" data-fe="${fe}" aria-pressed="false">${DIAS[i]}</button>`).join('');
   $('#cajaRepetir').hidden = !esNuevo;
 
   if (asig && !esAus) {
