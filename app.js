@@ -987,6 +987,10 @@ async function llenarEjemplo() {
   b.disabled = true; b.textContent = 'Creando…';
   m.textContent = 'Creando el local, la gente y los turnos…'; m.className = 'msg';
 
+  // Si esto falla a mitad de camino, hay que DESHACER el local recien creado.
+  // Si no, cada intento fallido deja un «Ejemplo» vacio dando vueltas: a Pedro
+  // le pasó tres veces seguidas porque el fallo venia despues de crearlo.
+  let recienCreado = null;
   try {
     const yaHay = (S.locales || []).filter(l => l.nombre === 'Ejemplo');
     if (yaHay.length) {
@@ -999,6 +1003,7 @@ async function llenarEjemplo() {
       await refrescar();
     } else {
       S.local = await DATOS.crearLocal('Ejemplo');
+      recienCreado = S.local.id;
     }
     if (!S.turnos.length) await Promise.all([
       DATOS.crearTurno(S.local.id, { nombre:'Apertura', inicio:8,  fin:16.5, colacion:0.5, orden:1 }),
@@ -1016,8 +1021,14 @@ async function llenarEjemplo() {
     try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
     await refrescar();
   } catch (e) {
+    // deshacer: que un intento fallido no deje un local vacío
+    if (recienCreado) {
+      try { await DATOS.borrarLocal(recienCreado); } catch (e2) {}
+      try { localStorage.removeItem('malla-local'); } catch (e2) {}
+      await verJefe().catch(() => {});
+    }
     b.disabled = false; b.textContent = 'Llenar con datos de ejemplo';
-    m.textContent = e.message; m.className = 'msg bad'; return;
+    m.textContent = e.message + ' — no se creó nada.'; m.className = 'msg bad'; return;
   }
 
   const f = fechas();
