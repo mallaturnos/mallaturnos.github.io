@@ -567,8 +567,9 @@ function pintarCobertura() {
   ['escala','escala2'].forEach(id => {
     const e = $('#' + id); if (e) e.innerHTML = horas.map(h => `<div>${((h%24)+24)%24}</div>`).join('');
   });
-  document.querySelectorAll('.covbars, .needrow>div:last-child, .covscale div:last-child')
-    .forEach(n => n.style.gridTemplateColumns = `repeat(${horas.length},1fr)`);
+  const anchoCols = `repeat(${horas.length},1fr)`;
+  document.querySelectorAll('.covscale div:last-child')
+    .forEach(n => n.style.gridTemplateColumns = anchoCols);
 
   let faltan = 0, sobran = 0, hayDotacion = false;
   const cont = $('#cobertura'); cont.innerHTML = '';
@@ -588,7 +589,10 @@ function pintarCobertura() {
                     : `${DIAS[d]} ${((h%24)+24)%24}:00 · ${n} en piso`;
       return `<span class="${cls}" title="${t}">${n||''}</span>`;
     }).join('');
-    cont.appendChild(el('div','covrow', `<div class="covday">${DIAS[d]}</div><div class="covbars">${celdas}</div>`));
+    const fila = el('div','covrow', `<div class="covday">${DIAS[d]}</div><div class="covbars">${celdas}</div>`);
+    // el ancho se fija AL CREAR la fila; antes se hacía antes de que existiera
+    fila.querySelector('.covbars').style.gridTemplateColumns = anchoCols;
+    cont.appendChild(fila);
   });
 
   // editores: se edita UN día a la vez, con una fila por puesto
