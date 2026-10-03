@@ -6,10 +6,11 @@
 'use strict';
 
 const $ = s => document.querySelector(s);
+const SIN_CONECTAR = [];
 const on = (sel, ev, fn) => {
   const n = document.querySelector(sel);
   if (n) n.addEventListener(ev, fn);
-  else console.warn('falta el elemento', sel, '— sigo igual');
+  else { SIN_CONECTAR.push(sel); console.warn('falta el elemento', sel, '— sigo igual'); }
 };
 const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
 const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
@@ -1736,7 +1737,19 @@ async function arrancar() {
   });
 }
 
-arrancar().catch(e => {
+// Si algun boton quedo sin conectar, la app parece funcionar pero no responde.
+// Vale mas un aviso feo que un boton mudo.
+function avisarSinConectar() {
+  if (!SIN_CONECTAR.length) return;
+  const d = document.getElementById('diag');
+  if (!d) return;
+  d.hidden = false;
+  document.getElementById('diagNota').textContent =
+    'Quedaron sin conectar ' + SIN_CONECTAR.length + ' controles: ' + SIN_CONECTAR.join(', ')
+    + '. Los botones existen pero no responden.';
+}
+
+arrancar().then(avisarSinConectar).catch(e => {
   // ultimo recurso: que la pagina diga algo en vez de quedarse muda
   const d = document.getElementById('diag');
   if (d) { d.hidden = false; document.getElementById('diagNota').textContent = 'Error al arrancar: ' + (e && e.message ? e.message : e); }

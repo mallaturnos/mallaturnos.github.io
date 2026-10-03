@@ -431,7 +431,10 @@ tr.grupo.sinpuesto th .ojo{font-family:var(--font-body);font-weight:500;text-tra
 .dlg h3{margin:0 0 2px;font-size:1.0625rem}
 .dlg .hint{margin:0 0 14px}
 .dlgtabs{display:flex;gap:6px;margin-bottom:14px}
-.fldrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:12px}
+.fldrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px;margin-bottom:12px}
+/* En 12 h el campo muestra «08:00 a. m.» y con poco ancho el navegador lo
+   recorta a «08:00 a.r». Hay que darle aire. */
+.fldrow .fld input[type="time"]{min-width:118px}
 .diapills{flex-wrap:wrap;gap:4px}
 .diapills .dia.on{background:var(--accent);color:#fff;border-color:var(--accent)}
 .dlgpie{margin-top:16px;justify-content:flex-end}
