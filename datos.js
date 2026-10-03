@@ -105,6 +105,22 @@
     return /does not exist|schema cache|no existe|le falta la columna|no existe en la base/i.test(t);
   };
 
+  // ¿Esta la base al dia con lo que la app necesita? Se comprueba pidiendo las
+  // columnas nuevas, que es barato y no cambia nada. Vale mas detectarlo ANTES
+  // y decir que hacer, que intentar, fallar y dejar a medias.
+  const baseAlDia = async (localId) => {
+    const falta = [];
+    const probar = async (tabla, columna) => {
+      try { await pedir(sb.from(tabla).select(columna).eq('local_id', localId).limit(1)); }
+      catch (e) { if (faltaEnLaBase(e)) falta.push(tabla + '.' + columna); else throw e; }
+    };
+    await probar('personas', 'equipo');
+    await probar('asignaciones', 'inicio');
+    await probar('asignaciones', 'ofrecido_por');
+    await probar('asignaciones', 'horas_pagadas');
+    return falta;
+  };
+
   /* ---------- catálogo de puestos ----------
      Mientras no se aplique `arreglo-puestos.sql` la tabla no existe. La app
      tiene que seguir funcionando igual, asi que esta lectura DEVUELVE VACIO en
@@ -358,6 +374,7 @@
     miLocal, misLocales, crearLocal, guardarLocal, borrarLocal, dejarDeEscuchar,
     personas, crearPersona, guardarPersona, quitarPersona, activarPersonas,
     turnos, crearTurno, guardarTurno, quitarTurno,
+    baseAlDia,
     puestos, crearPuesto, guardarPuesto, quitarPuesto, renombrarPuesto,
     asignaciones, crearAsignacion, editarAsignacion, borrarAsignacion, ponerAusencia, limpiarDia,
     marcas, marcarComoJefe, horasPagadas, cerrarDia, copiarSemana,

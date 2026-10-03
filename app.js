@@ -984,7 +984,21 @@ async function llenarEjemplo() {
     + 'con su propia gente y una semana completa de turnos, marcas y propinas.\n\n'
     + 'No se toca ninguno de tus locales. Para volver al tuyo, lo eliges arriba.')) return;
 
-  b.disabled = true; b.textContent = 'Creando…';
+  b.disabled = true; b.textContent = 'Revisando…';
+  m.textContent = 'Revisando que la base esté al día…'; m.className = 'msg';
+
+  // Comprobar ANTES. Intentar y fallar deja al usuario reintentando un boton
+  // que no puede funcionar, y cada intento ensucia un poco mas.
+  const falta = await DATOS.baseAlDia(S.local.id).catch(() => []);
+  if (falta.length) {
+    b.disabled = false; b.textContent = 'Llenar con datos de ejemplo';
+    m.innerHTML = 'La base todavía no está al día: le faltan <b>' + falta.map(esc).join('</b>, <b>') + '</b>.<br>'
+      + 'Abre <a href="https://github.com/mallaturnos/mallaturnos.github.io/blob/main/arreglo-todo.sql" target="_blank" rel="noopener"><b>arreglo-todo.sql</b></a>, '
+      + 'copia todo, pégalo en el <b>SQL Editor</b> de Supabase, dale <b>Run</b> y vuelve a recargar esta página.';
+    m.className = 'msg bad'; return;
+  }
+
+  b.textContent = 'Creando…';
   m.textContent = 'Creando el local, la gente y los turnos…'; m.className = 'msg';
 
   // Si esto falla a mitad de camino, hay que DESHACER el local recien creado.
