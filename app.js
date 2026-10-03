@@ -760,7 +760,7 @@ function pintarDia() {
         <b>${esc(t ? t.nombre : hhmm(ta.inicio) + '–' + hhmm(ta.fin))}</b>
         <span>${hhmm(ta.inicio)}–${hhmm(ta.fin)} · ${hfmt(hs)} h · ${gente.length} ${gente.length===1?'persona':'personas'} · ${clp(costo)}</span>
       </div>
-      <ul>${gente.map(p => {
+      <ul data-fecha="${fe}">${gente.map(p => {
         const m = marcaDe(p.id, fe);
         const hl = horaLlegada(m);
         const tarde = hl !== null ? Math.round((hl - Number(ta.inicio))*60) : null;
@@ -768,9 +768,19 @@ function pintarDia() {
                  ? `<span class="flag ok">llegó${hl !== null ? ' ' + hhmm(hl) : ''}${tarde > 5 ? ' · '+minFmt(tarde)+' tarde' : ''}</span>`
                  : m.confirmo === true ? '<span class="flag info">confirmó</span>'
                  : m.confirmo === false ? '<span class="flag bad">no puede</span>' : '';
-        return `<li><b>${esc(p.nombre)}</b> <span class="rol">${esc(p.rol||'')}</span> ${et}</li>`;
+        return `<li data-p="${p.id}" data-asig="${ta.id}" role="button" tabindex="0"
+          title="Editar este turno"><b>${esc(p.nombre)}</b> <span class="rol">${esc(puestoDe(ta,p)||'')}</span> ${et}</li>`;
       }).join('')}</ul>`));
   });
+
+  // En el día también se edita. Antes era la única vista de solo lectura, y
+  // eso se notaba justo cuando hay que corregir algo: el día es cuando pasa.
+  caja.onclick = ev => {
+    const li = ev.target.closest('li[data-asig]'); if (!li) return;
+    const p = S.personas.find(x => x.id === li.dataset.p); if (!p) return;
+    const a = filasDe(p.id, fe).find(x => x.id === li.dataset.asig);
+    if (a) abrirTurno(p, fe, a);
+  };
 
   const ausentes = personasVisibles().map(p => ({ p, a: ausenciaDe(p.id, fe) }))
     .filter(x => x.a && x.a.ausencia !== 'L');

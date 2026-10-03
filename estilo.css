@@ -530,3 +530,7 @@ table.reloj tr.difiere td.n{background:var(--warn-soft)}
 td.mcel[data-p]{cursor:pointer}
 td.mcel.vacia:hover{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--accent)}
 .mcel .mbl[data-asig]:hover{box-shadow:inset 0 0 0 1px var(--accent)}
+/* En el día también se edita: la línea de cada persona abre su turno. */
+.turnodia li[data-asig]{cursor:pointer;border-radius:5px;padding:3px 5px;margin:0 -5px}
+.turnodia li[data-asig]:hover{background:var(--surface-2)}
+.turnodia li[data-asig]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
