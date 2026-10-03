@@ -255,6 +255,10 @@ const ausenciaDe = (pid, f) => filasDe(pid, f).find(a => a.ausencia) || null;
 // Las horas las manda la propia fila, no la plantilla de la que salio.
 const horasAsig = a => (a && a.inicio != null) ? Number(a.fin) - Number(a.inicio) - Number(a.colacion || 0) : 0;
 const horasDia  = (pid, f) => turnosDe(pid, f).reduce((n, a) => n + horasAsig(a), 0);
+// Las horas que SE PAGAN ese día. Es lo que manda para la propina: la base de
+// datos reparte con estas, así que la pantalla del jefe tiene que usar las
+// mismas o el trabajador y el jefe verían números distintos.
+const horasPagadasDia = (pid, f) => turnosDe(pid, f).reduce((n, a) => n + horasPagadasDe(a), 0);
 
 /* ---------- diagnóstico: solo se muestra si algo falla ---------- */
 const marca = (id, estado, texto) => { const li = $(id); if (!li) return;
@@ -1316,8 +1320,11 @@ function repartir(pool, pesos) {
 }
 
 function repartoDia(fecha) {
+  // Por las horas PAGADAS, no las planificadas: es lo que hace propina_de en
+  // la base. Si acá se usaran las del papel, al trabajador le aparecería un
+  // monto y al jefe otro — y la propina es justo donde eso no se perdona.
   const pesos = S.personas.map(p => {
-    return horasDia(p.id, fecha) * (Number(p.factor_propina)||0);
+    return horasPagadasDia(p.id, fecha) * (Number(p.factor_propina)||0);
   });
   const d = S.dias[fecha] || {};
   const pool = (d.propina_efectivo||0) + (d.propina_tarjeta||0);
