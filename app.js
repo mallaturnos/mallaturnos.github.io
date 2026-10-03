@@ -1892,8 +1892,12 @@ async function verJefe() {
 }
 
 function conectarApp() {
-  // pestañas
-  const TABS = ['sem','eq','prop','abi','conf','link'];
+  // Pestañas. Se filtran las que existen de verdad: al sacar «Turnos abiertos»
+  // esta lista quedó nombrando una que ya no está, y como aquí se llamaba a
+  // addEventListener sin red, reventaba y SE CAÍA TODO LO DEMÁS de conectarApp.
+  // Es la segunda vez hoy que un elemento que falta se lleva por delante a los
+  // que venían después; que no vuelva a pasar por esta vía.
+  const TABS = ['sem','eq','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
   TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
     TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
   }));
