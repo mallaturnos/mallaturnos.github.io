@@ -18,6 +18,20 @@
 -- =====================================================================
 
 -- ---------------------------------------------------------------------
+-- 0. Este archivo NECESITA que antes este aplicado arreglo-reloj-control.sql,
+--    porque mi_semana usa horas_pagadas_de() y marcas.asignacion_id. Mejor un
+--    aviso claro aca que un error raro treinta lineas mas abajo.
+-- ---------------------------------------------------------------------
+do $$
+begin
+  if not exists (select 1 from information_schema.columns
+                  where table_schema = 'public' and table_name = 'marcas'
+                    and column_name = 'asignacion_id') then
+    raise exception 'Falta aplicar antes arreglo-reloj-control.sql. Pega ese primero y despues este.';
+  end if;
+end $$;
+
+-- ---------------------------------------------------------------------
 -- 1. La persona pasa a ser opcional.
 -- ---------------------------------------------------------------------
 alter table asignaciones alter column persona_id drop not null;
@@ -42,7 +56,8 @@ select ta.local_id, ta.tomado_por, ta.fecha, ta.turno_id, t.inicio, t.fin, t.col
        ta.puesto, ta.nota, ta.ofrecido_por, ta.tomado_por, ta.tomado_en, ta.id
   from turnos_abiertos ta
   join turnos t on t.id = ta.turno_id
- where not exists (select 1 from asignaciones a where a.origen_abierto = ta.id);
+ where not exists (select 1 from asignaciones a where a.origen_abierto = ta.id)
+on conflict do nothing;
 
 -- ---------------------------------------------------------------------
 -- 3. Tomar un turno = ponerle la persona. Antes solo marcaba quién lo tomó en
