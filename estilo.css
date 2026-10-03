@@ -596,3 +596,6 @@ table.neces th .turnoEd{font-weight:500}
 :root[data-theme="dark"] .barra[data-c="3"]{background:#353050;color:#cec8e6}
 :root[data-theme="dark"] .barra[data-c="4"]{background:#2f3a24;color:#cfdcbb}
 @media (max-width:640px){ .linea-cab,.linea-fila{grid-template-columns:110px 1fr} }
+/* Botones para marcar por la persona, en la tabla del control horario. */
+table.reloj td.marcar{white-space:nowrap}
+table.reloj td.marcar .mini{margin-right:4px}

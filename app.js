@@ -1648,7 +1648,7 @@ function pintarReloj() {
   });
 
   $('#relojCab').innerHTML = '<tr><th>Persona</th><th>Previsto</th><th>Marcado</th>'
-    + '<th>Se paga</th><th></th></tr>';
+    + '<th>Se paga</th><th>Marcar por él</th><th></th></tr>';
 
   const cuerpo = $('#relojCuerpo'); cuerpo.innerHTML = '';
   const filas = S.personas.flatMap(p => turnosDe(p.id, fe).map(a => ({ p, a })));
@@ -1672,12 +1672,17 @@ function pintarReloj() {
       <td class="n">${marcado}</td>
       <td><input type="number" class="n paga" step="0.25" min="0" max="24" value="${hfmt(paga).replace(',','.')}"
             data-a="${a.id}" aria-label="Horas que se pagan a ${esc(p.nombre)}"></td>
+      <td class="marcar">
+        ${!m.entrada ? `<button class="mini" data-marca="entrada" data-a="${a.id}" data-p="${p.id}" data-f="${fe}">Entrada</button>` : ''}
+        ${m.entrada && !m.salida ? `<button class="mini" data-marca="salida" data-a="${a.id}" data-p="${p.id}" data-f="${fe}">Salida</button>` : ''}
+        ${m.entrada ? `<button class="mini" data-marca="borrar" data-a="${a.id}" data-p="${p.id}" data-f="${fe}" title="Borrar las marcas de este turno">✕</button>` : ''}
+      </td>
       <td>${a.horas_pagadas != null ? `<button class="mini" data-auto="${a.id}">Automático</button>` : ''}</td>`);
     cuerpo.appendChild(tr);
   });
   if (filas.length)
     cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Total</th>
-      <td class="n">${hfmt(totPrev)} h</td><td></td><td class="n">${hfmt(totPaga)} h</td><td></td></tr>`;
+      <td class="n">${hfmt(totPrev)} h</td><td></td><td class="n">${hfmt(totPaga)} h</td><td></td><td></td></tr>`;
 
   cuerpo.querySelectorAll('input.paga').forEach(inp => {
     let t = null;
@@ -1693,11 +1698,38 @@ function pintarReloj() {
     try { await DATOS.horasPagadas(b.dataset.auto, null); await refrescar(); } catch (e) { error(e); }
   }));
 
+  // El jefe marca POR la persona, sin abrir el link de nadie. No es solo para
+  // probar la app: a alguien se le olvida marcar, se queda sin batería o marca
+  // tarde, y queda registrado que lo marcó el jefe (marcado_por = 'jefe').
+  cuerpo.querySelectorAll('[data-marca]').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try { await marcarPorElJefe(b.dataset.marca, b.dataset.a, b.dataset.p, b.dataset.f); await refrescar(); }
+    catch (e) { b.disabled = false; error(e); }
+  }));
+
   const d = S.dias[fe];
   $('#relojEstado').innerHTML = d && d.cerrado_en
     ? `Cerrado · venta <b>${clp(d.venta)}</b>`
     : 'Sin cerrar. Al cerrar se te pide la venta del día.';
   $('#btnCerrarDia').textContent = d && d.cerrado_en ? 'Corregir la venta' : 'Cerrar el día';
+}
+
+// Marcar por alguien. La hora la pone el reloj del jefe, no el servidor, y por
+// eso queda `marcado_por = 'jefe'`: una marca puesta por el jefe no puede
+// hacerse pasar por una marca de la persona.
+async function marcarPorElJefe(accion, asigId, personaId, fecha) {
+  const a = filasDe(personaId, fecha).find(x => x.id === asigId); if (!a) return;
+  const hoy = new Date(fecha + 'T00:00:00');
+  const enHora = h => { const d = new Date(hoy); const hh = ((Number(h) % 24) + 24) % 24;
+    d.setHours(Math.floor(hh), Math.round((hh - Math.floor(hh)) * 60), 0, 0);
+    if (Number(h) >= 24) d.setDate(d.getDate() + 1);
+    return d.toISOString(); };
+  if (accion === 'borrar')
+    return DATOS.marcarComoJefe(asigId, personaId, fecha, { entrada:null, salida:null, llego:null, hora_llego:null });
+  if (accion === 'entrada')
+    return DATOS.marcarComoJefe(asigId, personaId, fecha,
+      { entrada: enHora(a.inicio), llego: true, hora_llego: enHora(a.inicio) });
+  return DATOS.marcarComoJefe(asigId, personaId, fecha, { salida: enHora(a.fin) });
 }
 
 /* ================= PINTAR TODO ================= */
@@ -2123,6 +2155,45 @@ function conectarApp() {
   // Cerrar el día es cuando se carga la venta. Skello la pide ahí y tiene
   // razón: es el momento en que el jefe ya está haciendo la caja, y no una
   // pestaña aparte que hay que acordarse de visitar.
+  // Marcar el dia entero de una. Pedro lo pidio para poder MOSTRAR la app sin
+  // tener que abrir el link de cada persona y hacerse pasar por ella.
+  const todosDelDia = () => S.personas.flatMap(p => turnosDe(p.id, S.relojDia).map(a => ({ p, a })));
+
+  on('#btnMarcarTodos', 'click', async () => {
+    const fe = S.relojDia; const lista = todosDelDia();
+    if (!lista.length) return alert('Nadie tiene turno este día.');
+    if (!confirm(`Marcar entrada y salida de ${lista.length} ${lista.length === 1 ? 'turno' : 'turnos'} del `
+      + ddmm(fe) + ', en el horario que estaba planificado.\n\n'
+      + 'Queda registrado que las marcaste tú y no cada persona.')) return;
+    const b = $('#btnMarcarTodos'); b.disabled = true; b.textContent = 'Marcando…';
+    const m = $('#msgReloj');
+    try {
+      for (const { p, a } of lista) {
+        await marcarPorElJefe('entrada', a.id, p.id, fe);
+        await marcarPorElJefe('salida',  a.id, p.id, fe);
+      }
+      await refrescar();
+      m.textContent = `Listo: ${lista.length} ${lista.length === 1 ? 'turno marcado' : 'turnos marcados'}.`;
+      m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+    b.disabled = false; b.textContent = 'Marcar el día completo';
+    setTimeout(() => { const x = $('#msgReloj'); if (x) x.textContent = ''; }, 6000);
+  });
+
+  on('#btnBorrarMarcas', 'click', async () => {
+    const fe = S.relojDia; const lista = todosDelDia().filter(x => marcaAsig(x.a).entrada);
+    if (!lista.length) return alert('No hay marcas que borrar en este día.');
+    if (!confirm(`Borrar las marcas de ${lista.length} ${lista.length === 1 ? 'turno' : 'turnos'} del `
+      + ddmm(fe) + '.\n\nLo planificado no se toca.')) return;
+    const m = $('#msgReloj');
+    try {
+      for (const { p, a } of lista) await marcarPorElJefe('borrar', a.id, p.id, fe);
+      await refrescar();
+      m.textContent = 'Marcas borradas.'; m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgReloj'); if (x) x.textContent = ''; }, 6000);
+  });
+
   on('#btnCerrarDia', 'click', async () => {
     const fe = S.relojDia; if (!fe) return;
     const d = S.dias[fe] || {};
