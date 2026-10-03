@@ -46,7 +46,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
-            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
+            lunes:lunesDe(new Date()), mes:new Date(), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
             hist:[], histDot:[], histEq:[], recien:null, relojDia:null };
 
 /* ---------- deshacer ----------
@@ -224,8 +224,10 @@ const fechas = () => Array.from({length:7}, (_,i) => iso(masDias(S.lunes, i)));
 function rango() {
   if (S.modo === 'dia')  return { desde: iso(S.dia), hasta: iso(S.dia) };
   if (S.modo === 'mes') {
-    const a = new Date(S.lunes.getFullYear(), S.lunes.getMonth(), 1);
-    const b = new Date(S.lunes.getFullYear(), S.lunes.getMonth() + 1, 0);
+    // Del ancla del MES, no del lunes de la semana: el lunes de la semana en
+    // curso puede caer en el mes anterior.
+    const a = new Date(S.mes.getFullYear(), S.mes.getMonth(), 1);
+    const b = new Date(S.mes.getFullYear(), S.mes.getMonth() + 1, 0);
     return { desde: iso(a), hasta: iso(b) };
   }
   const f = fechas(); return { desde: f[0], hasta: f[6] };
@@ -1702,7 +1704,11 @@ function conectarApp() {
   }));
 
   // modos de vista
-  const irA = modo => { S.modo = modo; refrescar().catch(error); };
+  const irA = modo => {
+    // al entrar al mes, se posa en el mes del día en que estabas parado
+    if (modo === 'mes') S.mes = new Date(S.modo === 'dia' ? S.dia : S.lunes.getTime() + 3 * 86400000);
+    S.modo = modo; refrescar().catch(error);
+  };
   on('#modoDia', 'click', () => irA('dia'));
   on('#modoSemana', 'click', () => irA('semana'));
   on('#modoMes', 'click', () => irA('mes'));
@@ -1710,14 +1716,15 @@ function conectarApp() {
   // navegar: el paso depende de la vista en la que estés
   const mover = n => {
     if (S.modo === 'dia') S.dia = masDias(S.dia, n);
-    else if (S.modo === 'mes') S.lunes = new Date(S.lunes.getFullYear(), S.lunes.getMonth() + n, 1);
+    else if (S.modo === 'mes') S.mes = new Date(S.mes.getFullYear(), S.mes.getMonth() + n, 1);
     else S.lunes = masDias(S.lunes, n * 7);
     refrescar().catch(error);
   };
   on('#semAnt', 'click', () => mover(-1));
   on('#semSig', 'click', () => mover(1));
   on('#semHoy', 'click', () => {
-    S.dia = new Date(); S.lunes = lunesDe(new Date()); refrescar().catch(error);
+    S.dia = new Date(); S.lunes = lunesDe(new Date()); S.mes = new Date();
+    refrescar().catch(error);
   });
 
   // copiar la semana anterior sobre esta
