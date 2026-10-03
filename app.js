@@ -21,6 +21,14 @@ const AUSENCIAS = { L:'Libre', V:'Vacaciones', E:'Licencia', F:'Falta' };
 const clp  = n => '$' + Math.round(n || 0).toLocaleString('es-CL');
 const hfmt = n => (n || 0).toLocaleString('es-CL', { minimumFractionDigits:1, maximumFractionDigits:1 });
 const pfmt = n => isFinite(n) ? n.toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1}) + ' %' : '—';
+// Un atraso en minutos se lee hasta la hora; «307 min» no se lee. Pedro:
+// «no es mejor en horas? tipo 1 hora 30 tarde».
+const minFmt = n => {
+  n = Math.round(Math.abs(n));
+  if (n < 60) return n + ' min';
+  const h = Math.floor(n / 60), m = n % 60;
+  return h + ' h' + (m ? ' ' + m + ' min' : '');
+};
 const hhmm = h => { const t = ((h % 24) + 24) % 24, m = Math.round((t - Math.floor(t)) * 60);
   return String(Math.floor(t)).padStart(2,'0') + ':' + String(m).padStart(2,'0'); };
 // Campos de plata: se escriben y se leen como $20.000, no como 20000.
@@ -757,7 +765,7 @@ function pintarDia() {
         const hl = horaLlegada(m);
         const tarde = hl !== null ? Math.round((hl - Number(ta.inicio))*60) : null;
         const et = m.llego === true
-                 ? `<span class="flag ok">llegó${hl !== null ? ' ' + hhmm(hl) : ''}${tarde > 5 ? ' · '+tarde+' min tarde' : ''}</span>`
+                 ? `<span class="flag ok">llegó${hl !== null ? ' ' + hhmm(hl) : ''}${tarde > 5 ? ' · '+minFmt(tarde)+' tarde' : ''}</span>`
                  : m.confirmo === true ? '<span class="flag info">confirmó</span>'
                  : m.confirmo === false ? '<span class="flag bad">no puede</span>' : '';
         return `<li><b>${esc(p.nombre)}</b> <span class="rol">${esc(p.rol||'')}</span> ${et}</li>`;
@@ -1329,12 +1337,12 @@ function pintarConf() {
     { k:'Con alguien que llegó', v:hfmt(conf)+' h', n:pfmt(pct)+' de lo planificado',
       c: isFinite(pct) ? (pct >= 80 ? 'good' : '') : '' },
     { k:'Sin marca de llegada', v:hfmt(sinM)+' h', n:'nadie dijo que llegó', c: sinM ? 'alert' : '' },
-    { k:'Atrasos', v:atr ? atr+' min' : '—', n:'acumulados sobre la hora de entrada' },
+    { k:'Atrasos', v:atr ? minFmt(atr) : '—', n:'acumulados sobre la hora de entrada' },
   ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
 
   $('#pcrDetalle').innerHTML = pcr.filter(x => x.plan > 0).map(x =>
     `<li><div class="prow"><span class="pname">${esc(x.p.nombre)}</span>
-       <span class="pstat">${hfmt(x.conLlegada)} de ${hfmt(x.plan)} h${x.atrasos ? ' · '+x.atrasoMin+' min tarde' : ''}</span></div>
+       <span class="pstat">${hfmt(x.conLlegada)} de ${hfmt(x.plan)} h${x.atrasos ? ' · '+minFmt(x.atrasoMin)+' tarde' : ''}</span></div>
      <div class="bar"><i style="width:${x.plan ? Math.min(100,(x.conLlegada/x.plan)*100) : 0}%"></i></div></li>`).join('')
     || '<li class="vacio">Todavía nadie ha marcado que llegó.</li>';
 
