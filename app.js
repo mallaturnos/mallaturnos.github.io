@@ -953,6 +953,114 @@ async function nuevoTurnoRapido() {
   } catch (e) { error(e); }
 }
 
+/* ---------- llenar con datos de ejemplo ----------
+   Pedro: «si quiero probar la plataforma tengo que gestionar a todo el
+   personal yo manualmente». La salida no es darle herramientas para hacerlo
+   mas rapido: es que no tenga que hacerlo.
+
+   Esto deja la semana como si el local llevara una semana andando, con los
+   casos que hacen que las pantallas digan algo: alguien que llego tarde,
+   alguien que no marco, un turno sin dueño, una ausencia y la propina
+   repartida de verdad. Con todo en blanco no se entiende para que sirve nada.
+
+   Todo lo que crea se deshace con Limpiar, Borrar las marcas y Deshacer. */
+async function llenarEjemplo() {
+  const m = $('#msgEjemplo');
+  if (!S.personas.length || !S.turnos.length) {
+    m.textContent = 'Primero necesitas gente en el equipo y al menos un turno.';
+    m.className = 'msg bad'; return;
+  }
+  const f = fechas();
+  if (!confirm(`Llenar «${S.local.nombre}» con datos de ejemplo, en la semana del `
+    + `${ddmm(f[0])} al ${ddmm(f[6])}.\n\n`
+    + 'Se agregan turnos, marcas, una ausencia, un turno sin asignar y las propinas.\n'
+    + 'Lo que ya tengas esa semana NO se borra: esto se suma.\n\n'
+    + 'Todo se puede deshacer con Limpiar y Borrar las marcas.')) return;
+
+  const b = $('#btnEjemplo'); b.disabled = true; b.textContent = 'Llenando…';
+  m.textContent = ''; m.className = 'msg';
+  const ts = S.turnos.slice().sort((a,x) => Number(a.inicio) - Number(x.inicio));
+  const gente = S.personas.slice();
+  let creados = 0, marcados = 0;
+
+  try {
+    recordar('llenar con datos de ejemplo');
+
+    // Reparte a la gente entre los turnos, rotando, y deja libre a cada uno un
+    // dia distinto: una malla donde todos trabajan siempre no se parece a nada.
+    for (let d = 0; d < 7; d++) {
+      const fe = f[d];
+      for (let i = 0; i < gente.length; i++) {
+        const p = gente[i];
+        if ((i + d) % 7 === 6) continue;                 // su dia libre
+        if (d === 6 && i % 2 === 0) continue;            // domingo con menos gente
+        const t = ts[(i + d) % ts.length];
+        if (turnosDe(p.id, fe).some(x => Number(x.inicio) === Number(t.inicio))) continue;
+        await DATOS.crearAsignacion(S.local.id, p.id, fe, {
+          turno_id: t.id, inicio: t.inicio, fin: t.fin, colacion: t.colacion,
+          puesto: (p.rol || '').trim(), nota: '',
+        });
+        creados++;
+      }
+    }
+
+    // Una ausencia, para que esa columna no se vea siempre vacia
+    if (gente.length > 2) await DATOS.ponerAusencia(S.local.id, gente[2].id, f[3], 'V');
+
+    // Un turno sin dueño esperando que alguien lo tome
+    await DATOS.crearAsignacion(S.local.id, null, f[5], {
+      turno_id: ts[0].id, inicio: ts[0].inicio, fin: ts[0].fin, colacion: ts[0].colacion,
+      puesto: (gente[0].rol || '').trim(), nota: 'reemplazo por licencia',
+    });
+    creados++;
+
+    await refrescar();
+
+    // Marcas: la gracia esta en que NO cuadren con lo planificado. Si todos
+    // marcan exacto, la pantalla de control horario no muestra nada.
+    for (let d = 0; d < 5; d++) {
+      const fe = f[d];
+      const hoy = new Date(fe + 'T00:00:00');
+      const enHora = h => { const x = new Date(hoy); const hh = ((Number(h) % 24) + 24) % 24;
+        x.setHours(Math.floor(hh), Math.round((hh - Math.floor(hh)) * 60), 0, 0);
+        if (Number(h) >= 24) x.setDate(x.getDate() + 1);
+        return x.toISOString(); };
+      let n = 0;
+      for (const p of gente) {
+        for (const a of turnosDe(p.id, fe)) {
+          n++;
+          if (n % 7 === 0) continue;                       // este no marco nada
+          const tarde = (n % 5 === 0) ? 0.6 : 0;           // este llego 36 min tarde
+          const antes = (n % 4 === 0) ? 0.5 : 0;           // este se fue media hora antes
+          await DATOS.marcarComoJefe(a.id, p.id, fe, {
+            entrada: enHora(Number(a.inicio) + tarde),
+            salida:  enHora(Number(a.fin) - antes),
+            llego: true, hora_llego: enHora(Number(a.inicio) + tarde),
+          });
+          marcados++;
+        }
+      }
+    }
+
+    // Ventas y propinas, para que el reparto tenga de donde salir
+    const venta = [380000, 420000, 395000, 460000, 610000, 840000, 520000];
+    for (let d = 0; d < 7; d++)
+      await DATOS.guardarDia(S.local.id, f[d], {
+        venta: venta[d],
+        propina_efectivo: Math.round(venta[d] * 0.04 / 1000) * 1000,
+        propina_tarjeta:  Math.round(venta[d] * 0.06 / 1000) * 1000,
+      });
+
+    await refrescar();
+    m.textContent = `Listo: ${creados} turnos y ${marcados} marcas. Mira la Semana, el Día y Control horario.`;
+    m.className = 'msg ok';
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();
+    m.textContent = e.message; m.className = 'msg bad';
+  }
+  b.disabled = false; b.textContent = 'Llenar con datos de ejemplo';
+}
+
 /* ---------- cargar el equipo desde una planilla ----------
    El valor no está en ahorrarle tiempo a Pedro con 8 personas: está en que un
    local de verdad con 25 YA TIENE su lista en una planilla, y nadie reescribe
@@ -2117,6 +2225,8 @@ function conectarApp() {
   on('#btnDeshacerEq', 'click', deshacerEq);
 
   /* --- cargar el equipo desde una planilla --- */
+  on('#btnEjemplo', 'click', llenarEjemplo);
+
   on('#btnPuesto', 'click', async () => {
     const nombre = prompt('¿Cómo se llama el puesto?\n\nPor ejemplo: Barra, Cocina, Garzón.');
     if (!nombre || !nombre.trim()) return;
