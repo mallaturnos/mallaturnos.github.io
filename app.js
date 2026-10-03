@@ -265,6 +265,23 @@ function pintarSemana() {
   const opciones = S.turnos.map(t => `<option value="${t.id}">${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('')
     + Object.entries(AUSENCIAS).map(([k,v]) => `<option value="a:${k}">${k==='L'?'—':k} ${v}</option>`).join('');
 
+  // Fila de turnos sin dueño, arriba de todo: se ven MIENTRAS planificas,
+  // no en otra pestaña. Es como lo hace Skello con su fila "Non assignés".
+  const sinDueno = el('tr','noasig');
+  sinDueno.innerHTML = '<th scope="row">Sin asignar<span class="rol">turnos abiertos</span></th>' +
+    f.map(fe => {
+      const aqui = S.abiertos.filter(a => a.fecha === fe);
+      if (!aqui.length) return '<td class="cell"></td>';
+      return '<td class="cell">' + aqui.map(a => {
+        const t = turnoDe(a.turno_id);
+        const quien = a.tomado_por ? S.personas.find(x => x.id === a.tomado_por) : null;
+        return `<span class="chip ${quien ? 'tomado' : ''}" title="${quien ? 'Lo tomó ' + esc(quien.nombre) : 'Sin tomar'}">
+                  ${t ? esc(t.nombre) : '—'}${quien ? ' · ' + esc(quien.nombre.split(' ')[0]) : ''}</span>`;
+      }).join('') + '</td>';
+    }).join('') + '<td class="tot"></td>';
+  sinDueno.addEventListener('click', () => $('#tab-abi').click());
+  if (S.abiertos.some(a => f.includes(a.fecha))) cuerpo.appendChild(sinDueno);
+
   let grupoActual = null;
   gente.forEach(p => {
     // una fila de titulo cada vez que cambia el puesto: cocina, mesas, barra…
@@ -334,7 +351,14 @@ function pintarResumenSemana() {
   personasVisibles().forEach(p => {
     const a = analizar(p); horasT += a.horas; costoT += a.costo;
     const h = $('#h-' + p.id);
-    if (h) { h.textContent = hfmt(a.horas) + ' h'; h.classList.toggle('over', a.horas > a.tope); }
+    if (h) {
+      // horas y, debajo, cuánto le falta o le sobra contra su contrato
+      const dif = a.dif;
+      h.innerHTML = hfmt(a.horas) + ' h' + (Math.abs(dif) >= 0.25
+        ? `<span class="dif ${dif > 0 ? 'mas' : 'menos'}">${dif > 0 ? '+' : '−'} ${hfmt(Math.abs(dif))} h</span>`
+        : '<span class="dif justo">al día</span>');
+      h.classList.toggle('over', a.horas > a.tope);
+    }
     lista.appendChild(el('li', '', `
       <div class="prow"><span class="pname">${esc(p.nombre)}</span>
         <span class="pstat">${hfmt(a.horas)} h · ${a.trabajados} d · ${clp(a.costo)}${
