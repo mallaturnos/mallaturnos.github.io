@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=29">
+<link rel="stylesheet" href="estilo.css?v=30">
 </head>
 <body>
 
@@ -119,22 +119,15 @@
 
       <div class="card" id="cardCobertura">
         <h2>¿Te alcanza la gente?</h2>
-        <p class="hint">El número es la gente en piso. <b>Rojo</b> = falta, <b>ámbar</b> = justo, <b>verde</b> = sobra. Se compara con lo que necesitas, abajo.</p>
-        <div class="acciones" style="margin-bottom:10px">
-          <select id="cobPuesto" aria-label="Ver cobertura de"></select>
-        </div>
+        <p class="hint">Turno por turno, si te alcanza la gente. <b>Rojo</b> = falta, <b>ámbar</b> = sobra, <b>verde</b> = justo.</p>
         <div class="scroll" style="border:0;background:transparent">
           <div class="cov" id="cobertura"></div>
-          <div class="covscale"><div></div><div id="escala"></div></div>
         </div>
         <details id="detNecesita">
           <summary>Definir cuánta gente necesito</summary>
-          <p class="hint" style="margin-top:10px">Un día a la vez y <b>por puesto</b>. Llena uno y cópialo a los demás.</p>
-          <div class="scroll" style="border:0;background:transparent">
-            <div class="covscale"><div></div><div id="escala2"></div></div>
-            <div class="acciones diatabs" id="cobTabs" style="margin-bottom:10px"></div>
-            <div id="needDia"></div>
-          </div>
+          <p class="hint" style="margin-top:10px">Cuánta gente de cada puesto necesitas <b>en cada turno</b>. Llena un día y cópialo a los demás.</p>
+          <div class="acciones diatabs" id="cobTabs" style="margin-bottom:10px"></div>
+          <div class="scroll" style="border:0;background:transparent"><div id="needDia"></div></div>
           <div class="acciones" style="margin-top:12px">
             <button class="act" id="btnCopiarDotacion">Copiar este día a los demás</button>
           </div>
@@ -249,8 +242,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=29"></script>
-<script src="datos.js?v=29"></script>
-<script src="app.js?v=29"></script>
+<script src="config.js?v=30"></script>
+<script src="datos.js?v=30"></script>
+<script src="app.js?v=30"></script>
 </body>
 </html>

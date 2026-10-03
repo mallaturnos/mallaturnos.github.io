@@ -133,9 +133,9 @@
   const dotacion = (localId) =>
     pedir(sb.from('dotacion').select('*').eq('local_id', localId));
 
-  const guardarDotacion = (localId, perfil, puesto, hora, cantidad) =>
-    pedir(sb.from('dotacion').upsert({ local_id: localId, perfil, puesto, hora, cantidad },
-      { onConflict: 'local_id,perfil,puesto,hora' }).select().single());
+  const guardarDotacion = (localId, perfil, puesto, turnoId, cantidad) =>
+    pedir(sb.from('dotacion').upsert({ local_id: localId, perfil, puesto, turno_id: turnoId, cantidad },
+      { onConflict: 'local_id,perfil,puesto,turno_id' }).select().single());
 
   /* ---------- turnos abiertos ---------- */
   const abiertos = (localId, desde) =>

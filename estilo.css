@@ -347,3 +347,25 @@ tr.noasig:hover td{filter:brightness(.98)}
 .hcell .dif.mas{color:var(--warn)}
 .hcell .dif.menos{color:var(--fg-faint)}
 .hcell .dif.justo{color:var(--ok);font-weight:500}
+
+/* ===== cobertura por turno: una línea por día, una celda por turno ===== */
+.cobfila{display:grid;grid-template-columns:92px 1fr;gap:8px;align-items:center;margin-bottom:6px;min-width:420px}
+.cobcels{display:grid;gap:6px}
+.cobcel{border-radius:5px;padding:8px 10px;border:1px solid var(--line);background:var(--surface)}
+.cobcel b{display:block;font-size:.75rem}
+.cobcel span{font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-dim)}
+.cobcel.falta{background:var(--bad-soft);border-color:var(--bad)}
+.cobcel.falta span{color:var(--bad);font-weight:700}
+.cobcel.sobra{background:var(--warn-soft);border-color:var(--warn)}
+.cobcel.sobra span{color:var(--warn);font-weight:600}
+.cobcel.ok{background:var(--ok-soft);border-color:var(--ok-soft)}
+.cobcel.ok span{color:var(--ok)}
+/* tabla de "cuánta necesito": puestos en filas, turnos en columnas */
+table.neces{min-width:0;width:auto}
+table.neces th{padding:6px 10px;font-size:.75rem;text-align:left}
+table.neces thead th{background:transparent;text-transform:none;letter-spacing:0;color:var(--fg)}
+table.neces thead th .num{display:block;font-weight:400;opacity:.6}
+table.neces td{padding:4px}
+table.neces input{width:62px;font-family:var(--font-mono);font-size:.875rem;padding:7px;text-align:center;
+  border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
+table.neces input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}

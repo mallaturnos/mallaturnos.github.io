@@ -51,17 +51,16 @@ function franja() {
 // domingo no se parecen en nada, y meterlos en un mismo "fin de semana"
 // obliga a poner un número que no sirve para ninguno de los tres.
 const perfilDe = fecha => String((new Date(fecha + 'T00:00:00').getDay() + 6) % 7);
-// La dotación va POR PUESTO: con puesto vacío se suman todos.
-const necesita = (perfil, puesto, hora) => {
-  const d = S.dotacion[perfil] || {};
-  if (puesto) return (d[puesto] || {})[hora] || 0;
-  return Object.values(d).reduce((s, porHora) => s + (porHora[hora] || 0), 0);
-};
-// cuánta gente hay en piso a esa hora, contando que un turno puede cruzar la medianoche
-const enPiso = (fecha, hora, puesto) => S.personas.reduce((n, p) => {
+// La dotación va por DÍA DE LA SEMANA, PUESTO y TURNO.
+// Por hora eran 350+ casillas que nadie llena; por turno son 63 y además es
+// como piensa un dueño: "el sábado en la tarde necesito tres garzones".
+const necesita = (perfil, puesto, turnoId) => ((S.dotacion[perfil] || {})[puesto] || {})[turnoId] || 0;
+
+// cuánta gente de ese puesto tiene ese turno asignado ese día
+const asignados = (fecha, turnoId, puesto) => S.personas.reduce((n, p) => {
   if (puesto && ((p.rol||'').trim() || 'Sin puesto') !== puesto) return n;
-  const a = asigDe(p.id, fecha); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
-  return n + (t && Number(t.inicio) <= hora && hora < Number(t.fin) ? 1 : 0);
+  const a = asigDe(p.id, fecha);
+  return n + (a && a.turno_id === turnoId ? 1 : 0);
 }, 0);
 
 // El filtro por puesto aplica a las tres vistas del plan. No toca las propinas
@@ -201,7 +200,7 @@ async function cargar() {
   S.dotacion = {};
   (dot||[]).forEach(x => {
     const perfil = S.dotacion[x.perfil] = S.dotacion[x.perfil] || {};
-    (perfil[x.puesto || ''] = perfil[x.puesto || ''] || {})[x.hora] = x.cantidad;
+    (perfil[x.puesto || ''] = perfil[x.puesto || ''] || {})[x.turno_id] = x.cantidad;
   });
 }
 
@@ -552,95 +551,86 @@ function pintarTurnos() {
 
 /* ================= COBERTURA Y COSTO ================= */
 function pintarCobertura() {
-  const selC = $('#cobPuesto');
-  if (selC) {
-    const ps = puestos();
-    selC.innerHTML = '<option value="">Todos los puestos juntos</option>' +
-      ps.map(x => `<option value="${esc(x)}">Solo ${esc(x)}</option>`).join('');
-    if (S.cobPuesto && !ps.includes(S.cobPuesto)) S.cobPuesto = '';
-    selC.value = S.cobPuesto;
-    selC.classList.toggle('activo', !!S.cobPuesto);
-  }
-  const { h0, h1 } = franja(), f = fechas(), horas = [];
-  for (let h = h0; h < h1; h++) horas.push(h);
+  const f = fechas();
+  const ts = S.turnos.slice().sort((a,b) => Number(a.inicio) - Number(b.inicio));
+  const ps = puestos();
 
-  ['escala','escala2'].forEach(id => {
-    const e = $('#' + id); if (e) e.innerHTML = horas.map(h => `<div>${((h%24)+24)%24}</div>`).join('');
-  });
-  const anchoCols = `repeat(${horas.length},1fr)`;
-  document.querySelectorAll('.covscale div:last-child')
-    .forEach(n => n.style.gridTemplateColumns = anchoCols);
-
-  let faltan = 0, sobran = 0, hayDotacion = false;
+  /* ---- arriba: una línea por día y turno, legible sin interpretar colores ---- */
   const cont = $('#cobertura'); cont.innerHTML = '';
+  if (!ts.length || !ps.length) {
+    cont.innerHTML = '<p class="vacio">Agrega turnos y gente al equipo para ver esto.</p>';
+  }
+  let faltanTot = 0, sobranTot = 0, hayDotacion = false;
   const diasVista = S.modo === 'dia' ? [iso(S.dia)] : f;
+
   diasVista.forEach(fe => {
     const d = (new Date(fe + 'T00:00:00').getDay() + 6) % 7;
-    const perfil = perfilDe(fe);
-    const celdas = horas.map(h => {
-      const n = enPiso(fe, h, S.cobPuesto), req = necesita(perfil, S.cobPuesto, h);
-      if (req) hayDotacion = true;
-      let cls = '';
-      if (!req) cls = n ? 'over' : '';
-      else if (n < req) { cls = 'falta'; faltan += (req - n); }
-      else if (n === req) cls = 'justo';
-      else { cls = 'over'; sobran += (n - req); }
-      const t = req ? `${DIAS[d]} ${((h%24)+24)%24}:00 · ${n} en piso, necesita ${req}`
-                    : `${DIAS[d]} ${((h%24)+24)%24}:00 · ${n} en piso`;
-      return `<span class="${cls}" title="${t}">${n||''}</span>`;
+    const celdas = ts.map(t => {
+      const faltas = [], sobras = [];
+      ps.forEach(puesto => {
+        const req = necesita(String(d), puesto, t.id);
+        if (req) hayDotacion = true;
+        const hay = asignados(fe, t.id, puesto);
+        if (req && hay < req) { faltas.push(`${req - hay} ${puesto.toLowerCase()}`); faltanTot += req - hay; }
+        else if (req && hay > req) { sobras.push(`${hay - req} ${puesto.toLowerCase()}`); sobranTot += hay - req; }
+      });
+      const total = ps.reduce((n,x) => n + asignados(fe, t.id, x), 0);
+      let cls = 'ok', txt = total ? total + (total === 1 ? ' persona' : ' personas') : '—';
+      if (faltas.length) { cls = 'falta'; txt = 'falta ' + faltas.join(', '); }
+      else if (sobras.length) { cls = 'sobra'; txt = 'sobra ' + sobras.join(', '); }
+      return `<div class="cobcel ${cls}"><b>${esc(t.nombre)}</b><span>${esc(txt)}</span></div>`;
     }).join('');
-    const fila = el('div','covrow', `<div class="covday">${DIAS[d]}</div><div class="covbars">${celdas}</div>`);
-    // el ancho se fija AL CREAR la fila; antes se hacía antes de que existiera
-    fila.querySelector('.covbars').style.gridTemplateColumns = anchoCols;
-    cont.appendChild(fila);
+    cont.appendChild(el('div','cobfila', `<div class="covday">${DIAS[d]} <span class="num">${ddmm(fe)}</span></div>
+      <div class="cobcels" style="grid-template-columns:repeat(${ts.length},1fr)">${celdas}</div>`));
   });
 
-  // editores: se edita UN día a la vez, con una fila por puesto
-  const ps = puestos();
+  /* ---- abajo: cuánta necesito, un día a la vez, por puesto y por turno ---- */
   const tabs = $('#cobTabs'); tabs.innerHTML = '';
-  DIAS.forEach((d, i) => {
-    const b = el('button','act' + (String(i) === S.cobDia ? ' primary' : ''), d);
+  DIAS.forEach((dn, i) => {
+    const b = el('button','act' + (String(i) === S.cobDia ? ' primary' : ''), dn);
     b.addEventListener('click', () => { S.cobDia = String(i); pintarCobertura(); });
     tabs.appendChild(b);
   });
 
   const box = $('#needDia'); box.innerHTML = '';
-  if (!ps.length) {
-    box.innerHTML = '<p class="vacio">Agrega gente al equipo y acá defines cuánta necesitas de cada puesto.</p>';
+  if (!ps.length || !ts.length) {
+    box.innerHTML = '<p class="vacio">Primero agrega tu equipo y tus turnos.</p>';
   } else {
+    const tabla = el('table','neces');
+    tabla.innerHTML = '<thead><tr><th>Puesto</th>' +
+      ts.map(t => `<th>${esc(t.nombre)}<span class="num">${hhmm(t.inicio)}</span></th>`).join('') + '</tr></thead>';
+    const tb = el('tbody');
     ps.forEach(puesto => {
-      const fila = el('div','needrow');
-      const celdas = el('div');
-      fila.appendChild(el('div','covday', esc(puesto)));
-      fila.appendChild(celdas);
-      box.appendChild(fila);
-      celdas.style.gridTemplateColumns = `repeat(${horas.length},1fr)`;
-      horas.forEach(h => {
-        const i = document.createElement('input');
-        i.type = 'number'; i.min = 0; i.max = 99; i.value = necesita(S.cobDia, puesto, h);
-        i.setAttribute('aria-label', `${puesto}, ${DIAS[Number(S.cobDia)]}, ${((h%24)+24)%24}:00`);
-        let t = null;
-        i.addEventListener('input', () => {
-          clearTimeout(t);
-          t = setTimeout(async () => {
-            const v = Number(i.value) || 0;
+      const tr = el('tr');
+      tr.innerHTML = `<th scope="row">${esc(puesto)}</th>` +
+        ts.map(t => `<td><input class="n" type="number" min="0" max="99"
+          value="${necesita(S.cobDia, puesto, t.id)}" data-t="${t.id}"
+          aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('');
+      tb.appendChild(tr);
+      tr.querySelectorAll('input[data-t]').forEach(inp => {
+        let tm = null;
+        inp.addEventListener('input', () => {
+          clearTimeout(tm);
+          tm = setTimeout(async () => {
+            const v = Number(inp.value) || 0;
             const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
-            (pf[puesto] = pf[puesto] || {})[h] = v;
-            try { await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, h, v); pintarCobertura(); }
+            (pf[puesto] = pf[puesto] || {})[inp.dataset.t] = v;
+            try { await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, inp.dataset.t, v); pintarCobertura(); }
             catch (e) { error(e); }
           }, 600);
         });
-        celdas.appendChild(i);
       });
     });
+    tabla.appendChild(tb);
+    box.appendChild(tabla);
   }
 
-  // costo sobre venta, día por día
+  /* ---- costo sobre venta ---- */
   const obj = Number(S.local.objetivo_pct) || 30;
   const oi = $('#objetivoPct');
   if (oi && document.activeElement !== oi) oi.value = obj;
   let costoT = 0, ventaT = 0;
-  const lis = f.map((fe, d) => {
+  $('#cobDias').innerHTML = f.map((fe, d) => {
     const costo = S.personas.reduce((s,p) => {
       const a = asigDe(p.id, fe); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
       return s + (t ? horasDe(t) * (p.valor_hora||0) : 0); }, 0);
@@ -652,15 +642,14 @@ function pintarCobertura() {
       <span class="pstat">${clp(costo)} de ${clp(venta)} · <b style="color:${mal?'var(--bad)':'var(--ok)'}">${pfmt(pct)}</b></span></div>
       <div class="bar"><i class="${mal?'over':''}" style="width:${isFinite(pct)?Math.min(100,pct):0}%"></i></div></li>`;
   }).join('');
-  $('#cobDias').innerHTML = lis;
 
   const pctT = ventaT ? (costoT/ventaT)*100 : NaN;
   $('#cobKpis').innerHTML = [
     { k:'Costo de personal', v:clp(costoT), n:'la semana completa' },
     { k:'Sobre la venta', v:pfmt(pctT), n:`tu objetivo es ${obj} %`,
       c: isFinite(pctT) ? (pctT > obj ? 'alert' : 'good') : '' },
-    { k:'Horas-persona que faltan', v: hayDotacion ? faltan : '—', n:'momentos con menos gente de la que pediste', c: faltan ? 'alert' : '' },
-    { k:'Horas-persona de sobra', v: hayDotacion ? sobran : '—', n:'momentos con más gente de la necesaria' },
+    { k:'Gente que falta', v: hayDotacion ? faltanTot : '—', n:'turnos con menos de la que pediste', c: faltanTot ? 'alert' : '' },
+    { k:'Gente de sobra', v: hayDotacion ? sobranTot : '—', n:'turnos con más de la necesaria' },
   ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
 }
 
