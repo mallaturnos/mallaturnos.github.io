@@ -520,3 +520,7 @@ table.reloj .sinmarca{color:var(--fg-faint);font-style:italic}
 /* Fila marcada cuando lo real se aparta de lo planificado: es justo lo que hay
    que mirar antes de decidir qué se paga. */
 table.reloj tr.difiere td.n{background:var(--warn-soft)}
+/* En el mes también se edita: la casilla vacía se ofrece al pasar por encima. */
+td.mcel[data-p]{cursor:pointer}
+td.mcel.vacia:hover{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--accent)}
+.mcel .mbl[data-asig]:hover{box-shadow:inset 0 0 0 1px var(--accent)}

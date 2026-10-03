@@ -454,7 +454,10 @@ function abrirTurno(p, fecha, asig) {
   // Antes se escondía ese día, y Pedro preguntó «¿por qué para Luz no me
   // aparece el lunes?»: esconderlo hace pensar que falta algo. Skello los
   // muestra los siete y deja marcado el del turno.
-  const f = fechas();
+  // OJO: la semana sale de la FECHA del turno y no de la que se está viendo,
+  // porque desde el mes se edita cualquier día, no solo los de esta semana.
+  const lun = lunesDe(new Date(fecha + 'T00:00:00'));
+  const f = [...Array(7)].map((_, k) => iso(masDias(lun, k)));
   $('#dRepetir').innerHTML = f.map((fe,i) => fe === fecha
     ? `<button type="button" class="act dia on" disabled aria-pressed="true"
          title="Es el día de este turno">${DIAS[i]}</button>`
@@ -795,18 +798,21 @@ function pintarMes() {
         // Un bloque por turno, con las horas en dos líneas. El mes sirve para
         // ver el patrón —«tres garzones todos los sábados»— y con una inicial
         // no se ve nada.
-        return corte + '<td class="mcel">' + ts.map(x => {
+        return corte + `<td class="mcel" data-p="${p.id}" data-fecha="${f}">` + ts.map(x => {
           const pl = x.turno_id ? turnoDe(x.turno_id) : null;
           const ci = pl ? (S.turnos.findIndex(y => y.id === pl.id) % 4) + 1 : 5;
           const pu = puestoDe(x, p);
-          return `<span class="mbl" data-c="${ci}" title="${esc((pu ? pu + ' · ' : '')
+          return `<span class="mbl" data-c="${ci}" data-asig="${x.id}" role="button" tabindex="0"
+            title="${esc((pu ? pu + ' · ' : '')
             + hhmm(x.inicio) + '–' + hhmm(x.fin) + ' · ' + hfmt(horasAsig(x)) + ' h'
             + (x.nota ? '\n' + x.nota : ''))}">${hhmm(x.inicio)}<br>${hhmm(x.fin)}</span>`;
         }).join('') + '</td>';
       }
       if (a && a.ausencia && a.ausencia !== 'L')
-        return corte + `<td class="mcel"><span class="mbl aus" title="${AUSENCIAS[a.ausencia]}">${AUSENCIAS[a.ausencia]}</span></td>`;
-      return corte + '<td class="mcel"></td>';
+        return corte + `<td class="mcel" data-p="${p.id}" data-fecha="${f}"><span class="mbl aus"
+          data-asig="${a.id}" role="button" tabindex="0" title="${AUSENCIAS[a.ausencia]}">${AUSENCIAS[a.ausencia]}</span></td>`;
+      return corte + `<td class="mcel vacia" data-p="${p.id}" data-fecha="${f}" role="button" tabindex="0"
+        title="Agregar turno"></td>`;
     }).join('');
     cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')}</span></th>${celdas}<td class="tot">${hfmt(horas)} h</td></tr>`;
   });
@@ -822,6 +828,20 @@ function pintarMes() {
     return corte + `<td class="mpie">${h ? hfmt(h) : ''}</td>`;
   }).join('');
   cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Horas del día</th>${pie}<td class="tot">${hfmt(totMes)} h</td></tr>`;
+
+  // Un solo escuchador para toda la tabla. En el mes también se edita: Pedro
+  // lo pidió y Skello lo hace («si veo algún desajuste puedo rectificarlo
+  // directamente desde aquí»), que es justamente para lo que sirve el mes.
+  cuerpo.onclick = ev => {
+    const cel = ev.target.closest('td.mcel[data-p]'); if (!cel) return;
+    const p = S.personas.find(x => x.id === cel.dataset.p); if (!p) return;
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      const a = filasDe(p.id, cel.dataset.fecha).find(x => x.id === bl.dataset.asig);
+      if (a) return abrirTurno(p, cel.dataset.fecha, a);
+    }
+    abrirTurno(p, cel.dataset.fecha, null);
+  };
 
   $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = '';
 }
