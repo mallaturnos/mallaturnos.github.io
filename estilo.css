@@ -375,3 +375,11 @@ table.neces td{padding:4px}
 table.neces input{width:62px;font-family:var(--font-mono);font-size:.875rem;padding:7px;text-align:center;
   border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
 table.neces input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* Puesto sin llenar. Antes el ejemplo gris «Garzón» parecia un valor puesto y la
+   persona quedaba sin puesto sin que nadie lo notara; ahora el campo lo dice, y
+   en la malla el grupo «Sin puesto» avisa que esa gente no entra en la cobertura. */
+.fld input.falta{border-color:var(--bad);background:var(--bad-soft)}
+tr.grupo.sinpuesto th{background:var(--bad-soft);color:var(--bad)}
+tr.grupo.sinpuesto th .ojo{font-family:var(--font-body);font-weight:500;text-transform:none;
+  letter-spacing:0;margin-left:10px;opacity:.85}

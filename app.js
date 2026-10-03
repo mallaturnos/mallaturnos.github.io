@@ -335,7 +335,10 @@ function pintarSemana() {
     if (g !== grupoActual) {
       grupoActual = g;
       const n = gente.filter(x => ((x.rol||'').trim() || 'Sin puesto') === g).length;
-      cuerpo.appendChild(el('tr','grupo', `<th colspan="9">${esc(g)} <span>${n}</span></th>`));
+      const huerfano = g === 'Sin puesto';
+      cuerpo.appendChild(el('tr','grupo' + (huerfano ? ' sinpuesto' : ''),
+        `<th colspan="9">${esc(g)} <span>${n}</span>${huerfano
+          ? '<span class="ojo">no se cuentan en la cobertura</span>' : ''}</th>`));
     }
     const tr = el('tr');
     tr.innerHTML = `<th scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')} · ${clp(p.valor_hora)}/h · ${hfmt(p.horas_contrato)} h</span></th>` +
@@ -517,7 +520,8 @@ function pintarEquipo() {
   S.personas.forEach(p => {
     const row = el('div','rowline' + (p.id === S.recien ? ' recien' : ''), `
       ${filaCampo('Nombre','text',p.nombre,'data-k="nombre"')}
-      ${filaCampo('Puesto','text',p.rol||'','data-k="rol" placeholder="Garzón"')}
+      ${filaCampo('Puesto','text',p.rol||'','data-k="rol" placeholder="ej.: Garzón"'
+        + ((p.rol||'').trim() ? '' : ' class="falta"'))}
       ${filaCampo('Equipo','text',p.equipo||'','data-k="equipo" placeholder="Fijos / Por llamado"')}
       ${filaCampo('Valor hora','plata',p.valor_hora,'data-k="valor_hora" class="n"')}
       ${filaCampo('Horas contrato','number',p.horas_contrato,'data-k="horas_contrato" class="n" min="0" max="60" step="1"')}
@@ -542,6 +546,7 @@ function pintarEquipo() {
           try {
             Object.assign(p, await DATOS.guardarPersona(p.id, { [k]: v }));
             if (p.id === S.recien && k === 'nombre') { S.recien = null; row.classList.remove('recien'); }
+            if (k === 'rol') inp.classList.toggle('falta', !inp.value.trim());
             pintarSemana(); pintarPropinas(); pintarLinks();
           }
           catch (e) { error(e); }
