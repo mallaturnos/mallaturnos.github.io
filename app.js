@@ -2299,8 +2299,11 @@ function conectarApp() {
       + 'Esto NO se puede deshacer.\n\n'
       + `Para confirmar, escribe el nombre del local: ${S.local.nombre}`);
     if (r === null) return;
-    if (r.trim() !== S.local.nombre) {
-      m.textContent = 'El nombre no coincide. No se borró nada.'; m.className = 'msg bad'; return;
+    // Sin distinguir mayusculas ni tildes: la gracia de escribir el nombre es
+    // obligar a MIRAR cual se borra, no tomarle una prueba de ortografia.
+    if (normal(r) !== normal(S.local.nombre)) {
+      m.textContent = `No se borró nada: escribiste «${r.trim()}» y el local se llama «${S.local.nombre}».`;
+      m.className = 'msg bad'; return;
     }
     try {
       await DATOS.borrarLocal(S.local.id);
