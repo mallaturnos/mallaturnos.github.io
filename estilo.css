@@ -552,3 +552,6 @@ table.neces .turnoEd.nuevo{font-weight:500;color:var(--fg-faint);border:1px dash
 .rowline .muestra[data-c="3"]{background:#d7d1e6;color:#37305a}
 .rowline .muestra[data-c="4"]{background:#dde5cf;color:#3a4a26}
 table.neces th .turnoEd{font-weight:500}
+/* Turno sin dueño en la malla: se distingue del asignado con un borde cortado. */
+.cell .bloque.libre{border:1px dashed var(--fg-faint);background:var(--surface-2)}
+.cell .bloque.libre em{font-style:italic}

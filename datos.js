@@ -122,9 +122,10 @@
      Skello. `turno_id` solo recuerda de que plantilla salio, para el nombre.
      Puede haber VARIOS el mismo dia: eso es el turno partido. Por eso ya no
      hay upsert por (persona, fecha) y todo va por el id de la fila. */
+  // personaId null = turno SIN ASIGNAR, el «Non assigné» de Skello.
   const crearAsignacion = (localId, personaId, fecha, t) =>
     pedir(sb.from('asignaciones').insert({
-      local_id: localId, persona_id: personaId, fecha, ausencia: null,
+      local_id: localId, persona_id: personaId || null, fecha, ausencia: null,
       turno_id: t.turno_id || null,
       inicio: t.inicio, fin: t.fin, colacion: t.colacion || 0,
       puesto: t.puesto || '', nota: t.nota || '',
@@ -271,9 +272,14 @@
   };
 
   /* ---------- turnos abiertos ---------- */
-  const abiertos = (localId, desde) =>
-    pedir(sb.from('turnos_abiertos').select('*').eq('local_id', localId)
-            .gte('fecha', desde).order('fecha'));
+  // Los turnos sin dueño ya no viven en otra tabla: son asignaciones sin
+  // persona, o asignaciones que alguien ofreció.
+  const abiertos = (localId, desde, hasta) =>
+    pedir(sb.from('asignaciones').select('*').eq('local_id', localId)
+            .not('inicio', 'is', null)
+            .gte('fecha', desde).lte('fecha', hasta)
+            .or('persona_id.is.null,ofrecido_por.not.is.null')
+            .order('fecha').order('inicio'));
 
   const abrirTurno = (localId, a) =>
     pedir(sb.from('turnos_abiertos').insert(Object.assign({ local_id: localId }, a)).select().single());

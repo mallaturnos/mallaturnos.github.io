@@ -366,7 +366,7 @@ async function cargar() {
   const [personas, turnos, puestosCat, asign, marcas, dias, abiertos, dot] = await Promise.all([
     DATOS.personas(S.local.id), DATOS.turnos(S.local.id), DATOS.puestos(S.local.id),
     DATOS.asignaciones(S.local.id, desde, hasta), DATOS.marcas(S.local.id, desde, hasta),
-    DATOS.dias(S.local.id, desde, hasta), DATOS.abiertos(S.local.id, desde),
+    DATOS.dias(S.local.id, desde, hasta), DATOS.abiertos(S.local.id, desde, hasta),
     DATOS.dotacion(S.local.id),
   ]);
   S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
@@ -375,6 +375,7 @@ async function cargar() {
   // que cada casilla guarda una LISTA, no una fila.
   S.asign = {};
   (asign||[]).forEach(a => {
+    if (!a.persona_id) return;        // sin dueño: va a la fila «Sin asignar»
     const k = a.persona_id + '|' + a.fecha;
     (S.asign[k] = S.asign[k] || []).push(a);
   });
@@ -462,13 +463,19 @@ function abrirTurno(p, fecha, asig) {
   DLG = { p, fecha, asig };
   const esNuevo = !asig, esAus = asig && asig.ausencia;
   $('#dlgTit').textContent = esNuevo ? 'Agregar turno' : (esAus ? 'Editar ausencia' : 'Editar turno');
-  $('#dlgSub').textContent = p.nombre + ' · ' + DIAS[(new Date(fecha + 'T00:00:00').getDay() + 6) % 7] + ' ' + ddmm(fecha);
+  $('#dlgSub').textContent = (p ? p.nombre : 'Sin asignar') + ' · '
+    + DIAS[(new Date(fecha + 'T00:00:00').getDay() + 6) % 7] + ' ' + ddmm(fecha);
   $('#dlgMsg').textContent = '';
   $('#dBorrar').hidden = esNuevo;
 
   $('#dPlantilla').innerHTML = '<option value="">— escribir las horas —</option>' +
     S.turnos.map(t => `<option value="${t.id}">${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
-  $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p) : (p.rol||'').trim());
+  // La lista de quién lo cubre, con «sin asignar» como una opción más. Es
+  // exactamente el desplegable de Skello: el turno sin dueño no es otra cosa.
+  const quien = asig ? (asig.persona_id || '') : (p ? p.id : '');
+  $('#dPersona').innerHTML = `<option value=""${quien ? '' : ' selected'}>— sin asignar —</option>`
+    + S.personas.map(x => `<option value="${x.id}"${x.id === quien ? ' selected' : ''}>${esc(x.nombre)}</option>`).join('');
+  $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p) : ((p && p.rol) || '').trim());
   $('#dAusencia').innerHTML = Object.entries(AUSENCIAS)
     .filter(([k]) => k !== 'L')
     .map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
@@ -496,6 +503,7 @@ function abrirTurno(p, fecha, asig) {
   } else {
     const t = S.turnos[0];
     $('#dEntra').value = t ? aHora(t.inicio) : '09:00';
+    /* turno nuevo */
     $('#dSale').value  = t ? aHora(t.fin)    : '18:00';
     $('#dPausa').value = t ? Math.round(Number(t.colacion) * 60) : 30;
     $('#dPlantilla').value = t ? t.id : '';
@@ -520,6 +528,7 @@ async function guardarDlg() {
   const esAus = $('#paneAus').hidden === false;
 
   if (esAus) {
+    if (!p) { m.textContent = 'Una ausencia es de alguien: elige la persona.'; m.className = 'msg bad'; return; }
     recordar('la ausencia de ' + p.nombre + ' del ' + ddmm(fecha));
     try {
       await DATOS.ponerAusencia(S.local.id, p.id, fecha, $('#dAusencia').value);
@@ -532,8 +541,10 @@ async function guardarDlg() {
   if (!d) { m.textContent = 'Faltan las horas.'; m.className = 'msg bad'; return; }
   if (d.horas <= 0) { m.textContent = 'La colación se come el turno entero.'; m.className = 'msg bad'; return; }
 
+  const quien = $('#dPersona').value || null;
   const campos = { turno_id: $('#dPlantilla').value || null, inicio: d.inicio, fin: d.fin,
-                   colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim() };
+                   colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim(),
+                   persona_id: quien };
   // Solo los botones que LLEVAN fecha: el del día del propio turno va marcado
   // pero sin `data-fe`, y colarlo aquí mandaba a la base una fila con la fecha
   // vacía. El Set evita además repetir ese mismo día.
@@ -541,14 +552,14 @@ async function guardarDlg() {
     .map(b => b.dataset.fe).filter(Boolean);
   const dias = [...new Set([fecha, ...marcados])];
 
-  recordar(asig ? 'el turno de ' + p.nombre + ' del ' + ddmm(fecha)
-                : 'agregar turno a ' + p.nombre);
+  recordar(asig ? 'el turno de ' + (p ? p.nombre : 'sin asignar') + ' del ' + ddmm(fecha)
+                : 'agregar turno' + (p ? ' a ' + p.nombre : ' sin asignar'));
   try {
     if (asig) await DATOS.editarAsignacion(asig.id, campos);
     else for (const fe of dias) {
-      // si ese día ya tiene el mismo bloque, no se duplica
-      if (turnosDe(p.id, fe).some(x => Number(x.inicio) === d.inicio)) continue;
-      await DATOS.crearAsignacion(S.local.id, p.id, fe, campos);
+      // si esa persona ya tiene el mismo bloque ese día, no se duplica
+      if (quien && turnosDe(quien, fe).some(x => Number(x.inicio) === d.inicio)) continue;
+      await DATOS.crearAsignacion(S.local.id, quien, fe, campos);
     }
     await refrescar(); $('#dlgTurno').close();
   } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
@@ -556,7 +567,7 @@ async function guardarDlg() {
 
 async function borrarDlg() {
   const { p, fecha, asig } = DLG; if (!asig) return;
-  recordar('quitar un turno de ' + p.nombre + ' del ' + ddmm(fecha));
+  recordar('quitar un turno de ' + (p ? p.nombre : 'sin asignar') + ' del ' + ddmm(fecha));
   try {
     await DATOS.borrarAsignacion(asig.id);
     await refrescar(); $('#dlgTurno').close();
@@ -628,20 +639,34 @@ function pintarSemana() {
 
   // Fila de turnos sin dueño, arriba de todo: se ven MIENTRAS planificas,
   // no en otra pestaña. Es como lo hace Skello con su fila "Non assignés".
+  // La fila de los turnos sin dueño, arriba de todo. Ya no es un atajo a otra
+  // pestaña: son turnos de verdad, se editan aquí y se asignan desde el mismo
+  // diálogo, eligiendo a quién. Es como lo hace Skello con «Non assigné».
   const sinDueno = el('tr','noasig');
-  sinDueno.innerHTML = '<th scope="row">Sin asignar<span class="rol">turnos abiertos</span></th>' +
+  sinDueno.innerHTML = '<th scope="row">Sin asignar<span class="rol">el primero que lo tome se lo queda</span></th>' +
     f.map(fe => {
       const aqui = S.abiertos.filter(a => a.fecha === fe);
-      if (!aqui.length) return '<td class="cell"></td>';
-      return '<td class="cell">' + aqui.map(a => {
-        const t = turnoDe(a.turno_id);
-        const quien = a.tomado_por ? S.personas.find(x => x.id === a.tomado_por) : null;
-        return `<span class="chip ${quien ? 'tomado' : ''}" title="${quien ? 'Lo tomó ' + esc(quien.nombre) : 'Sin tomar'}">
-                  ${t ? esc(t.nombre) : '—'}${quien ? ' · ' + esc(quien.nombre.split(' ')[0]) : ''}</span>`;
-      }).join('') + '</td>';
+      return `<td class="cell" data-fecha="${fe}">` + aqui.map(a => {
+        const t = a.turno_id ? turnoDe(a.turno_id) : null;
+        const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
+        const of = a.ofrecido_por ? S.personas.find(x => x.id === a.ofrecido_por) : null;
+        return `<span class="bloque libre" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
+          role="button" tabindex="0" title="${of ? 'Lo ofreció ' + esc(of.nombre) : 'Nadie lo ha tomado'}">
+          <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b><i>${hfmt(horasAsig(a))} h</i>
+          <em>${esc(a.puesto || 'sin puesto')}${of ? ' · ofrece ' + esc(of.nombre.split(' ')[0]) : ''}</em></span>`;
+      }).join('') + `<button type="button" class="anadir" data-anadir="${fe}"
+        aria-label="Publicar un turno sin asignar el ${fe}">${aqui.length ? '+' : '+ turno'}</button></td>`;
     }).join('') + '<td class="tot"></td>';
-  sinDueno.addEventListener('click', () => $('#tab-abi').click());
-  if (S.abiertos.some(a => f.includes(a.fecha))) cuerpo.appendChild(sinDueno);
+  sinDueno.addEventListener('click', ev => {
+    const cel = ev.target.closest('td[data-fecha]'); if (!cel) return;
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      const a = S.abiertos.find(x => x.id === bl.dataset.asig);
+      if (a) return abrirTurno(null, cel.dataset.fecha, a);
+    }
+    if (ev.target.closest('[data-anadir]')) abrirTurno(null, cel.dataset.fecha, null);
+  });
+  cuerpo.appendChild(sinDueno);
 
   let grupoActual = null;
   gente.forEach(p => {
@@ -1080,6 +1105,8 @@ function pintarEquipo() {
 }
 
 function pintarPuestos() {
+  const bq = $('#bloqTope');
+  if (bq && document.activeElement !== bq) bq.checked = !!(S.local && S.local.bloquear_sobre_tope);
   const box = $('#eqPuestos'); if (!box) return;
   box.innerHTML = '';
   if (!S.puestos.length) {
@@ -1163,7 +1190,7 @@ function pintarTurnos() {
             if (k === 'inicio') { campos.inicio = v; if (Number(t.fin) <= v) campos.fin = v + 8; }
             else campos.fin = v <= Number(t.inicio) ? v + 24 : v;   // cruza la medianoche
           }
-          try { Object.assign(t, await DATOS.guardarTurno(t.id, campos)); pintarTurnos(); pintarSemana(); pintarAbiertos(); }
+          try { Object.assign(t, await DATOS.guardarTurno(t.id, campos)); pintarTurnos(); pintarSemana(); }
           catch (e) { error(e); }
         }, 600);
       });
@@ -1399,72 +1426,6 @@ function pintarPropinas() {
 }
 
 /* ================= TURNOS ABIERTOS ================= */
-function pintarAbiertos() {
-  const f = fechas();
-  const sd = $('#abiDia'), st = $('#abiTurno');
-  const dv = sd.value, tv = st.value;
-  sd.innerHTML = f.map((fe,i) => `<option value="${fe}">${DIAS[i]} ${ddmm(fe)}</option>`).join('');
-  st.innerHTML = S.turnos.map(t => `<option value="${t.id}">${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
-  if (dv && f.includes(dv)) sd.value = dv;
-  if (tv && S.turnos.some(t => t.id === tv)) st.value = tv;
-
-  const bq = $('#bloqTope');
-  if (bq && document.activeElement !== bq) bq.checked = !!S.local.bloquear_sobre_tope;
-
-  const lista = $('#abiLista'); lista.innerHTML = '';
-  if (!S.abiertos.length) { lista.innerHTML = '<p class="vacio">No hay turnos abiertos. Publica uno cuando te falte gente.</p>'; return; }
-  S.abiertos.forEach(a => {
-    const t = turnoDe(a.turno_id);
-    const quien = a.tomado_por ? S.personas.find(p => p.id === a.tomado_por) : null;
-    // Choca solo si el horario SE PISA con otro turno suyo: con el turno partido
-    // tener algo ese dia ya no es impedimento, doblar es justamente lo normal.
-    const choque = quien && t && turnosDe(quien.id, a.fecha).some(x => solapan(x, t));
-    // ¿quién del equipo quedaría sobre su contrato si tomara este turno?
-    const extra = horasDe(t);
-    const pasados = t ? S.personas.filter(p => {
-      const ya = analizar(p).horas;
-      return ya + extra > (Number(p.horas_contrato) || 0);
-    }) : [];
-    const quienPasa = quien && t && (analizar(quien).horas > (Number(quien.horas_contrato) || 0));
-    const card = el('div','abicard' + (a.tomado_por ? ' tomado' : ''), `
-      <div class="qué">
-        <b>${ddmm(a.fecha)} · ${t ? esc(t.nombre)+' '+hhmm(t.inicio)+'–'+hhmm(t.fin) : 'turno borrado'}</b>
-        <span>${esc(a.puesto||'sin puesto')}${t ? ' · '+hfmt(horasDe(t))+' h' : ''}</span>
-        ${a.nota ? `<em>${esc(a.nota)}</em>` : ''}
-      </div>
-      <div class="abiest">
-        ${a.ofrecido_por ? '<span class="flag info">cambio de turno</span>' : ''}
-        ${a.tomado_por ? `<span class="flag ok">Lo tomó ${esc(quien ? quien.nombre : '—')}</span>` : '<span class="flag warn">Sin tomar</span>'}
-        ${choque ? '<span class="flag bad">ya tiene turno ese día</span>' : ''}
-        ${quienPasa ? `<span class="flag bad">queda sobre su contrato</span>` : ''}
-        ${!a.tomado_por && pasados.length ? `<span class="flag warn" title="${esc(pasados.map(x=>x.nombre).join(', '))}">${pasados.length} ${pasados.length===1?'persona quedaría':'personas quedarían'} sobre su contrato</span>` : ''}
-        ${a.tomado_por && t && quien ? '<button class="act" data-pasar="1">Pasar a la malla</button>' : ''}
-        <button class="mini" data-quitar="1">Quitar</button>
-      </div>`);
-    lista.appendChild(card);
-    const bp = card.querySelector('[data-pasar]');
-    if (bp) bp.addEventListener('click', async () => {
-      try {
-        await DATOS.crearAsignacion(S.local.id, quien.id, a.fecha, {
-          turno_id: a.turno_id, inicio: t.inicio, fin: t.fin, colacion: t.colacion,
-          puesto: a.puesto || (quien.rol||'').trim(), nota: a.nota || '',
-        });
-        // si era un cambio ofrecido, al confirmarlo se le quita ESE turno a
-        // quien lo ofreció: antes se le ponía una ausencia «L», que ahora no
-        // existe como fila — quedarse sin turno ES estar libre.
-        if (a.ofrecido_por && a.ofrecido_por !== quien.id) {
-          const suyo = turnosDe(a.ofrecido_por, a.fecha)
-            .find(x => Number(x.inicio) === Number(t.inicio));
-          if (suyo) await DATOS.borrarAsignacion(suyo.id);
-        }
-        await DATOS.cerrarTurno(a.id); await refrescar();
-      } catch (e) { error(e); }
-    });
-    card.querySelector('[data-quitar]').addEventListener('click', async () => {
-      try { await DATOS.cerrarTurno(a.id); await refrescar(); } catch (e) { error(e); }
-    });
-  });
-}
 
 /* ================= CONFIRMACIONES ================= */
 const marcaDe = (pid, f) => S.marcas[pid + '|' + f] || {};
@@ -1709,7 +1670,7 @@ function pintarReloj() {
 /* ================= PINTAR TODO ================= */
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
-  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPuestos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarReloj(); pintarLinks();
+  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPuestos(); pintarPropinas(); pintarConf(); pintarReloj(); pintarLinks();
   pintarDeshacer(); pintarDeshacerDot(); pintarDeshacerEq();
 }
 
@@ -2203,14 +2164,6 @@ function conectarApp() {
   on('#btnTurno', 'click', async () => {
     try { await DATOS.crearTurno(S.local.id, { nombre:'Turno '+(S.turnos.length+1), inicio:9, fin:17,
             colacion:0.5, orden:S.turnos.length+1 }); await refrescar(); } catch (e) { error(e); }
-  });
-  on('#btnAbrir', 'click', async () => {
-    const turnoId = $('#abiTurno').value; if (!turnoId) return alert('Primero crea un turno en Equipo.');
-    try {
-      await DATOS.abrirTurno(S.local.id, { fecha:$('#abiDia').value, turno_id:turnoId,
-        puesto:$('#abiPuesto').value.trim(), nota:$('#abiNota').value.trim() });
-      $('#abiNota').value = ''; await refrescar();
-    } catch (e) { error(e); }
   });
   on('#bloqTope', 'change', async ev => {
     try { S.local = await DATOS.guardarLocal(S.local.id, { bloquear_sobre_tope: ev.target.checked }); }

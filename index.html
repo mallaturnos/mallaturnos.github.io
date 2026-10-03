@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=47">
+<link rel="stylesheet" href="estilo.css?v=48">
 </head>
 <body>
 
@@ -86,7 +86,6 @@
       <button role="tab" id="tab-sem"  aria-selected="true"  aria-controls="p-sem">Semana</button>
       <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
       <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
-      <button role="tab" id="tab-abi"  aria-selected="false" aria-controls="p-abi">Turnos abiertos</button>
       <button role="tab" id="tab-conf" aria-selected="false" aria-controls="p-conf">Control horario</button>
       <button role="tab" id="tab-link" aria-selected="false" aria-controls="p-link">Links</button>
     </nav>
@@ -173,6 +172,11 @@
         <p class="hint">Si el fin es menor que el inicio, se entiende que cruza la medianoche.</p>
         <div id="eqTurnos"></div>
         <div class="acciones" style="margin-top:14px"><button class="act" id="btnTurno">Agregar turno</button></div>
+        <label class="ctrl" style="margin-top:14px;display:flex;gap:8px;align-items:flex-start;max-width:60ch">
+          <input type="checkbox" id="bloqTope" style="width:auto;margin-top:3px">
+          <span>No dejar que alguien tome un turno sin asignar si <b>se pasa de sus horas contratadas</b>.
+          <i>Si lo dejas apagado, lo puede tomar igual.</i></span>
+        </label>
       </div>
       <div class="card">
         <h2>Puestos del local</h2>
@@ -206,30 +210,6 @@
       <div class="card">
         <h2>El reparto</h2>
         <div class="scroll"><table class="prop" id="tablaProp"><thead><tr id="propCab"></tr></thead><tbody id="propCuerpo"></tbody><tfoot id="propPie"></tfoot></table></div>
-      </div>
-    </div>
-
-    <div class="panel" id="p-abi" role="tabpanel" aria-labelledby="tab-abi" hidden>
-      <p class="note"><b>Se te enfermó uno a las once.</b> En vez de llamar a seis personas, publicas el turno y el primero que lo toma se lo queda.</p>
-      <div class="card">
-        <h2>Publicar un turno abierto</h2>
-        <div class="grid2">
-          <div class="fld"><label for="abiDia">Día</label><select id="abiDia"></select></div>
-          <div class="fld"><label for="abiTurno">Turno</label><select id="abiTurno"></select></div>
-          <div class="fld"><label for="abiPuesto">Puesto</label><input type="text" id="abiPuesto" placeholder="Garzón"></div>
-          <div class="fld"><label for="abiNota">Nota</label><input type="text" id="abiNota" placeholder="reemplazo por licencia"></div>
-        </div>
-        <div class="acciones" style="margin-top:14px"><button class="act primary" id="btnAbrir">Publicar</button></div>
-        <label class="ctrl" style="margin-top:12px;display:flex;gap:8px;align-items:flex-start;max-width:60ch">
-          <input type="checkbox" id="bloqTope" style="width:auto;margin-top:3px">
-          <span>No dejar que alguien tome un turno si <b>se pasa de sus horas contratadas</b>.
-          <i>Si lo dejas apagado, igual te aviso quién quedaría pasado, pero lo puede tomar.</i></span>
-        </label>
-      </div>
-      <div class="card">
-        <h2>Publicados</h2>
-        <p class="hint">Se actualiza solo cuando alguien lo toma desde su teléfono.</p>
-        <div class="abi" id="abiLista"></div>
       </div>
     </div>
 
@@ -298,6 +278,7 @@
         <div class="fld"><label>Duración</label><input type="text" id="dDura" class="n" readonly tabindex="-1"></div>
       </div>
       <div class="fldrow">
+        <div class="fld"><label for="dPersona">Quién lo cubre</label><select id="dPersona"></select></div>
         <div class="fld"><label for="dPlantilla">Plantilla</label><select id="dPlantilla"></select></div>
         <div class="fld"><label for="dPuesto">Puesto</label><select id="dPuesto"></select></div>
       </div>
@@ -324,8 +305,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
-<script src="datos.js?v=50"></script>
-<script src="app.js?v=52"></script>
+<script src="datos.js?v=53"></script>
+<script src="app.js?v=53"></script>
 
 
 </body>
