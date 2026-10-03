@@ -477,8 +477,13 @@ td.mcel{padding:2px}
 :root[data-theme="dark"] .mcel .mbl[data-c="3"]{background:#353050;color:#cec8e6}
 :root[data-theme="dark"] .mcel .mbl[data-c="4"]{background:#2f3a24;color:#cfdcbb}
 
-/* Columna fina entre domingo y lunes: parte el mes en semanas legibles. */
-.corte{width:8px;min-width:8px;padding:0;background:var(--surface-3);border:0}
+/* Columna fina entre domingo y lunes: parte el mes en semanas legibles.
+   Va con el mismo peso que `table.mes thead th`, que fija 46px de ancho
+   mínimo para que quepa «08:00»: sin esta especificidad, el separador se
+   comía 46px por semana. Medido en el navegador, no supuesto. */
+table.mes thead th.corte,
+table.mes td.corte{width:8px;min-width:8px;max-width:8px;padding:0;
+  background:var(--surface-3);border:0}
 
 /* Fila al pie con las horas de cada día y el total del mes. */
 tr.piemes th,tr.piemes td{background:var(--surface-2);font-weight:600;position:sticky;bottom:0}
