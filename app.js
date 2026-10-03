@@ -511,6 +511,7 @@ function abrirTurno(p, fecha, asig) {
   }
   if (esAus) $('#dAusencia').value = asig.ausencia;
   pestañaDlg(!esAus);
+  ajustarAusencia();
   duraDlg();
   $('#dlgTurno').showModal();
   setTimeout(() => $('#dEntra').focus(), 30);
@@ -520,6 +521,13 @@ function pestañaDlg(turno) {
   $('#paneTurno').hidden = !turno; $('#paneAus').hidden = turno;
   $('#tabTurno').classList.toggle('primary', turno);
   $('#tabAus').classList.toggle('primary', !turno);
+}
+
+// Una ausencia es DE ALGUIEN: en un turno sin asignar no significa nada.
+function ajustarAusencia() {
+  const hayPersona = !!$('#dPersona').value;
+  $('#tabAus').hidden = !hayPersona;
+  if (!hayPersona) pestañaDlg(true);
 }
 
 async function guardarDlg() {
@@ -1987,6 +1995,7 @@ function conectarApp() {
   on('#btnDeshacer', 'click', deshacer);
 
   /* --- el diálogo del turno --- */
+  on('#dPersona', 'change', ajustarAusencia);
   on('#tabTurno', 'click', () => pestañaDlg(true));
   on('#tabAus',   'click', () => pestañaDlg(false));
   on('#dCancelar','click', () => $('#dlgTurno').close());
