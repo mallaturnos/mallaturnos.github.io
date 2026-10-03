@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=22">
+<link rel="stylesheet" href="estilo.css?v=24">
 </head>
 <body>
 
@@ -145,6 +145,9 @@
       <div class="card">
         <h2>Cuánta gente tienes, hora por hora</h2>
         <p class="hint">El número es la gente en piso. <b>Rojo</b> = falta, <b>ámbar</b> = va justo, <b>verde</b> = hay holgura. Se compara con lo que definas abajo.</p>
+        <div class="acciones" style="margin-bottom:12px">
+          <select id="cobPuesto" aria-label="Ver cobertura de"></select>
+        </div>
         <div class="kpis" id="cobKpis" style="margin-bottom:14px"></div>
         <div class="scroll" style="border:0;background:transparent">
           <div class="cov" id="cobertura"></div>
@@ -153,11 +156,14 @@
       </div>
       <div class="card">
         <h2>Cuánta necesitas</h2>
-        <p class="hint">Dos perfiles, porque un martes no se parece a un sábado. Edita y la tabla de arriba se recalcula sola.</p>
+        <p class="hint">Un día a la vez y <b>por puesto</b>, porque el viernes no se parece al domingo ni la cocina a los garzones. Llena uno y cópialo a los demás.</p>
         <div class="scroll" style="border:0;background:transparent">
           <div class="covscale"><div></div><div id="escala2"></div></div>
-          <div class="needrow"><div class="covday">L–J</div><div id="needSem"></div></div>
-          <div class="needrow"><div class="covday">V–D</div><div id="needFin"></div></div>
+          <div class="acciones" id="cobDias" style="margin-bottom:10px"></div>
+          <div id="needDia"></div>
+          <div class="acciones" style="margin-top:12px">
+            <button class="act" id="btnCopiarDotacion">Copiar este día a los demás</button>
+          </div>
         </div>
       </div>
       <div class="card">
@@ -244,8 +250,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=22"></script>
-<script src="datos.js?v=22"></script>
-<script src="app.js?v=22"></script>
+<script src="config.js?v=24"></script>
+<script src="datos.js?v=24"></script>
+<script src="app.js?v=24"></script>
 </body>
 </html>

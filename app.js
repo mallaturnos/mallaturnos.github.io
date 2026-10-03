@@ -37,7 +37,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
-            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', dotacion:{}, canal:null };
+            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobPuesto:'', cobDia:'0', dotacion:{}, canal:null };
 
 // La franja horaria no se fija a mano: sale de los turnos que tenga el local.
 // Un café que cierra a las 19 no tiene por qué mirar columnas hasta la 1 AM.
@@ -47,13 +47,19 @@ function franja() {
   const fin = Math.ceil(Math.max(...S.turnos.map(t => Number(t.fin))));
   return { h0: Math.max(0, ini), h1: Math.min(ini + 24, Math.max(fin, ini + 1)) };
 }
-const perfilDe = fecha => {
-  const d = new Date(fecha + 'T00:00:00'), i = (d.getDay() + 6) % 7;
-  return i <= 3 ? 'semana' : 'finde';          // L–J y V–D, como en el prototipo
+// Un perfil por día de la semana: 0 = lunes … 6 = domingo. Viernes, sábado y
+// domingo no se parecen en nada, y meterlos en un mismo "fin de semana"
+// obliga a poner un número que no sirve para ninguno de los tres.
+const perfilDe = fecha => String((new Date(fecha + 'T00:00:00').getDay() + 6) % 7);
+// La dotación va POR PUESTO: con puesto vacío se suman todos.
+const necesita = (perfil, puesto, hora) => {
+  const d = S.dotacion[perfil] || {};
+  if (puesto) return (d[puesto] || {})[hora] || 0;
+  return Object.values(d).reduce((s, porHora) => s + (porHora[hora] || 0), 0);
 };
-const necesita = (perfil, hora) => (S.dotacion[perfil] || {})[hora] || 0;
 // cuánta gente hay en piso a esa hora, contando que un turno puede cruzar la medianoche
-const enPiso = (fecha, hora) => S.personas.reduce((n, p) => {
+const enPiso = (fecha, hora, puesto) => S.personas.reduce((n, p) => {
+  if (puesto && ((p.rol||'').trim() || 'Sin puesto') !== puesto) return n;
   const a = asigDe(p.id, fecha); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
   return n + (t && Number(t.inicio) <= hora && hora < Number(t.fin) ? 1 : 0);
 }, 0);
@@ -192,7 +198,11 @@ async function cargar() {
   S.asign = {}; (asign||[]).forEach(a => { S.asign[a.persona_id + '|' + a.fecha] = a; });
   S.marcas = {}; (marcas||[]).forEach(m => { S.marcas[m.persona_id + '|' + m.fecha] = m; });
   S.dias = {};   (dias||[]).forEach(d => { S.dias[d.fecha] = d; });
-  S.dotacion = {}; (dot||[]).forEach(x => { (S.dotacion[x.perfil] = S.dotacion[x.perfil] || {})[x.hora] = x.cantidad; });
+  S.dotacion = {};
+  (dot||[]).forEach(x => {
+    const perfil = S.dotacion[x.perfil] = S.dotacion[x.perfil] || {};
+    (perfil[x.puesto || ''] = perfil[x.puesto || ''] || {})[x.hora] = x.cantidad;
+  });
 }
 
 async function refrescar() { await cargar(); pintarTodo(); }
@@ -513,6 +523,15 @@ function pintarTurnos() {
 
 /* ================= COBERTURA Y COSTO ================= */
 function pintarCobertura() {
+  const selC = $('#cobPuesto');
+  if (selC) {
+    const ps = puestos();
+    selC.innerHTML = '<option value="">Todos los puestos juntos</option>' +
+      ps.map(x => `<option value="${esc(x)}">Solo ${esc(x)}</option>`).join('');
+    if (S.cobPuesto && !ps.includes(S.cobPuesto)) S.cobPuesto = '';
+    selC.value = S.cobPuesto;
+    selC.classList.toggle('activo', !!S.cobPuesto);
+  }
   const { h0, h1 } = franja(), f = fechas(), horas = [];
   for (let h = h0; h < h1; h++) horas.push(h);
 
@@ -527,7 +546,7 @@ function pintarCobertura() {
   f.forEach((fe, d) => {
     const perfil = perfilDe(fe);
     const celdas = horas.map(h => {
-      const n = enPiso(fe, h), req = necesita(perfil, h);
+      const n = enPiso(fe, h, S.cobPuesto), req = necesita(perfil, S.cobPuesto, h);
       if (req) hayDotacion = true;
       let cls = '';
       if (!req) cls = n ? 'over' : '';
@@ -541,26 +560,45 @@ function pintarCobertura() {
     cont.appendChild(el('div','covrow', `<div class="covday">${DIAS[d]}</div><div class="covbars">${celdas}</div>`));
   });
 
-  // editores de dotación
-  [['needSem','semana'],['needFin','finde']].forEach(([id, perfil]) => {
-    const box = $('#' + id); box.innerHTML = '';
-    horas.forEach(h => {
-      const i = document.createElement('input');
-      i.type = 'number'; i.min = 0; i.max = 99; i.value = necesita(perfil, h);
-      i.setAttribute('aria-label', `Necesidad ${perfil === 'semana' ? 'lunes a jueves' : 'viernes a domingo'}, ${((h%24)+24)%24}:00`);
-      let t = null;
-      i.addEventListener('input', () => {
-        clearTimeout(t);
-        t = setTimeout(async () => {
-          const v = Number(i.value) || 0;
-          (S.dotacion[perfil] = S.dotacion[perfil] || {})[h] = v;
-          try { await DATOS.guardarDotacion(S.local.id, perfil, h, v); pintarCobertura(); }
-          catch (e) { error(e); }
-        }, 600);
-      });
-      box.appendChild(i);
-    });
+  // editores: se edita UN día a la vez, con una fila por puesto
+  const ps = puestos();
+  const tabs = $('#cobDias'); tabs.innerHTML = '';
+  DIAS.forEach((d, i) => {
+    const b = el('button','act' + (String(i) === S.cobDia ? ' primary' : ''), d);
+    b.addEventListener('click', () => { S.cobDia = String(i); pintarCobertura(); });
+    tabs.appendChild(b);
   });
+
+  const box = $('#needDia'); box.innerHTML = '';
+  if (!ps.length) {
+    box.innerHTML = '<p class="vacio">Agrega gente al equipo y acá defines cuánta necesitas de cada puesto.</p>';
+  } else {
+    ps.forEach(puesto => {
+      const fila = el('div','needrow');
+      const celdas = el('div');
+      fila.appendChild(el('div','covday', esc(puesto)));
+      fila.appendChild(celdas);
+      box.appendChild(fila);
+      celdas.style.gridTemplateColumns = `repeat(${horas.length},1fr)`;
+      horas.forEach(h => {
+        const i = document.createElement('input');
+        i.type = 'number'; i.min = 0; i.max = 99; i.value = necesita(S.cobDia, puesto, h);
+        i.setAttribute('aria-label', `${puesto}, ${DIAS[Number(S.cobDia)]}, ${((h%24)+24)%24}:00`);
+        let t = null;
+        i.addEventListener('input', () => {
+          clearTimeout(t);
+          t = setTimeout(async () => {
+            const v = Number(i.value) || 0;
+            const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
+            (pf[puesto] = pf[puesto] || {})[h] = v;
+            try { await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, h, v); pintarCobertura(); }
+            catch (e) { error(e); }
+          }, 600);
+        });
+        celdas.appendChild(i);
+      });
+    });
+  }
 
   // costo sobre venta, día por día
   const obj = Number(S.local.objetivo_pct) || 30;
@@ -1124,6 +1162,22 @@ function conectarApp() {
     setTimeout(() => { $('#msgSem').textContent = ''; }, 5000);
   });
 
+  // copiar la dotación de un día a los demás, para no teclear siete veces
+  on('#btnCopiarDotacion', 'click', async () => {
+    const dia = DIAS[Number(S.cobDia)];
+    if (!confirm(`Copiar la dotación de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
+    const origen = S.dotacion[S.cobDia] || {};
+    try {
+      for (let d = 0; d < 7; d++) {
+        if (String(d) === S.cobDia) continue;
+        for (const puesto of Object.keys(origen))
+          for (const h of Object.keys(origen[puesto]))
+            await DATOS.guardarDotacion(S.local.id, String(d), puesto, Number(h), origen[puesto][h]);
+      }
+      await refrescar();
+    } catch (e) { error(e); }
+  });
+  on('#cobPuesto', 'change', ev => { S.cobPuesto = ev.target.value; pintarCobertura(); });
   on('#objetivoPct', 'change', async ev => {
     const v = Number(ev.target.value) || 30;
     try { S.local = await DATOS.guardarLocal(S.local.id, { objetivo_pct: v }); pintarCobertura(); pintarResumenSemana(); }
