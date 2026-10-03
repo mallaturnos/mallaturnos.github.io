@@ -562,7 +562,7 @@ function pintarCobertura() {
 
   // editores: se edita UN día a la vez, con una fila por puesto
   const ps = puestos();
-  const tabs = $('#cobDias'); tabs.innerHTML = '';
+  const tabs = $('#cobTabs'); tabs.innerHTML = '';
   DIAS.forEach((d, i) => {
     const b = el('button','act' + (String(i) === S.cobDia ? ' primary' : ''), d);
     b.addEventListener('click', () => { S.cobDia = String(i); pintarCobertura(); });
