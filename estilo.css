@@ -325,3 +325,10 @@ button.ofrecer:hover{border-color:var(--accent);color:var(--accent)}
   border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--fg);max-width:220px}
 #selLocal:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 .diatabs button{min-width:52px;padding:8px 10px}
+#detNecesita{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+#detNecesita summary{cursor:pointer;font-size:.8125rem;font-weight:600;color:var(--accent);
+  list-style:none;display:flex;align-items:center;gap:6px}
+#detNecesita summary::-webkit-details-marker{display:none}
+#detNecesita summary::before{content:"▸";transition:transform .15s}
+#detNecesita[open] summary::before{transform:rotate(90deg)}
+#detNecesita summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}

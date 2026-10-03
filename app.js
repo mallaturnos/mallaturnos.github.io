@@ -237,6 +237,11 @@ function pintarPlan() {
   $('#cajaDia').hidden    = S.modo !== 'dia';
   $('#cajaMes').hidden    = S.modo !== 'mes';
   $('#btnCopiarSem').hidden = S.modo !== 'semana';
+  // la franja de cobertura vive junto a la malla, no en otra pestaña:
+  // sirve MIENTRAS planificas, no después
+  const caja = $('#cardCobertura');
+  if (caja) caja.hidden = (S.modo === 'mes');
+  if (S.modo !== 'mes') pintarCobertura();
   if (S.modo === 'dia')  return pintarDia();
   if (S.modo === 'mes')  return pintarMes();
   return pintarSemana();
@@ -543,7 +548,9 @@ function pintarCobertura() {
 
   let faltan = 0, sobran = 0, hayDotacion = false;
   const cont = $('#cobertura'); cont.innerHTML = '';
-  f.forEach((fe, d) => {
+  const diasVista = S.modo === 'dia' ? [iso(S.dia)] : f;
+  diasVista.forEach(fe => {
+    const d = (new Date(fe + 'T00:00:00').getDay() + 6) % 7;
     const perfil = perfilDe(fe);
     const celdas = horas.map(h => {
       const n = enPiso(fe, h, S.cobPuesto), req = necesita(perfil, S.cobPuesto, h);
@@ -685,7 +692,7 @@ function pintarPropinas() {
         clearTimeout(t);
         t = setTimeout(async () => {
           try { S.dias[fe] = await DATOS.guardarDia(S.local.id, fe, { [inp.dataset.c]: dePlata(inp.value) });
-                pintarPropinas(); pintarResumenSemana(); }
+                pintarPropinas(); pintarCobertura(); pintarResumenSemana(); }
           catch (e) { error(e); }
         }, 700);
       });
@@ -930,7 +937,7 @@ function pintarLinks() {
 /* ================= PINTAR TODO ================= */
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
-  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarCobertura(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
+  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
 }
 
 /* ================= VISTA DEL TRABAJADOR ================= */
@@ -1122,7 +1129,7 @@ async function verJefe() {
 
 function conectarApp() {
   // pestañas
-  const TABS = ['sem','eq','cob','prop','abi','conf','link'];
+  const TABS = ['sem','eq','prop','abi','conf','link'];
   TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
     TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
   }));

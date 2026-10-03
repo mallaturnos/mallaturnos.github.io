@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=25">
+<link rel="stylesheet" href="estilo.css?v=26">
 </head>
 <body>
 
@@ -84,7 +84,6 @@
     <nav role="tablist" aria-label="Secciones">
       <button role="tab" id="tab-sem"  aria-selected="true"  aria-controls="p-sem">Semana</button>
       <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
-      <button role="tab" id="tab-cob" aria-selected="false" aria-controls="p-cob">Cobertura</button>
       <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
       <button role="tab" id="tab-abi"  aria-selected="false" aria-controls="p-abi">Turnos abiertos</button>
       <button role="tab" id="tab-conf" aria-selected="false" aria-controls="p-conf">Confirmaciones</button>
@@ -116,6 +115,30 @@
         <div class="scroll" id="cajaMes" hidden><table class="mes"><thead><tr id="mesCab"></tr></thead><tbody id="mesCuerpo"></tbody></table></div>
         <p class="hint" style="margin-top:12px">Cambia cualquier celda y se guarda solo. Las alertas aparecen al lado de cada persona.</p>
       </div>
+
+      <div class="card" id="cardCobertura">
+        <h2>¿Te alcanza la gente?</h2>
+        <p class="hint">El número es la gente en piso. <b>Rojo</b> = falta, <b>ámbar</b> = justo, <b>verde</b> = sobra. Se compara con lo que necesitas, abajo.</p>
+        <div class="acciones" style="margin-bottom:10px">
+          <select id="cobPuesto" aria-label="Ver cobertura de"></select>
+        </div>
+        <div class="scroll" style="border:0;background:transparent">
+          <div class="cov" id="cobertura"></div>
+          <div class="covscale"><div></div><div id="escala"></div></div>
+        </div>
+        <details id="detNecesita">
+          <summary>Definir cuánta gente necesito</summary>
+          <p class="hint" style="margin-top:10px">Un día a la vez y <b>por puesto</b>. Llena uno y cópialo a los demás.</p>
+          <div class="scroll" style="border:0;background:transparent">
+            <div class="covscale"><div></div><div id="escala2"></div></div>
+            <div class="acciones diatabs" id="cobTabs" style="margin-bottom:10px"></div>
+            <div id="needDia"></div>
+          </div>
+          <div class="acciones" style="margin-top:12px">
+            <button class="act" id="btnCopiarDotacion">Copiar este día a los demás</button>
+          </div>
+        </details>
+      </div>
       <div class="card">
         <h2>Por persona</h2>
         <ul class="people" id="semPersonas"></ul>
@@ -141,42 +164,6 @@
       </div>
     </div>
 
-    <div class="panel" id="p-cob" role="tabpanel" aria-labelledby="tab-cob" hidden>
-      <div class="card">
-        <h2>Cuánta gente tienes, hora por hora</h2>
-        <p class="hint">El número es la gente en piso. <b>Rojo</b> = falta, <b>ámbar</b> = va justo, <b>verde</b> = hay holgura. Se compara con lo que definas abajo.</p>
-        <div class="acciones" style="margin-bottom:12px">
-          <select id="cobPuesto" aria-label="Ver cobertura de"></select>
-        </div>
-        <div class="kpis" id="cobKpis" style="margin-bottom:14px"></div>
-        <div class="scroll" style="border:0;background:transparent">
-          <div class="cov" id="cobertura"></div>
-          <div class="covscale"><div></div><div id="escala"></div></div>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Cuánta necesitas</h2>
-        <p class="hint">Un día a la vez y <b>por puesto</b>, porque el viernes no se parece al domingo ni la cocina a los garzones. Llena uno y cópialo a los demás.</p>
-        <div class="scroll" style="border:0;background:transparent">
-          <div class="covscale"><div></div><div id="escala2"></div></div>
-          <div class="acciones diatabs" id="cobTabs" style="margin-bottom:10px"></div>
-          <div id="needDia"></div>
-          <div class="acciones" style="margin-top:12px">
-            <button class="act" id="btnCopiarDotacion">Copiar este día a los demás</button>
-          </div>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Costo de personal sobre la venta</h2>
-        <p class="hint">El indicador que de verdad mira un dueño. La venta se carga en la pestaña <b>Propinas</b>.</p>
-        <div class="grid2" style="max-width:220px">
-          <div class="fld"><label for="objetivoPct">Objetivo %</label>
-            <input class="n" type="number" id="objetivoPct" min="1" max="100" step="1"></div>
-        </div>
-        <ul class="people" id="cobDias" style="margin-top:14px"></ul>
-      </div>
-    </div>
-
     <div class="panel" id="p-prop" role="tabpanel" aria-labelledby="tab-prop" hidden>
       <p class="note"><b>Esto no lo decide el jefe.</b> Por el <b>art. 64</b> del Código del Trabajo, cómo se reparte la propina lo acuerdan los trabajadores. Esta pantalla solo aplica el acuerdo: horas × factor, día por día.</p>
       <div class="card">
@@ -184,6 +171,17 @@
         <p class="hint">Separado en efectivo y tarjeta: la de tarjeta sale del cierre de la máquina y el equipo la puede contrastar.</p>
         <div id="propDias"></div>
         <div class="kpis" id="propKpis" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
+        <h2>Costo de personal sobre la venta</h2>
+        <p class="hint">El indicador que de verdad mira un dueño.</p>
+        <div class="kpis" id="cobKpis" style="margin-bottom:14px"></div>
+        <div class="grid2" style="max-width:220px">
+          <div class="fld"><label for="objetivoPct">Objetivo %</label>
+            <input class="n" type="number" id="objetivoPct" min="1" max="100" step="1"></div>
+        </div>
+        <ul class="people" id="cobDias" style="margin-top:14px"></ul>
       </div>
       <div class="card">
         <h2>El reparto</h2>
@@ -250,8 +248,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=25"></script>
-<script src="datos.js?v=25"></script>
-<script src="app.js?v=25"></script>
+<script src="config.js?v=26"></script>
+<script src="datos.js?v=26"></script>
+<script src="app.js?v=26"></script>
 </body>
 </html>
