@@ -38,7 +38,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
-            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobPuesto:'', cobDia:'0', dotacion:{}, canal:null,
+            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
             hist:[], histDot:[], histEq:[], recien:null };
 
 /* ---------- deshacer ----------
@@ -1641,7 +1641,6 @@ function conectarApp() {
   });
   on('#btnDeshacerEq', 'click', deshacerEq);
 
-  on('#cobPuesto', 'change', ev => { S.cobPuesto = ev.target.value; pintarCobertura(); });
   on('#objetivoPct', 'change', async ev => {
     const v = Number(ev.target.value) || 30;
     try { S.local = await DATOS.guardarLocal(S.local.id, { objetivo_pct: v }); pintarCobertura(); pintarResumenSemana(); }
