@@ -541,3 +541,11 @@ table.neces .turnoEd .num{display:block;font-family:var(--font-mono);font-weight
   font-size:.6875rem;opacity:.6}
 table.neces .turnoEd:hover{background:var(--surface-2);color:var(--accent)}
 table.neces .turnoEd.nuevo{font-weight:500;color:var(--fg-faint);border:1px dashed var(--line)}
+/* Muestra del color del puesto, para elegirlo viéndolo y no por número. */
+.rowline .muestra{align-self:end;padding:5px 9px;border-radius:5px;font-size:.75rem;
+  font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rowline .muestra[data-c="1"]{background:#cde3e5;color:#0f4247}
+.rowline .muestra[data-c="2"]{background:#ecdcc0;color:#57411a}
+.rowline .muestra[data-c="3"]{background:#d7d1e6;color:#37305a}
+.rowline .muestra[data-c="4"]{background:#dde5cf;color:#3a4a26}
+table.neces th .turnoEd{font-weight:500}

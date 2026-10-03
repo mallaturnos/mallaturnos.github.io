@@ -75,6 +75,30 @@
   const activarPersonas = (ids, activo) =>
     pedir(sb.from('personas').update({ activo: !!activo }).in('id', ids).select());
 
+  /* ---------- catálogo de puestos ----------
+     Mientras no se aplique `arreglo-puestos.sql` la tabla no existe. La app
+     tiene que seguir funcionando igual, asi que esta lectura DEVUELVE VACIO en
+     vez de reventar: los puestos se siguen deduciendo de la gente, como antes. */
+  const puestos = async (localId) => {
+    try {
+      return await pedir(sb.from('puestos').select('*').eq('local_id', localId)
+                           .eq('activo', true).order('orden').order('nombre'));
+    } catch (e) {
+      if (/no existe|does not exist|schema cache|falta un cambio/i.test(e.message || '')) return [];
+      throw e;
+    }
+  };
+  const crearPuesto = (localId, p) =>
+    pedir(sb.from('puestos').insert(Object.assign({ local_id: localId }, p)).select().single());
+  const guardarPuesto = (id, campos) =>
+    pedir(sb.from('puestos').update(campos).eq('id', id).select().single());
+  const quitarPuesto = (id) =>
+    pedir(sb.from('puestos').update({ activo: false }).eq('id', id).select().single());
+  // Renombrar arrastra a la gente y a los turnos ya asignados, en la base, de
+  // una sola vez: a mano habria que editar ficha por ficha.
+  const renombrarPuesto = (id, nombre) =>
+    pedir(sb.rpc('renombrar_puesto', { p_puesto: id, p_nombre: nombre }));
+
   /* ---------- catálogo de turnos ---------- */
   const turnos = (localId) =>
     pedir(sb.from('turnos').select('*').eq('local_id', localId).order('orden').order('inicio'));
@@ -288,6 +312,7 @@
     miLocal, misLocales, crearLocal, guardarLocal, dejarDeEscuchar,
     personas, crearPersona, guardarPersona, quitarPersona, activarPersonas,
     turnos, crearTurno, guardarTurno, quitarTurno,
+    puestos, crearPuesto, guardarPuesto, quitarPuesto, renombrarPuesto,
     asignaciones, crearAsignacion, editarAsignacion, borrarAsignacion, ponerAusencia, limpiarDia,
     marcas, marcarComoJefe, horasPagadas, cerrarDia, copiarSemana,
     borrarAsignaciones, reponerAsignaciones,

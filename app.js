@@ -45,7 +45,7 @@ const masDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
-const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
+const S = { local:null, personas:[], turnos:[], puestos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
             lunes:lunesDe(new Date()), mes:new Date(), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
             hist:[], histDot:[], histEq:[], recien:null, relojDia:null };
 
@@ -197,10 +197,18 @@ const solapan = (a, t) => Number(a.inicio) < Number(t.fin) && Number(t.inicio) <
 // Todos los puestos que existen: los habituales del equipo MAS los que se usan
 // en alguna asignacion. Sin esto, un puesto que solo se trabaja de vez en
 // cuando no aparece para elegirlo ni para pedir dotacion.
-const puestosConocidos = () => [...new Set([
-  ...S.personas.map(p => (p.rol || '').trim()),
-  ...Object.values(S.asign).flat().map(a => (a.puesto || '').trim()),
-].filter(Boolean))].sort();
+// Del catálogo si lo hay. Si todavía no se aplicó `arreglo-puestos.sql`, se
+// siguen deduciendo de la gente y de los turnos, como antes: la app no puede
+// quedar inservible por un SQL pendiente.
+const puestosConocidos = () => {
+  if (S.puestos.length) return S.puestos.map(x => x.nombre);
+  return [...new Set([
+    ...S.personas.map(p => (p.rol || '').trim()),
+    ...Object.values(S.asign).flat().map(a => (a.puesto || '').trim()),
+  ].filter(Boolean))].sort();
+};
+const puestoCat = nombre => S.puestos.find(x =>
+  normal(x.nombre) === normal(nombre)) || null;
 
 // El filtro por puesto aplica a las tres vistas del plan. No toca las propinas
 // ni las confirmaciones: el reparto tiene que considerar SIEMPRE a todo el
@@ -351,13 +359,14 @@ function pintarLocales() {
 /* ================= CARGAR TODO ================= */
 async function cargar() {
   const r = rango(), desde = r.desde, hasta = r.hasta;
-  const [personas, turnos, asign, marcas, dias, abiertos, dot] = await Promise.all([
-    DATOS.personas(S.local.id), DATOS.turnos(S.local.id),
+  const [personas, turnos, puestosCat, asign, marcas, dias, abiertos, dot] = await Promise.all([
+    DATOS.personas(S.local.id), DATOS.turnos(S.local.id), DATOS.puestos(S.local.id),
     DATOS.asignaciones(S.local.id, desde, hasta), DATOS.marcas(S.local.id, desde, hasta),
     DATOS.dias(S.local.id, desde, hasta), DATOS.abiertos(S.local.id, desde),
     DATOS.dotacion(S.local.id),
   ]);
   S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
+  S.puestos = puestosCat || [];
   // Un dia puede traer VARIOS turnos de la misma persona (turno partido), asi
   // que cada casilla guarda una LISTA, no una fila.
   S.asign = {};
@@ -1061,6 +1070,65 @@ function pintarEquipo() {
   });
 }
 
+function pintarPuestos() {
+  const box = $('#eqPuestos'); if (!box) return;
+  box.innerHTML = '';
+  if (!S.puestos.length) {
+    box.innerHTML = '<p class="vacio">Todavía no hay lista de puestos. '
+      + 'Si acabas de pegar el SQL, recarga; si no, agrega el primero abajo.</p>';
+    return;
+  }
+  S.puestos.forEach(q => {
+    const row = el('div','rowline', `
+      ${filaCampo('Nombre','text',q.nombre,'data-k="nombre"')}
+      <div class="fld"><label>Color</label>
+        <select data-k="color">${[1,2,3,4].map(c =>
+          `<option value="${c}"${Number(q.color) === c ? ' selected' : ''}>Color ${c}</option>`).join('')}</select></div>
+      ${filaCampo('Colación (min)','number',q.colacion == null ? '' : Math.round(q.colacion*60),
+                  'data-k="colacion" class="n" min="0" max="120" step="15" placeholder="la del turno"')}
+      <button class="mini" data-del="1">Quitar</button>
+      <div class="muestra" data-c="${q.color}">${esc(q.nombre)}</div>`);
+    row.dataset.puesto = q.id;
+    box.appendChild(row);
+
+    const m = $('#msgPuestos');
+    row.querySelectorAll('[data-k]').forEach(inp => {
+      let t = null;
+      const guardar = async () => {
+        const k = inp.dataset.k;
+        try {
+          if (k === 'nombre') {
+            const v = inp.value.trim();
+            if (!v || v === q.nombre) return;
+            // Renombrar lo hace la base de una vez, porque tiene que arrastrar
+            // a la gente y a los turnos ya asignados.
+            await DATOS.renombrarPuesto(q.id, v);
+            await refrescar();
+            m.textContent = 'Listo: se renombró también en la gente y en los turnos.'; m.className = 'msg ok';
+            setTimeout(() => { m.textContent = ''; }, 5000);
+          } else {
+            const v = k === 'colacion'
+              ? (inp.value === '' ? null : (Number(inp.value) || 0) / 60)
+              : Number(inp.value);
+            Object.assign(q, await DATOS.guardarPuesto(q.id, { [k]: v }));
+            pintarPuestos(); pintarTodo();
+          }
+        } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+      };
+      inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input',
+        () => { clearTimeout(t); t = setTimeout(guardar, 700); });
+    });
+    row.querySelector('[data-del]').addEventListener('click', async () => {
+      const usan = S.personas.filter(p => normal(p.rol) === normal(q.nombre)).length;
+      if (!confirm(`¿Quitar el puesto «${q.nombre}»?\n\n`
+        + (usan ? `Lo tienen ${usan} ${usan === 1 ? 'persona' : 'personas'}. No se les borra: `
+                + 'siguen con ese puesto escrito, pero deja de ofrecerse en las listas.\n\n' : '')
+        + 'No se borra nada de lo ya planificado.')) return;
+      try { await DATOS.quitarPuesto(q.id); await refrescar(); } catch (e) { error(e); }
+    });
+  });
+}
+
 function pintarTurnos() {
   const box = $('#eqTurnos'); box.innerHTML = '';
   S.turnos.forEach(t => {
@@ -1154,7 +1222,11 @@ function pintarCobertura() {
     const tb = el('tbody');
     ps.forEach(puesto => {
       const tr = el('tr');
-      tr.innerHTML = `<th scope="row">${esc(puesto)}</th>` +
+      const q = puestoCat(puesto);
+      tr.innerHTML = `<th scope="row">${q
+        ? `<button type="button" class="turnoEd" data-puesto="${q.id}"
+             title="Editar este puesto">${esc(puesto)}</button>`
+        : esc(puesto)}</th>` +
         ts.map(t => `<td><input class="n" type="number" min="0" max="99"
           value="${necesita(S.cobDia, puesto, t.id)}" data-t="${t.id}"
           aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('')
@@ -1181,6 +1253,14 @@ function pintarCobertura() {
     // abrir el turno desde su propio título, o crear uno nuevo
     tabla.querySelectorAll('.turnoEd').forEach(b => b.addEventListener('click', () => {
       if (b.dataset.nuevo) return nuevoTurnoRapido();
+      if (b.dataset.puesto) {
+        $('#tab-eq').click();
+        const fila = document.querySelector(`#eqPuestos [data-puesto="${b.dataset.puesto}"]`);
+        if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
+          fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
+          const inp = fila.querySelector('input'); if (inp) { inp.focus(); inp.select(); } }
+        return;
+      }
       $('#tab-eq').click();
       const fila = document.querySelector(`#eqTurnos [data-turno="${b.dataset.t}"]`);
       if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
@@ -1617,7 +1697,7 @@ function pintarReloj() {
 /* ================= PINTAR TODO ================= */
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
-  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarReloj(); pintarLinks();
+  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPuestos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarReloj(); pintarLinks();
   pintarDeshacer(); pintarDeshacerDot(); pintarDeshacerEq();
 }
 
@@ -1994,6 +2074,20 @@ function conectarApp() {
   on('#btnDeshacerEq', 'click', deshacerEq);
 
   /* --- cargar el equipo desde una planilla --- */
+  on('#btnPuesto', 'click', async () => {
+    const nombre = prompt('¿Cómo se llama el puesto?\n\nPor ejemplo: Barra, Cocina, Garzón.');
+    if (!nombre || !nombre.trim()) return;
+    try {
+      await DATOS.crearPuesto(S.local.id, { nombre: nombre.trim(),
+        color: (S.puestos.length % 4) + 1, orden: S.puestos.length + 1 });
+      await refrescar();
+    } catch (e) {
+      $('#msgPuestos').textContent = /duplicate|unicos/i.test(e.message)
+        ? 'Ya tienes un puesto con ese nombre.' : e.message;
+      $('#msgPuestos').className = 'msg bad';
+    }
+  });
+
   on('#btnPlantilla', 'click', () => {
     // Punto y coma: es lo que Excel en Chile espera, y así se abre en columnas
     // con doble clic en vez de quedar todo apelmazado en la primera.
