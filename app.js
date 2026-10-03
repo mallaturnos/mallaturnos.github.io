@@ -866,6 +866,123 @@ function pintarMes() {
   $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = '';
 }
 
+/* ---------- cargar el equipo desde una planilla ----------
+   El valor no está en ahorrarle tiempo a Pedro con 8 personas: está en que un
+   local de verdad con 25 YA TIENE su lista en una planilla, y nadie reescribe
+   25 fichas a mano.
+
+   Regla del 17-sep de Pedro: la app no guarda RUT, teléfono ni correo de los
+   trabajadores. El cargador ignora esas columnas Y LO DICE, en vez de
+   tragárselas calladito. Así él puede subir su planilla tal cual, sin
+   limpiarla antes, y entra solo lo que corresponde. */
+
+const COLUMNAS = {
+  nombre:         ['nombre','nombres','nombre completo','trabajador','persona'],
+  rol:            ['puesto','puesto habitual','cargo','rol','funcion','función'],
+  equipo:         ['equipo','grupo','turno fijo'],
+  valor_hora:     ['valor hora','valor por hora','sueldo hora','precio hora','valor_hora'],
+  horas_contrato: ['horas contrato','horas','jornada','horas semanales','horas_contrato'],
+  factor_propina: ['factor propina','factor','propina','factor_propina'],
+};
+// Columnas que NO se cargan aunque vengan. Se avisan aparte, por nombre.
+const VETADAS = ['rut','run','cedula','cédula','dni','telefono','teléfono','fono','celular',
+                 'correo','email','e-mail','mail','direccion','dirección','domicilio',
+                 'fecha nacimiento','nacimiento','edad','cuenta','banco'];
+
+const normal = t => String(t||'').trim().toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+// Un CSV de Excel en Chile sale con punto y coma. Y con comillas cuando el
+// campo trae el separador adentro. Las dos cosas hay que aguantarlas.
+function leerCSV(texto) {
+  texto = texto.replace(/^\uFEFF/, '');                  // Excel pone una marca al inicio
+  const prim = (texto.split(/\r?\n/)[0] || '');
+  const sep = (prim.split(';').length > prim.split(',').length) ? ';' : ',';
+  const filas = []; let campo = '', fila = [], comillas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (comillas) {
+      if (c === '"' && texto[i+1] === '"') { campo += '"'; i++; }
+      else if (c === '"') comillas = false;
+      else campo += c;
+    } else if (c === '"') comillas = true;
+    else if (c === sep) { fila.push(campo); campo = ''; }
+    else if (c === '\n') { fila.push(campo); filas.push(fila); fila = []; campo = ''; }
+    else if (c !== '\r') campo += c;
+  }
+  if (campo !== '' || fila.length) { fila.push(campo); filas.push(fila); }
+  return filas.filter(f => f.some(x => String(x).trim() !== ''));
+}
+
+function analizarPlanilla(texto) {
+  const filas = leerCSV(texto);
+  if (filas.length < 2) return { error: 'La planilla no tiene filas con datos.' };
+
+  const cab = filas[0].map(normal);
+  const mapa = {};                       // campo -> índice de columna
+  Object.entries(COLUMNAS).forEach(([campo, nombres]) => {
+    const i = cab.findIndex(c => nombres.some(n => normal(n) === c));
+    if (i >= 0) mapa[campo] = i;
+  });
+  if (mapa.nombre == null) return { error: 'No encontré una columna «Nombre». Usa la plantilla.' };
+
+  const usadas = new Set(Object.values(mapa));
+  const ignoradas = [], sensibles = [];
+  cab.forEach((c, i) => {
+    if (usadas.has(i) || !c) return;
+    (VETADAS.some(v => c.includes(normal(v))) ? sensibles : ignoradas).push(filas[0][i].trim());
+  });
+
+  const porNombre = {};
+  S.personas.forEach(p => { porNombre[normal(p.nombre)] = p; });
+
+  const nuevas = [], existentes = [], malas = [];
+  filas.slice(1).forEach((f, n) => {
+    const nombre = String(f[mapa.nombre] || '').trim();
+    if (!nombre) { malas.push('fila ' + (n+2) + ': sin nombre'); return; }
+    const d = { nombre };
+    if (mapa.rol != null)    d.rol    = String(f[mapa.rol] || '').trim();
+    if (mapa.equipo != null) d.equipo = String(f[mapa.equipo] || '').trim();
+    if (mapa.valor_hora != null)     d.valor_hora     = Number(soloDigitos(f[mapa.valor_hora])) || 0;
+    if (mapa.horas_contrato != null) d.horas_contrato = Number(String(f[mapa.horas_contrato]||'').replace(',','.')) || 0;
+    if (mapa.factor_propina != null) d.factor_propina = Number(String(f[mapa.factor_propina]||'').replace(',','.')) || 1;
+    const ya = porNombre[normal(nombre)];
+    if (ya) existentes.push({ d, p: ya }); else nuevas.push(d);
+  });
+  return { nuevas, existentes, malas, ignoradas, sensibles };
+}
+
+function pintarPrevia(r) {
+  const caja = $('#previaEq');
+  if (r.error) { caja.innerHTML = `<p class="msg bad">${esc(r.error)}</p>`; return; }
+  const li = [];
+  if (r.nuevas.length)     li.push(`<b>${r.nuevas.length}</b> ${r.nuevas.length === 1 ? 'persona nueva' : 'personas nuevas'}`);
+  if (r.existentes.length) li.push(`<b>${r.existentes.length}</b> que ya ${r.existentes.length === 1 ? 'existe y se actualiza' : 'existen y se actualizan'}`);
+  caja.innerHTML = `
+    <div class="note">
+      <p><b>Esto es lo que va a pasar:</b> ${li.length ? li.join(' · ') : 'nada, no hay filas con nombre'}.</p>
+      ${r.sensibles.length ? `<p>🔒 <b>No se cargan</b> estas columnas, porque la app no guarda esos datos:
+        <b>${r.sensibles.map(esc).join(', ')}</b>.</p>` : ''}
+      ${r.ignoradas.length ? `<p>Se ignoran además, porque no sé qué son: ${r.ignoradas.map(esc).join(', ')}.</p>` : ''}
+      ${r.malas.length ? `<p class="msg bad">${r.malas.map(esc).join(' · ')}</p>` : ''}
+      <div class="acciones" style="margin-top:10px">
+        <button class="act primary" id="btnAplicar">Aplicar</button>
+        <button class="act" id="btnCancelarCarga">Cancelar</button>
+      </div>
+    </div>`;
+  on('#btnCancelarCarga', 'click', () => { caja.innerHTML = ''; });
+  on('#btnAplicar', 'click', async () => {
+    const b = $('#btnAplicar'); b.disabled = true; b.textContent = 'Cargando…';
+    try {
+      for (const d of r.nuevas) await DATOS.crearPersona(S.local.id, Object.assign({ valor_hora:2900, horas_contrato:45, factor_propina:1 }, d));
+      for (const { d, p } of r.existentes) await DATOS.guardarPersona(p.id, d);
+      await refrescar();
+      caja.innerHTML = `<p class="msg ok">Listo: ${r.nuevas.length} nuevas y ${r.existentes.length} actualizadas.</p>`;
+      setTimeout(() => { caja.innerHTML = ''; }, 6000);
+    } catch (e) { b.disabled = false; b.textContent = 'Aplicar'; caja.innerHTML += `<p class="msg bad">${esc(e.message)}</p>`; }
+  });
+}
+
 /* ================= EQUIPO ================= */
 function filaCampo(label, tipo, valor, attrs) {
   if (tipo === 'plata')
@@ -1850,6 +1967,28 @@ function conectarApp() {
     setTimeout(() => { const x = $('#msgEq'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerEq', 'click', deshacerEq);
+
+  /* --- cargar el equipo desde una planilla --- */
+  on('#btnPlantilla', 'click', () => {
+    // Punto y coma: es lo que Excel en Chile espera, y así se abre en columnas
+    // con doble clic en vez de quedar todo apelmazado en la primera.
+    const cab = ['Nombre','Puesto','Equipo','Valor hora','Horas contrato','Factor propina'];
+    const ej  = [['Juana Pérez','Barra','Fijos','3500','45','1'],
+                 ['Luis Soto','Cocina','Por llamado','4000','30','1']];
+    const csv = '\uFEFF' + [cab, ...ej].map(f => f.join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
+    a.download = 'equipo-plantilla.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+  on('#btnCargar', 'click', () => $('#archivoEq').click());
+  on('#archivoEq', 'change', ev => {
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    const lector = new FileReader();
+    lector.onload = () => { pintarPrevia(analizarPlanilla(String(lector.result || ''))); ev.target.value = ''; };
+    lector.onerror = () => { $('#previaEq').innerHTML = '<p class="msg bad">No se pudo leer el archivo.</p>'; };
+    lector.readAsText(f, 'UTF-8');
+  });
 
   // Cerrar el día es cuando se carga la venta. Skello la pide ahí y tiene
   // razón: es el momento en que el jefe ya está haciendo la caja, y no una

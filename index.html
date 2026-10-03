@@ -156,6 +156,15 @@
           <button class="act" id="btnLimpiarEq">Limpiar</button>
           <button class="act" id="btnDeshacerEq" disabled>Deshacer</button>
         </div>
+        <div class="acciones" style="margin-top:10px">
+          <button class="act" id="btnPlantilla">Descargar plantilla</button>
+          <button class="act" id="btnCargar">Cargar desde una planilla</button>
+          <input type="file" id="archivoEq" accept=".csv,text/csv,text/plain" hidden>
+        </div>
+        <p class="hint" style="margin-top:6px">Baja la plantilla, llénala en Excel y guárdala
+          como <b>CSV</b>. Si tu planilla trae RUT, teléfono o correo, <b>esas columnas se ignoran</b>:
+          la app no guarda esos datos.</p>
+        <div id="previaEq"></div>
         <p class="msg" id="msgEq"></p>
         <p class="hint" style="margin-top:8px">«Cerrar la semana al saldo» suma a cada persona la diferencia entre las horas que le planificaste y las de su contrato. Hazlo <b>una vez por semana</b>.</p>
       </div>
@@ -308,7 +317,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=43"></script>
-<script src="app.js?v=47"></script>
+<script src="app.js?v=48"></script>
 
 
 </body>
