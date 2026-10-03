@@ -501,7 +501,12 @@ async function guardarDlg() {
 
   const campos = { turno_id: $('#dPlantilla').value || null, inicio: d.inicio, fin: d.fin,
                    colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim() };
-  const dias = [fecha, ...[...$('#dRepetir').querySelectorAll('[aria-pressed="true"]')].map(b => b.dataset.fe)];
+  // Solo los botones que LLEVAN fecha: el del día del propio turno va marcado
+  // pero sin `data-fe`, y colarlo aquí mandaba a la base una fila con la fecha
+  // vacía. El Set evita además repetir ese mismo día.
+  const marcados = [...$('#dRepetir').querySelectorAll('button[data-fe][aria-pressed="true"]')]
+    .map(b => b.dataset.fe).filter(Boolean);
+  const dias = [...new Set([fecha, ...marcados])];
 
   recordar(asig ? 'el turno de ' + p.nombre + ' del ' + ddmm(fecha)
                 : 'agregar turno a ' + p.nombre);
@@ -525,6 +530,17 @@ async function borrarDlg() {
   } catch (e) { S.hist.pop(); pintarDeshacer(); $('#dlgMsg').textContent = e.message; $('#dlgMsg').className = 'msg bad'; }
 }
 
+async function quitarTurno(p, fecha, id) {
+  const m = $('#msgSem');
+  recordar('quitar el turno de ' + p.nombre + ' del ' + ddmm(fecha));
+  try {
+    await DATOS.borrarAsignacion(id);
+    await refrescar();
+    if (m) { m.textContent = 'Turno quitado. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok'; }
+  } catch (e) { S.hist.pop(); pintarDeshacer(); if (m) { m.textContent = e.message; m.className = 'msg bad'; } }
+  setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 5000);
+}
+
 /* ---------- la casilla: una PILA de bloques ----------
    Skello no usa un desplegable: la casilla vacia dice «Ajouter un shift» y la
    llena muestra un bloque por turno, apilados. Es lo que permite el turno
@@ -543,7 +559,9 @@ function pintarCasilla(p, fe) {
     return `<span class="bloque" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
               role="button" tabindex="0" title="Editar este turno">
               <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b><i>${hfmt(horasAsig(a))} h</i>
-              <em>${esc(pu || 'sin puesto')}</em></span>`;
+              <em>${esc(pu || 'sin puesto')}</em>
+              <button type="button" class="borrarbl" data-borrar="${a.id}" data-fecha="${fe}"
+                title="Quitar este turno" aria-label="Quitar el turno de ${hhmm(a.inicio)}">×</button></span>`;
   }).join('');
 
   return bloques + `<button type="button" class="anadir" data-anadir="${fe}"
@@ -613,6 +631,8 @@ function pintarSemana() {
     // Un solo escuchador por fila: las casillas se repintan enteras y colgarle
     // un escuchador a cada bloque los dejaria huerfanos en cada repintado.
     tr.addEventListener('click', ev => {
+      const papelera = ev.target.closest('[data-borrar]');
+      if (papelera) { ev.stopPropagation(); return quitarTurno(p, papelera.dataset.fecha, papelera.dataset.borrar); }
       const añadir = ev.target.closest('[data-anadir]');
       if (añadir) return abrirTurno(p, añadir.dataset.anadir, null);
       const bloque = ev.target.closest('[data-asig]');

@@ -441,3 +441,14 @@ tr.grupo.sinpuesto th .ojo{font-family:var(--font-body);font-weight:500;text-tra
 @media (max-width:560px){ .dlg form{padding:16px} }
 /* El día del propio turno va marcado y bloqueado: se ve que está incluido. */
 .diapills .dia:disabled{opacity:1;cursor:default}
+
+/* Basurero por bloque: borrar sin abrir el diálogo. Va SIEMPRE visible y no
+   solo al pasar el mouse, porque en el teléfono no existe el «pasar por
+   encima» y Pedro trabaja desde el teléfono. */
+.cell .bloque{padding-right:18px}
+.cell .bloque b{white-space:nowrap}
+.cell .borrarbl{position:absolute;top:1px;right:1px;width:16px;height:16px;line-height:14px;
+  padding:0;border:0;border-radius:4px;background:transparent;color:inherit;opacity:.45;
+  cursor:pointer;font-size:.8125rem;font-family:var(--font-body)}
+.cell .borrarbl:hover{opacity:1;background:var(--bad-soft);color:var(--bad)}
+.cell .borrarbl:focus-visible{opacity:1;outline:2px solid var(--accent);outline-offset:1px}
