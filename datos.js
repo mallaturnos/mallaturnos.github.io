@@ -274,12 +274,22 @@
   /* ---------- turnos abiertos ---------- */
   // Los turnos sin dueño ya no viven en otra tabla: son asignaciones sin
   // persona, o asignaciones que alguien ofreció.
-  const abiertos = (localId, desde, hasta) =>
-    pedir(sb.from('asignaciones').select('*').eq('local_id', localId)
-            .not('inicio', 'is', null)
-            .gte('fecha', desde).lte('fecha', hasta)
-            .or('persona_id.is.null,ofrecido_por.not.is.null')
-            .order('fecha').order('inicio'));
+  // Mientras no se aplique `arreglo-sin-asignar.sql` la columna ofrecido_por no
+  // existe. La app TIENE que seguir funcionando: devuelve vacio en vez de
+  // dejar la pantalla en blanco. Esto ya lo hace la lectura de puestos; aqui
+  // faltaba, y Pedro recargo antes de pegar el SQL y se quedo sin datos.
+  const abiertos = async (localId, desde, hasta) => {
+    try {
+      return await pedir(sb.from('asignaciones').select('*').eq('local_id', localId)
+              .not('inicio', 'is', null)
+              .gte('fecha', desde).lte('fecha', hasta)
+              .or('persona_id.is.null,ofrecido_por.not.is.null')
+              .order('fecha').order('inicio'));
+    } catch (e) {
+      if (/does not exist|no existe|schema cache|falta un cambio/i.test(e.message || '')) return [];
+      throw e;
+    }
+  };
 
   const abrirTurno = (localId, a) =>
     pedir(sb.from('turnos_abiertos').insert(Object.assign({ local_id: localId }, a)).select().single());
