@@ -17,8 +17,14 @@
   function explicar(e) {
     if (!e) return 'Error desconocido.';
     const m = (e.message || '') + ' ' + (e.details || '');
-    if (/relation .* does not exist|schema cache/i.test(m))
-      return 'Las tablas todavía no existen en la base. Falta aplicar el esquema.';
+    if (/relation .* does not exist/i.test(m))
+      return 'Esa tabla no existe en la base todavía. Falta aplicar el esquema.';
+    // Postgres dice lo mismo («schema cache») cuando falta una COLUMNA, y decir
+    // «faltan las tablas» ahi manda a buscar al lugar equivocado: la base esta,
+    // lo que falta es el ultimo parche.
+    if (/schema cache/i.test(m))
+      return 'A la base le falta un cambio que la app ya está usando. '
+           + 'Hay que aplicar el último archivo arreglo-*.sql en el SQL Editor de Supabase.';
     if (/row-level security|violates row-level/i.test(m))
       return 'La base rechazó la operación por las reglas de acceso. Revisa que estés en tu propio local.';
     if (/duplicate key/i.test(m)) return 'Ese registro ya existe.';
@@ -87,12 +93,41 @@
             .gte('fecha', desde).lte('fecha', hasta));
 
   // Una fila por persona y día: se pisa la que haya (clave única persona+fecha).
-  const ponerTurno = (localId, personaId, fecha, turnoId, ausencia) =>
-    pedir(sb.from('asignaciones')
-            .upsert({ local_id: localId, persona_id: personaId, fecha,
-                      turno_id: turnoId || null, ausencia: turnoId ? null : (ausencia || 'L') },
-                    { onConflict: 'persona_id,fecha' })
-            .select().single());
+  /* ---------- turnos asignados ----------
+     Cada turno lleva SUS horas (inicio, fin, colacion) y su puesto, como en
+     Skello. `turno_id` solo recuerda de que plantilla salio, para el nombre.
+     Puede haber VARIOS el mismo dia: eso es el turno partido. Por eso ya no
+     hay upsert por (persona, fecha) y todo va por el id de la fila. */
+  const crearAsignacion = (localId, personaId, fecha, t) =>
+    pedir(sb.from('asignaciones').insert({
+      local_id: localId, persona_id: personaId, fecha, ausencia: null,
+      turno_id: t.turno_id || null,
+      inicio: t.inicio, fin: t.fin, colacion: t.colacion || 0,
+      puesto: t.puesto || '', nota: t.nota || '',
+    }).select().single());
+
+  const editarAsignacion = (id, campos) =>
+    pedir(sb.from('asignaciones').update(campos).eq('id', id).select().single());
+
+  const borrarAsignacion = (id) =>
+    pedir(sb.from('asignaciones').delete().eq('id', id));
+
+  // La ausencia es UNA por dia y manda sobre los turnos: si alguien esta de
+  // vacaciones, no puede tener turnos ese dia. Por eso se borra lo que haya.
+  const ponerAusencia = async (localId, personaId, fecha, ausencia) => {
+    await pedir(sb.from('asignaciones').delete()
+                  .eq('local_id', localId).eq('persona_id', personaId).eq('fecha', fecha));
+    if (!ausencia || ausencia === 'L') return null;      // «libre» es no tener nada
+    return pedir(sb.from('asignaciones').insert({
+      local_id: localId, persona_id: personaId, fecha,
+      ausencia, inicio: null, fin: null, puesto: '',
+    }).select().single());
+  };
+
+  // Dejar el dia de alguien en blanco, sin poner ausencia.
+  const limpiarDia = (localId, personaId, fecha) =>
+    pedir(sb.from('asignaciones').delete()
+            .eq('local_id', localId).eq('persona_id', personaId).eq('fecha', fecha));
 
   // Copia la semana anterior sobre la actual. A PROPOSITO no copia ausencias:
   // si se copiaran, las vacaciones de la semana pasada se repetirian para siempre.
@@ -103,15 +138,24 @@
     const previas = await pedir(sb.from('asignaciones').select('*').eq('local_id', localId)
       .gte('fecha', desdeAnterior)
       .lte('fecha', hastaAnterior.toISOString().slice(0,10))
-      .not('turno_id', 'is', null));
+      .not('inicio', 'is', null));
     if (!previas || !previas.length) return 0;
     const corrimiento = (new Date(desdeActual + 'T00:00:00') - new Date(desdeAnterior + 'T00:00:00')) / 86400000;
     const filas = previas.map(a => {
       const d = new Date(a.fecha + 'T00:00:00'); d.setDate(d.getDate() + corrimiento);
       return { local_id: localId, persona_id: a.persona_id,
-               fecha: d.toISOString().slice(0,10), turno_id: a.turno_id, ausencia: null };
+               fecha: d.toISOString().slice(0,10), turno_id: a.turno_id, ausencia: null,
+               inicio: a.inicio, fin: a.fin, colacion: a.colacion || 0,
+               puesto: a.puesto || '', nota: a.nota || '' };
     });
-    await pedir(sb.from('asignaciones').upsert(filas, { onConflict: 'persona_id,fecha' }).select());
+    // Sin la clave (persona, fecha) ya no hay upsert posible: se limpia el
+    // destino y se inserta. Las ausencias del destino se respetan a proposito.
+    const hasta = new Date(desdeActual + 'T00:00:00');
+    hasta.setDate(hasta.getDate() + 6);
+    await pedir(sb.from('asignaciones').delete().eq('local_id', localId)
+                  .gte('fecha', desdeActual).lte('fecha', hasta.toISOString().slice(0,10))
+                  .not('inicio', 'is', null));
+    await pedir(sb.from('asignaciones').insert(filas).select());
     return filas.length;
   };
 
@@ -129,7 +173,10 @@
     if (!filas || !filas.length) return 0;
     await pedir(sb.from('asignaciones').insert(filas.map(a => ({
       local_id: localId, persona_id: a.persona_id, fecha: a.fecha,
-      turno_id: a.turno_id || null, ausencia: a.turno_id ? null : (a.ausencia || 'L'),
+      turno_id: a.turno_id || null,
+      ausencia: a.inicio == null ? (a.ausencia || 'L') : null,
+      inicio: a.inicio, fin: a.fin, colacion: a.colacion || 0,
+      puesto: a.puesto || '', nota: a.nota || '',
     }))).select());
     return filas.length;
   };
@@ -204,8 +251,8 @@
   const marcar = (token, fecha, campo, valor) =>
     pedir(sb.rpc('marcar', { p_token: token, p_fecha: fecha, p_campo: campo, p_valor: valor }));
 
-  const ofrecerTurno = (token, fecha) =>
-    pedir(sb.rpc('ofrecer_turno', { p_token: token, p_fecha: fecha }));
+  const ofrecerTurno = (token, asignacionId) =>
+    pedir(sb.rpc('ofrecer_turno', { p_token: token, p_asignacion: asignacionId }));
 
   const tomarTurno = (token, abiertoId) =>
     pedir(sb.rpc('tomar_turno', { p_token: token, p_abierto: abiertoId }));
@@ -226,7 +273,8 @@
     miLocal, misLocales, crearLocal, guardarLocal, dejarDeEscuchar,
     personas, crearPersona, guardarPersona, quitarPersona, activarPersonas,
     turnos, crearTurno, guardarTurno, quitarTurno,
-    asignaciones, ponerTurno, marcas, marcarComoJefe, copiarSemana,
+    asignaciones, crearAsignacion, editarAsignacion, borrarAsignacion, ponerAusencia, limpiarDia,
+    marcas, marcarComoJefe, copiarSemana,
     borrarAsignaciones, reponerAsignaciones,
     dias, guardarDia, dotacion, guardarDotacion, guardarDotacionLote,
     borrarDotacion, reponerDotacion,

@@ -383,3 +383,56 @@ table.neces input:focus-visible{outline:2px solid var(--accent);outline-offset:1
 tr.grupo.sinpuesto th{background:var(--bad-soft);color:var(--bad)}
 tr.grupo.sinpuesto th .ojo{font-family:var(--font-body);font-weight:500;text-transform:none;
   letter-spacing:0;margin-left:10px;opacity:.85}
+
+/* El puesto de cada turno, debajo del horario en la misma casilla, como Skello.
+   Va chico y sin borde para que no compita con el turno: se lee, y solo se
+   nota que es editable al pasar por encima. */
+.cell select.puestoCell{display:block;width:100%;margin-top:3px;border:1px solid transparent;
+  background:transparent;color:var(--fg-faint);font-family:var(--font-body);font-size:.6875rem;
+  padding:1px 3px;border-radius:3px;cursor:pointer;text-overflow:ellipsis}
+.cell select.puestoCell:hover{border-color:var(--line);color:var(--fg)}
+.cell select.puestoCell:focus-visible{outline:2px solid var(--accent);outline-offset:1px;color:var(--fg)}
+
+/* La casilla deja de ser un desplegable y pasa a ser una PILA de bloques, como
+   en Skello: un bloque por turno, apilados, y abajo el botón de agregar. Es lo
+   que permite ver de un vistazo quién dobla el mismo día. */
+.cell .bloque{display:block;width:100%;margin-bottom:3px;padding:4px 6px;border-radius:5px;
+  cursor:pointer;text-align:left;border:1px solid transparent;position:relative;
+  background:var(--surface-2);color:var(--fg)}
+.cell .bloque b{display:inline-block;font-family:var(--font-mono);font-size:.6875rem;font-weight:600}
+.cell .bloque i{float:right;font-family:var(--font-mono);font-size:.625rem;font-style:normal;opacity:.7}
+.cell .bloque em{display:block;font-style:normal;font-size:.6875rem;opacity:.85;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .bloque:hover{border-color:var(--accent)}
+.cell .bloque:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.cell .bloque[data-c="1"]{background:#cde3e5;color:#0f4247}
+.cell .bloque[data-c="2"]{background:#ecdcc0;color:#57411a}
+.cell .bloque[data-c="3"]{background:#d7d1e6;color:#37305a}
+.cell .bloque[data-c="4"]{background:#dde5cf;color:#3a4a26}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]) .cell .bloque[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) .cell .bloque[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) .cell .bloque[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) .cell .bloque[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+:root[data-theme="dark"] .cell .bloque[data-c="1"]{background:#1e4348;color:#bfe2e5}
+:root[data-theme="dark"] .cell .bloque[data-c="2"]{background:#453b26;color:#e9d6b0}
+:root[data-theme="dark"] .cell .bloque[data-c="3"]{background:#353050;color:#cec8e6}
+:root[data-theme="dark"] .cell .bloque[data-c="4"]{background:#2f3a24;color:#cfdcbb}
+.cell .bloque.aus{background:var(--surface-3);color:var(--fg-dim);font-size:.6875rem}
+.cell .anadir{width:100%;border:1px dashed var(--line);background:transparent;color:var(--fg-faint);
+  border-radius:5px;padding:3px;font-size:.6875rem;cursor:pointer;font-family:var(--font-body)}
+.cell .anadir:hover{border-color:var(--accent);color:var(--accent)}
+
+/* El diálogo del turno */
+.dlg{border:0;border-radius:10px;padding:0;max-width:540px;width:calc(100% - 32px);
+  background:var(--surface);color:var(--fg);box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.dlg::backdrop{background:rgba(0,0,0,.45)}
+.dlg form{padding:20px}
+.dlg h3{margin:0 0 2px;font-size:1.0625rem}
+.dlg .hint{margin:0 0 14px}
+.dlgtabs{display:flex;gap:6px;margin-bottom:14px}
+.fldrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(110px,1fr));gap:10px;margin-bottom:12px}
+.diapills{flex-wrap:wrap;gap:4px}
+.diapills .dia.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dlgpie{margin-top:16px;justify-content:flex-end}
+@media (max-width:560px){ .dlg form{padding:16px} }

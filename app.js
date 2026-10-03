@@ -47,9 +47,14 @@ const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, ab
 const MAX_HIST = 20;
 function recordar(que) {
   const r = rango();
-  const filas = Object.values(S.asign)
+  // S.asign guarda una LISTA por casilla desde que existe el turno partido, y
+  // la foto tiene que llevarse las horas: sin ellas, deshacer repondria turnos
+  // vacios que el CHECK de la base rechaza.
+  const filas = Object.values(S.asign).flat()
     .filter(a => a.fecha >= r.desde && a.fecha <= r.hasta)
-    .map(a => ({ persona_id:a.persona_id, fecha:a.fecha, turno_id:a.turno_id, ausencia:a.ausencia }));
+    .map(a => ({ persona_id:a.persona_id, fecha:a.fecha, turno_id:a.turno_id,
+                 ausencia:a.ausencia, inicio:a.inicio, fin:a.fin,
+                 colacion:a.colacion, puesto:a.puesto, nota:a.nota }));
   S.hist.push({ desde:r.desde, hasta:r.hasta, filas, que: que || 'el ultimo cambio' });
   if (S.hist.length > MAX_HIST) S.hist.shift();
   pintarDeshacer();
@@ -162,17 +167,41 @@ const perfilDe = fecha => String((new Date(fecha + 'T00:00:00').getDay() + 6) % 
 // como piensa un dueño: "el sábado en la tarde necesito tres garzones".
 const necesita = (perfil, puesto, turnoId) => ((S.dotacion[perfil] || {})[puesto] || {})[turnoId] || 0;
 
-// cuánta gente de ese puesto tiene ese turno asignado ese día
-const asignados = (fecha, turnoId, puesto) => S.personas.reduce((n, p) => {
-  if (puesto && ((p.rol||'').trim() || 'Sin puesto') !== puesto) return n;
-  const a = asigDe(p.id, fecha);
-  return n + (a && a.turno_id === turnoId ? 1 : 0);
-}, 0);
+// El puesto que se trabaja ESE turno. Si la asignacion no lo trae (una vieja,
+// de antes del cambio), vale el habitual de la persona.
+const puestoDe = (a, p) => ((a && a.puesto) || '').trim() || ((p && p.rol) || '').trim();
+const puestoRot = (a, p) => puestoDe(a, p) || 'Sin puesto';
+
+// cuánta gente de ese puesto tiene ese turno asignado ese día. Cuenta el puesto
+// DE LA ASIGNACION: si Camila hace barra el lunes, cuenta en barra ese lunes
+// aunque su puesto habitual sea garzón.
+const asignados = (fecha, turnoId, puesto) => {
+  const t = turnoDe(turnoId); if (!t) return 0;
+  return S.personas.reduce((n, p) => n + (turnosDe(p.id, fecha).some(a =>
+    (puesto ? puestoRot(a, p) === puesto : true) && solapan(a, t)) ? 1 : 0), 0);
+};
+// Dos bloques se pisan si comparten aunque sea un minuto. Se compara por horas
+// y no por turno_id porque un turno asignado puede no venir de ninguna
+// plantilla: se le escribieron las horas y ya.
+const solapan = (a, t) => Number(a.inicio) < Number(t.fin) && Number(t.inicio) < Number(a.fin);
+
+// Todos los puestos que existen: los habituales del equipo MAS los que se usan
+// en alguna asignacion. Sin esto, un puesto que solo se trabaja de vez en
+// cuando no aparece para elegirlo ni para pedir dotacion.
+const puestosConocidos = () => [...new Set([
+  ...S.personas.map(p => (p.rol || '').trim()),
+  ...Object.values(S.asign).map(a => (a.puesto || '').trim()),
+].filter(Boolean))].sort();
 
 // El filtro por puesto aplica a las tres vistas del plan. No toca las propinas
 // ni las confirmaciones: el reparto tiene que considerar SIEMPRE a todo el
 // equipo, aunque en pantalla estés mirando solo la cocina.
-const puestos = () => [...new Set(S.personas.map(p => (p.rol||'').trim() || 'Sin puesto'))].sort();
+const puestos = () => {
+  const hay = puestosConocidos();
+  // «Sin puesto» solo si de verdad hay alguien sin el, para no ensuciar la lista
+  if (S.personas.some(p => !(p.rol||'').trim())) hay.push('Sin puesto');
+  return hay;
+};
 // "equipo" es una segunda dimensión, aparte del puesto: un garzón part-time
 // sigue siendo garzón. Mezclar las dos cosas en un campo pierde información.
 const equipos = () => [...new Set(S.personas.map(p => (p.equipo||'').trim()).filter(Boolean))].sort();
@@ -199,7 +228,14 @@ const diasDelMes = () => {
 };
 const turnoDe = id => S.turnos.find(t => t.id === id) || null;
 const horasDe = t => t ? Number(t.fin) - Number(t.inicio) - Number(t.colacion) : 0;
-const asigDe = (pid, f) => S.asign[pid + '|' + f] || null;
+const filasDe  = (pid, f) => S.asign[pid + '|' + f] || [];
+// Los turnos de trabajo de ese dia, en orden de entrada. Pueden ser varios.
+const turnosDe = (pid, f) => filasDe(pid, f).filter(a => a.inicio != null);
+// La ausencia, que es UNA por dia y manda sobre los turnos.
+const ausenciaDe = (pid, f) => filasDe(pid, f).find(a => a.ausencia) || null;
+// Las horas las manda la propia fila, no la plantilla de la que salio.
+const horasAsig = a => (a && a.inicio != null) ? Number(a.fin) - Number(a.inicio) - Number(a.colacion || 0) : 0;
+const horasDia  = (pid, f) => turnosDe(pid, f).reduce((n, a) => n + horasAsig(a), 0);
 
 /* ---------- diagnóstico: solo se muestra si algo falla ---------- */
 const marca = (id, estado, texto) => { const li = $(id); if (!li) return;
@@ -311,7 +347,14 @@ async function cargar() {
     DATOS.dotacion(S.local.id),
   ]);
   S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
-  S.asign = {}; (asign||[]).forEach(a => { S.asign[a.persona_id + '|' + a.fecha] = a; });
+  // Un dia puede traer VARIOS turnos de la misma persona (turno partido), asi
+  // que cada casilla guarda una LISTA, no una fila.
+  S.asign = {};
+  (asign||[]).forEach(a => {
+    const k = a.persona_id + '|' + a.fecha;
+    (S.asign[k] = S.asign[k] || []).push(a);
+  });
+  Object.values(S.asign).forEach(l => l.sort((x,y) => (x.inicio||0) - (y.inicio||0)));
   S.marcas = {}; (marcas||[]).forEach(m => { S.marcas[m.persona_id + '|' + m.fecha] = m; });
   S.dias = {};   (dias||[]).forEach(d => { S.dias[d.fecha] = d; });
   S.dotacion = {};
@@ -363,6 +406,154 @@ function pintarPlan() {
   return pintarSemana();
 }
 
+/* ---------- el diálogo del turno ----------
+   Es el «Ajouter un shift» de Skello: se escriben LAS HORAS DE ESTE TURNO, no
+   se elige de una lista. La plantilla solo rellena los campos de un saque.
+   Trae además lo que ellos tienen y nos faltaba: repetir el mismo turno en
+   varios días de la semana de una vez. */
+let DLG = null;      // { p, fecha, asig }   asig null = turno nuevo
+
+const aHora = h => { const t = ((Number(h) % 24) + 24) % 24;
+  return String(Math.floor(t)).padStart(2,'0') + ':' + String(Math.round((t - Math.floor(t)) * 60)).padStart(2,'0'); };
+const deHora = v => { const [h,m] = String(v||'').split(':').map(Number);
+  return isFinite(h) ? h + (m||0)/60 : null; };
+
+function duraDlg() {
+  const i = deHora($('#dEntra').value), fRaw = deHora($('#dSale').value);
+  if (i == null || fRaw == null) { $('#dDura').value = ''; return null; }
+  const f = fRaw <= i ? fRaw + 24 : fRaw;                 // cruza la medianoche
+  const h = f - i - (Number($('#dPausa').value) || 0) / 60;
+  $('#dDura').value = h > 0 ? hfmt(h) + ' h' : '—';
+  return { inicio: i, fin: f, colacion: (Number($('#dPausa').value) || 0) / 60, horas: h };
+}
+
+function abrirTurno(p, fecha, asig) {
+  DLG = { p, fecha, asig };
+  const esNuevo = !asig, esAus = asig && asig.ausencia;
+  $('#dlgTit').textContent = esNuevo ? 'Agregar turno' : (esAus ? 'Editar ausencia' : 'Editar turno');
+  $('#dlgSub').textContent = p.nombre + ' · ' + DIAS[(new Date(fecha + 'T00:00:00').getDay() + 6) % 7] + ' ' + ddmm(fecha);
+  $('#dlgMsg').textContent = '';
+  $('#dBorrar').hidden = esNuevo;
+
+  $('#dPlantilla').innerHTML = '<option value="">— escribir las horas —</option>' +
+    S.turnos.map(t => `<option value="${t.id}">${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
+  $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p) : (p.rol||'').trim());
+  $('#dAusencia').innerHTML = Object.entries(AUSENCIAS)
+    .filter(([k]) => k !== 'L')
+    .map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+
+  // los otros días de la semana, para repetir el turno de una vez
+  const f = fechas();
+  $('#dRepetir').innerHTML = f.map((fe,i) => fe === fecha ? '' :
+    `<button type="button" class="act dia" data-fe="${fe}" aria-pressed="false">${DIAS[i]}</button>`).join('');
+  $('#cajaRepetir').hidden = !esNuevo;
+
+  if (asig && !esAus) {
+    $('#dEntra').value = aHora(asig.inicio);
+    $('#dSale').value  = aHora(asig.fin);
+    $('#dPausa').value = Math.round(Number(asig.colacion || 0) * 60);
+    $('#dPlantilla').value = asig.turno_id || '';
+    $('#dNota').value = asig.nota || '';
+  } else {
+    const t = S.turnos[0];
+    $('#dEntra').value = t ? aHora(t.inicio) : '09:00';
+    $('#dSale').value  = t ? aHora(t.fin)    : '18:00';
+    $('#dPausa').value = t ? Math.round(Number(t.colacion) * 60) : 30;
+    $('#dPlantilla').value = t ? t.id : '';
+    $('#dNota').value = '';
+  }
+  if (esAus) $('#dAusencia').value = asig.ausencia;
+  pestañaDlg(!esAus);
+  duraDlg();
+  $('#dlgTurno').showModal();
+  setTimeout(() => $('#dEntra').focus(), 30);
+}
+
+function pestañaDlg(turno) {
+  $('#paneTurno').hidden = !turno; $('#paneAus').hidden = turno;
+  $('#tabTurno').classList.toggle('primary', turno);
+  $('#tabAus').classList.toggle('primary', !turno);
+}
+
+async function guardarDlg() {
+  const { p, fecha, asig } = DLG;
+  const m = $('#dlgMsg');
+  const esAus = $('#paneAus').hidden === false;
+
+  if (esAus) {
+    recordar('la ausencia de ' + p.nombre + ' del ' + ddmm(fecha));
+    try {
+      await DATOS.ponerAusencia(S.local.id, p.id, fecha, $('#dAusencia').value);
+      await refrescar(); $('#dlgTurno').close();
+    } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
+    return;
+  }
+
+  const d = duraDlg();
+  if (!d) { m.textContent = 'Faltan las horas.'; m.className = 'msg bad'; return; }
+  if (d.horas <= 0) { m.textContent = 'La pausa se come el turno entero.'; m.className = 'msg bad'; return; }
+
+  const campos = { turno_id: $('#dPlantilla').value || null, inicio: d.inicio, fin: d.fin,
+                   colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim() };
+  const dias = [fecha, ...[...$('#dRepetir').querySelectorAll('[aria-pressed="true"]')].map(b => b.dataset.fe)];
+
+  recordar(asig ? 'el turno de ' + p.nombre + ' del ' + ddmm(fecha)
+                : 'agregar turno a ' + p.nombre);
+  try {
+    if (asig) await DATOS.editarAsignacion(asig.id, campos);
+    else for (const fe of dias) {
+      // si ese día ya tiene el mismo bloque, no se duplica
+      if (turnosDe(p.id, fe).some(x => Number(x.inicio) === d.inicio)) continue;
+      await DATOS.crearAsignacion(S.local.id, p.id, fe, campos);
+    }
+    await refrescar(); $('#dlgTurno').close();
+  } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
+}
+
+async function borrarDlg() {
+  const { p, fecha, asig } = DLG; if (!asig) return;
+  recordar('quitar un turno de ' + p.nombre + ' del ' + ddmm(fecha));
+  try {
+    await DATOS.borrarAsignacion(asig.id);
+    await refrescar(); $('#dlgTurno').close();
+  } catch (e) { S.hist.pop(); pintarDeshacer(); $('#dlgMsg').textContent = e.message; $('#dlgMsg').className = 'msg bad'; }
+}
+
+/* ---------- la casilla: una PILA de bloques ----------
+   Skello no usa un desplegable: la casilla vacia dice «Ajouter un shift» y la
+   llena muestra un bloque por turno, apilados. Es lo que permite el turno
+   partido, y lo que hace que se vea de un vistazo quien dobla. */
+function pintarCasilla(p, fe) {
+  const aus = ausenciaDe(p.id, fe);
+  if (aus && aus.ausencia !== 'L')
+    return `<span class="bloque aus" data-asig="${aus.id}" data-fecha="${fe}" role="button" tabindex="0"
+              title="${esc(AUSENCIAS[aus.ausencia] || aus.ausencia)}">${esc(aus.ausencia)} · ${esc(AUSENCIAS[aus.ausencia]||'')}</span>`;
+
+  const ts = turnosDe(p.id, fe);
+  const bloques = ts.map(a => {
+    const t = a.turno_id ? turnoDe(a.turno_id) : null;
+    const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
+    const pu = puestoDe(a, p);
+    return `<span class="bloque" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
+              role="button" tabindex="0" title="Editar este turno">
+              <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b><i>${hfmt(horasAsig(a))} h</i>
+              <em>${esc(pu || 'sin puesto')}</em></span>`;
+  }).join('');
+
+  return bloques + `<button type="button" class="anadir" data-anadir="${fe}"
+    aria-label="Agregar turno a ${esc(p.nombre)} el ${fe}">${ts.length ? '+' : '+ turno'}</button>`;
+}
+
+// Las opciones del puesto de una casilla: los que ya existen, mas el que tenga
+// puesto esa asignacion aunque no lo use nadie mas, mas la salida «sin puesto».
+function opcionesPuesto(actual) {
+  const hay = puestosConocidos();
+  if (actual && !hay.includes(actual)) hay.push(actual);
+  return `<option value=""${actual ? '' : ' selected'}>— sin puesto —</option>`
+    + hay.sort().map(x =>
+        `<option value="${esc(x)}"${x === actual ? ' selected' : ''}>${esc(x)}</option>`).join('');
+}
+
 function pintarSemana() {
   const f = fechas();
   $('#semTitulo').textContent = ddmm(f[0]) + ' al ' + ddmm(f[6]);
@@ -377,9 +568,6 @@ function pintarSemana() {
       : 'Todavía no tienes a nadie. Anda a <b>Equipo</b> y agrega tu primera persona.'}</td></tr>`;
     $('#semPie').innerHTML = ''; $('#semPersonas').innerHTML = ''; return;
   }
-
-  const opciones = S.turnos.map(t => `<option value="${t.id}">${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('')
-    + Object.entries(AUSENCIAS).map(([k,v]) => `<option value="a:${k}">${k==='L'?'—':k} ${v}</option>`).join('');
 
   // Fila de turnos sin dueño, arriba de todo: se ven MIENTRAS planificas,
   // no en otra pestaña. Es como lo hace Skello con su fila "Non assignés".
@@ -412,28 +600,20 @@ function pintarSemana() {
     }
     const tr = el('tr');
     tr.innerHTML = `<th scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')} · ${clp(p.valor_hora)}/h · ${hfmt(p.horas_contrato)} h</span></th>` +
-      f.map(fe => {
-        const a = asigDe(p.id, fe);
-        const val = a ? (a.turno_id ? a.turno_id : 'a:' + (a.ausencia||'L')) : 'a:L';
-        const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
-        const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 'off';
-        return `<td class="cell"><select class="turno" data-c="${ci}" data-p="${p.id}" data-f="${fe}"
-                 aria-label="${esc(p.nombre)}, ${fe}">${opciones}</select></td>`;
-      }).join('') + `<td class="tot"><span class="hcell" id="h-${p.id}"></span></td>`;
+      f.map(fe => `<td class="cell">${pintarCasilla(p, fe)}</td>`).join('')
+      + `<td class="tot"><span class="hcell" id="h-${p.id}"></span></td>`;
     cuerpo.appendChild(tr);
-    f.forEach(fe => {
-      const a = asigDe(p.id, fe);
-      const sel = tr.querySelector(`select[data-f="${fe}"]`);
-      sel.value = a ? (a.turno_id || 'a:' + (a.ausencia||'L')) : 'a:L';
-      sel.addEventListener('change', async () => {
-        const v = sel.value, esAus = v.startsWith('a:');
-        recordar('el turno de ' + p.nombre + ' del ' + ddmm(fe));
-        try {
-          const nueva = await DATOS.ponerTurno(S.local.id, p.id, fe, esAus ? null : v, esAus ? v.slice(2) : null);
-          S.asign[p.id + '|' + fe] = nueva;
-          pintarTodo();
-        } catch (e) { error(e); }
-      });
+
+    // Un solo escuchador por fila: las casillas se repintan enteras y colgarle
+    // un escuchador a cada bloque los dejaria huerfanos en cada repintado.
+    tr.addEventListener('click', ev => {
+      const añadir = ev.target.closest('[data-anadir]');
+      if (añadir) return abrirTurno(p, añadir.dataset.anadir, null);
+      const bloque = ev.target.closest('[data-asig]');
+      if (bloque) {
+        const a = filasDe(p.id, bloque.dataset.fecha).find(x => x.id === bloque.dataset.asig);
+        if (a) return abrirTurno(p, bloque.dataset.fecha, a);
+      }
     });
   });
   pintarResumenSemana();
@@ -444,9 +624,13 @@ function analizar(p) {
   let horas = 0, trabajados = 0, aus = 0;
   const alertas = [];
   f.forEach((fe, i) => {
-    const a = asigDe(p.id, fe); if (!a) return;
-    const t = a.turno_id ? turnoDe(a.turno_id) : null;
-    if (t) { horas += horasDe(t); trabajados++; if (horasDe(t) > 10) alertas.push({n:'bad', t:`${DIAS[i]} sobre 10 h`}); }
+    const ts = turnosDe(p.id, fe), a = ausenciaDe(p.id, fe);
+    if (!ts.length && !a) return;
+    if (ts.length) {
+      const hd = horasDia(p.id, fe);
+      horas += hd; trabajados++;
+      if (hd > 10) alertas.push({n:'bad', t:`${DIAS[i]} sobre 10 h`});
+    }
     else if (a.ausencia && a.ausencia !== 'L') aus++;
   });
   const tope = Number(p.horas_contrato) || Number(S.local.tope_semanal) || 42;
@@ -455,8 +639,7 @@ function analizar(p) {
   // disponibilidad: avisa, no bloquea. El encargado decide igual, pero viéndolo.
   const nd = p.no_disponible || [];
   f.forEach((fe, i) => {
-    const a = asigDe(p.id, fe);
-    if (a && a.turno_id && nd.includes(i))
+    if (turnosDe(p.id, fe).length && nd.includes(i))
       alertas.push({ n:'warn', t:`${DIAS[i]}: dijo que no puede` });
   });
   if (aus) alertas.push({ n:'info', t:`${aus} ${aus===1?'día':'días'} de ausencia` });
@@ -492,8 +675,7 @@ function pintarResumenSemana() {
   const pct = ventaT ? (costoT/ventaT)*100 : NaN;
   $('#semPie').innerHTML = '<tr class="sumrow"><th>Costo del día</th>' +
     f.map(fe => {
-      const c = S.personas.reduce((s,p) => { const a = asigDe(p.id,fe); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
-        return s + (t ? horasDe(t) * (p.valor_hora||0) : 0); }, 0);
+      const c = S.personas.reduce((s,p) => s + horasDia(p.id, fe) * (p.valor_hora||0), 0);
       const v = (S.dias[fe]||{}).venta || 0, pd = v ? (c/v)*100 : NaN;
       const col = !isFinite(pd) ? 'var(--fg-faint)' : (pd > Number(S.local.objetivo_pct) ? 'var(--bad)' : 'var(--fg-dim)');
       return `<td style="color:${col}">${clp(c)}<br><span style="font-size:.6875rem">${pfmt(pd)}</span></td>`;
@@ -507,29 +689,37 @@ function pintarDia() {
   $('#semTitulo').textContent = DIAS[i] + ' ' + ddmm(fe);
 
   const caja = $('#cajaDia'); caja.innerHTML = '';
-  const conTurno = personasVisibles().map(p => ({ p, a: asigDe(p.id, fe) }))
-    .filter(x => x.a && x.a.turno_id);
+  // Una persona con turno partido aparece una vez POR BLOQUE, no una sola.
+  const conTurno = personasVisibles().flatMap(p => turnosDe(p.id, fe).map(a => ({ p, a })));
 
   if (!conTurno.length) {
     caja.innerHTML = '<p class="vacio">Nadie tiene turno este día.</p>';
     $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = ''; return;
   }
 
-  // agrupados por turno y ordenados por hora de entrada: así se lee como el día real
-  const porTurno = {};
-  conTurno.forEach(x => { (porTurno[x.a.turno_id] = porTurno[x.a.turno_id] || []).push(x.p); });
-  S.turnos.slice().sort((a,b) => Number(a.inicio) - Number(b.inicio)).forEach(t => {
-    const gente = porTurno[t.id]; if (!gente) return;
-    const costo = gente.reduce((s,p) => s + horasDe(t) * (p.valor_hora||0), 0);
+  // Agrupados por HORARIO REAL y ordenados por hora de entrada, que es como se
+  // lee el día. Antes se agrupaba por plantilla, pero ahora dos turnos de la
+  // misma plantilla pueden tener horas distintas: la plantilla solo da el nombre.
+  const porHorario = {};
+  conTurno.forEach(x => {
+    const k = Number(x.a.inicio) + '|' + Number(x.a.fin) + '|' + Number(x.a.colacion||0);
+    (porHorario[k] = porHorario[k] || { a: x.a, gente: [] }).gente.push(x.p);
+  });
+  Object.values(porHorario)
+    .sort((u,v) => Number(u.a.inicio) - Number(v.a.inicio) || Number(u.a.fin) - Number(v.a.fin))
+    .forEach(({ a: ta, gente }) => {
+    const t = ta.turno_id ? turnoDe(ta.turno_id) : null;
+    const hs = horasAsig(ta);
+    const costo = gente.reduce((s,p) => s + hs * (p.valor_hora||0), 0);
     caja.appendChild(el('div','turnodia', `
       <div class="turnodia-h">
-        <b>${esc(t.nombre)}</b>
-        <span>${hhmm(t.inicio)}–${hhmm(t.fin)} · ${hfmt(horasDe(t))} h · ${gente.length} ${gente.length===1?'persona':'personas'} · ${clp(costo)}</span>
+        <b>${esc(t ? t.nombre : hhmm(ta.inicio) + '–' + hhmm(ta.fin))}</b>
+        <span>${hhmm(ta.inicio)}–${hhmm(ta.fin)} · ${hfmt(hs)} h · ${gente.length} ${gente.length===1?'persona':'personas'} · ${clp(costo)}</span>
       </div>
       <ul>${gente.map(p => {
         const m = marcaDe(p.id, fe);
         const hl = horaLlegada(m);
-        const tarde = hl !== null ? Math.round((hl - Number(t.inicio))*60) : null;
+        const tarde = hl !== null ? Math.round((hl - Number(ta.inicio))*60) : null;
         const et = m.llego === true
                  ? `<span class="flag ok">llegó${hl !== null ? ' ' + hhmm(hl) : ''}${tarde > 5 ? ' · '+tarde+' min tarde' : ''}</span>`
                  : m.confirmo === true ? '<span class="flag info">confirmó</span>'
@@ -538,8 +728,8 @@ function pintarDia() {
       }).join('')}</ul>`));
   });
 
-  const ausentes = personasVisibles().map(p => ({ p, a: asigDe(p.id, fe) }))
-    .filter(x => x.a && x.a.ausencia && x.a.ausencia !== 'L');
+  const ausentes = personasVisibles().map(p => ({ p, a: ausenciaDe(p.id, fe) }))
+    .filter(x => x.a && x.a.ausencia !== 'L');
   if (ausentes.length) caja.appendChild(el('div','turnodia', `
     <div class="turnodia-h"><b>Ausencias</b></div>
     <ul>${ausentes.map(x => `<li><b>${esc(x.p.nombre)}</b> <span class="rol">${AUSENCIAS[x.a.ausencia]}</span></li>`).join('')}</ul>`));
@@ -562,11 +752,16 @@ function pintarMes() {
   personasVisibles().forEach(p => {
     let horas = 0;
     const celdas = ds.map(f => {
-      const a = asigDe(p.id, f);
-      const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
-      if (t) { horas += horasDe(t); 
-        const ci = (S.turnos.findIndex(x => x.id === t.id) % 4) + 1;
-        return `<td class="mcel" data-c="${ci}" title="${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}">${esc(t.nombre[0])}</td>`; }
+      const ts = turnosDe(p.id, f), a = ausenciaDe(p.id, f);
+      const t = ts[0];
+      if (t) {
+        horas += horasDia(p.id, f);
+        const pl = t.turno_id ? turnoDe(t.turno_id) : null;
+        const ci = pl ? (S.turnos.findIndex(x => x.id === pl.id) % 4) + 1 : 5;
+        const tit = ts.map(x => hhmm(x.inicio) + '–' + hhmm(x.fin)).join(' + ');
+        // con turno partido la inicial sola miente: se marca que son dos
+        return `<td class="mcel" data-c="${ci}" title="${esc(tit)}">${esc(
+          (pl ? pl.nombre[0] : hhmm(t.inicio).slice(0,2)))}${ts.length > 1 ? '<sup>'+ts.length+'</sup>' : ''}</td>`; }
       if (a && a.ausencia && a.ausencia !== 'L')
         return `<td class="mcel aus" title="${AUSENCIAS[a.ausencia]}">${a.ausencia}</td>`;
       return '<td class="mcel"></td>';
@@ -590,7 +785,7 @@ function pintarEquipo() {
   S.personas.forEach(p => {
     const row = el('div','rowline' + (p.id === S.recien ? ' recien' : ''), `
       ${filaCampo('Nombre','text',p.nombre,'data-k="nombre"')}
-      ${filaCampo('Puesto','text',p.rol||'','data-k="rol" placeholder="ej.: Garzón"'
+      ${filaCampo('Puesto habitual','text',p.rol||'','data-k="rol" placeholder="ej.: Garzón"'
         + ((p.rol||'').trim() ? '' : ' class="falta"'))}
       ${filaCampo('Equipo','text',p.equipo||'','data-k="equipo" placeholder="Fijos / Por llamado"')}
       ${filaCampo('Valor hora','plata',p.valor_hora,'data-k="valor_hora" class="n"')}
@@ -764,8 +959,7 @@ function pintarCobertura() {
   let costoT = 0, ventaT = 0;
   $('#cobDias').innerHTML = f.map((fe, d) => {
     const costo = S.personas.reduce((s,p) => {
-      const a = asigDe(p.id, fe); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
-      return s + (t ? horasDe(t) * (p.valor_hora||0) : 0); }, 0);
+      return s + horasDia(p.id, fe) * (p.valor_hora||0); }, 0);
     const venta = (S.dias[fe]||{}).venta || 0;
     costoT += costo; ventaT += venta;
     const pct = venta ? (costo/venta)*100 : NaN;
@@ -801,8 +995,7 @@ function repartir(pool, pesos) {
 
 function repartoDia(fecha) {
   const pesos = S.personas.map(p => {
-    const a = asigDe(p.id, fecha); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
-    return t ? horasDe(t) * (Number(p.factor_propina)||0) : 0;
+    return horasDia(p.id, fecha) * (Number(p.factor_propina)||0);
   });
   const d = S.dias[fecha] || {};
   const pool = (d.propina_efectivo||0) + (d.propina_tarjeta||0);
@@ -894,7 +1087,9 @@ function pintarAbiertos() {
   S.abiertos.forEach(a => {
     const t = turnoDe(a.turno_id);
     const quien = a.tomado_por ? S.personas.find(p => p.id === a.tomado_por) : null;
-    const choque = quien && asigDe(quien.id, a.fecha) && asigDe(quien.id, a.fecha).turno_id;
+    // Choca solo si el horario SE PISA con otro turno suyo: con el turno partido
+    // tener algo ese dia ya no es impedimento, doblar es justamente lo normal.
+    const choque = quien && t && turnosDe(quien.id, a.fecha).some(x => solapan(x, t));
     // ¿quién del equipo quedaría sobre su contrato si tomara este turno?
     const extra = horasDe(t);
     const pasados = t ? S.personas.filter(p => {
@@ -921,10 +1116,18 @@ function pintarAbiertos() {
     const bp = card.querySelector('[data-pasar]');
     if (bp) bp.addEventListener('click', async () => {
       try {
-        await DATOS.ponerTurno(S.local.id, quien.id, a.fecha, a.turno_id, null);
-        // si era un cambio ofrecido, al confirmarlo quien lo ofrecio queda libre
-        if (a.ofrecido_por && a.ofrecido_por !== quien.id)
-          await DATOS.ponerTurno(S.local.id, a.ofrecido_por, a.fecha, null, 'L');
+        await DATOS.crearAsignacion(S.local.id, quien.id, a.fecha, {
+          turno_id: a.turno_id, inicio: t.inicio, fin: t.fin, colacion: t.colacion,
+          puesto: a.puesto || (quien.rol||'').trim(), nota: a.nota || '',
+        });
+        // si era un cambio ofrecido, al confirmarlo se le quita ESE turno a
+        // quien lo ofreció: antes se le ponía una ausencia «L», que ahora no
+        // existe como fila — quedarse sin turno ES estar libre.
+        if (a.ofrecido_por && a.ofrecido_por !== quien.id) {
+          const suyo = turnosDe(a.ofrecido_por, a.fecha)
+            .find(x => Number(x.inicio) === Number(t.inicio));
+          if (suyo) await DATOS.borrarAsignacion(suyo.id);
+        }
         await DATOS.cerrarTurno(a.id); await refrescar();
       } catch (e) { error(e); }
     });
@@ -952,18 +1155,18 @@ function planContraReal() {
   return S.personas.map(p => {
     let plan = 0, conLlegada = 0, atrasoMin = 0, atrasos = 0, sinMarca = 0;
     f.forEach(fe => {
-      const a = asigDe(p.id, fe); if (!a || !a.turno_id) return;
-      const t = turnoDe(a.turno_id); if (!t) return;
-      plan += horasDe(t);
+      const ts = turnosDe(p.id, fe); if (!ts.length) return;
+      const t = ts[0];                       // la puntualidad se mide contra el PRIMER bloque
+      plan += horasDia(p.id, fe);
       const m = marcaDe(p.id, fe);
       if (m.llego === true) {
-        conLlegada += horasDe(t);
+        conLlegada += horasDia(p.id, fe);
         const h = horaLlegada(m);
         if (h !== null) {
           const dif = Math.round((h - Number(t.inicio)) * 60);
           if (dif > 5) { atrasoMin += dif; atrasos++; }
         }
-      } else sinMarca += horasDe(t);
+      } else sinMarca += horasDia(p.id, fe);
     });
     return { p, plan, conLlegada, sinMarca, atrasoMin, atrasos };
   });
@@ -982,8 +1185,8 @@ function pintarConf() {
 
   S.personas.forEach(p => {
     cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}</th>` + f.map((fe,i) => {
-      const a = asigDe(p.id, fe);
-      if (!a || !a.turno_id) return '<td><span class="mk"><b class="esp">libre</b></span></td>';
+      const ts = turnosDe(p.id, fe);
+      if (!ts.length) return '<td><span class="mk"><b class="esp">libre</b></span></td>';
       const m = marcaDe(p.id, fe);
       // los dos casos que al dueño le interesa ver de inmediato
       if (m.llego === true && m.confirmo === false)
@@ -1070,9 +1273,11 @@ function pintarLinks() {
   const libres = S.abiertos.filter(a => !a.tomado_por).length;
   $('#salidaPub').value = S.personas.map((p,i) => {
     const lineas = f.map((fe,d) => {
-      const a = asigDe(p.id, fe); const t = a && a.turno_id ? turnoDe(a.turno_id) : null;
-      return `${DIAS[d]} ${ddmm(fe)}: ` + (t ? `${t.nombre} ${hhmm(t.inicio)}–${hhmm(t.fin)}`
-                                            : (AUSENCIAS[(a&&a.ausencia)||'L']||'libre').toLowerCase());
+      const ts = turnosDe(p.id, fe), au = ausenciaDe(p.id, fe);
+      return `${DIAS[d]} ${ddmm(fe)}: ` + (ts.length
+        ? ts.map(a => { const t = a.turno_id ? turnoDe(a.turno_id) : null;
+            return (t ? t.nombre + ' ' : '') + hhmm(a.inicio) + '–' + hhmm(a.fin); }).join(' y ')
+        : (AUSENCIAS[(au&&au.ausencia)||'L']||'libre').toLowerCase());
     });
     const horas = analizar(p).horas;
     return `Hola ${p.nombre.split(' ')[0]}, tu semana del ${ddmm(f[0])} al ${ddmm(f[6])}:\n` +
@@ -1115,13 +1320,15 @@ async function pintarTrabajador(token) {
   // propina de la semana: se calcula con lo que la base deja ver de su propia semana
   const dias = d.dias || [], props = d.propinas || [];
   let horasSem = 0;
-  dias.forEach(x => { if (x.turno) horasSem += Number(x.fin) - Number(x.inicio) - Number(x.colacion); });
+  const horasDelDia = x => (x.turnos || []).reduce((n,t) =>
+    n + Number(t.fin) - Number(t.inicio) - Number(t.colacion || 0), 0);
+  dias.forEach(x => { horasSem += horasDelDia(x); });
 
   const hoy = iso(new Date());
 
   // Confirmar toda la semana de una: la mayoría de las semanas puede con todo,
   // y pedirle 5 toques para decir que sí es la mejor forma de que no lo haga.
-  const porConfirmar = dias.filter(x => x.turno && x.confirmo !== true);
+  const porConfirmar = dias.filter(x => (x.turnos||[]).length && x.confirmo !== true);
   const btnTodo = $('#tConfTodo');
   if (porConfirmar.length > 1) {
     btnTodo.hidden = false;
@@ -1142,14 +1349,21 @@ async function pintarTrabajador(token) {
 
   const cont = $('#tDias'); cont.innerHTML = '';
   dias.forEach(x => {
-    const trabaja = !!x.turno;
-    const hs = trabaja ? Number(x.fin) - Number(x.inicio) - Number(x.colacion) : 0;
+    const bloques = x.turnos || [];
+    const trabaja = bloques.length > 0;
+    const hs = horasDelDia(x);
     const i = (new Date(x.fecha + 'T00:00:00').getDay() + 6) % 7;
     const card = el('div','diacard' + (trabaja ? '' : ' libre'), `
       <div class="diahead">
         <div><div class="diafecha">${DIAS[i]} ${ddmm(x.fecha)}</div>
-          <div class="diaturno">${trabaja ? esc(x.turno) : (AUSENCIAS[x.ausencia] || 'Libre')}</div></div>
-        <div class="diahoras">${trabaja ? hhmm(x.inicio)+'–'+hhmm(x.fin)+' · '+hfmt(hs)+' h' : ''}
+          <div class="diaturno">${trabaja
+            ? bloques.map(b => esc(b.turno || b.puesto || 'Turno')).join(' + ')
+            : (AUSENCIAS[x.ausencia] || 'Libre')}</div></div>
+        <div class="diahoras">${trabaja
+            ? bloques.map(b => hhmm(b.inicio)+'–'+hhmm(b.fin)
+                + (b.puesto ? ' <i>'+esc(b.puesto)+'</i>' : '')).join('<br>')
+              + ' · ' + hfmt(hs) + ' h'
+            : ''}
           ${x.propina ? `<span class="prop">${clp(x.propina)} de propina</span>` : ''}</div>
       </div>` +
       (trabaja ? `<div class="btns">
@@ -1158,16 +1372,16 @@ async function pintarTrabajador(token) {
         <button data-a="llego" data-v="1" aria-pressed="${x.llego === true}">Llegué</button>
       </div>` + (x.ofrecido
         ? '<p class="ofrecido">Ofreciste este turno. Si alguien lo toma, tu jefe confirma el cambio.</p>'
-        : `<button class="ofrecer" data-of="${x.fecha}">Ofrecer este turno a mis compañeros</button>`) : ''));
+        : bloques.map(b => `<button class="ofrecer" data-of="${b.id}">Ofrecer${bloques.length > 1
+             ? ' el de ' + hhmm(b.inicio) : ' este turno'} a mis compañeros</button>`).join('')) : ''));
     cont.appendChild(card);
-    const bo = card.querySelector('[data-of]');
-    if (bo) bo.addEventListener('click', async () => {
+    card.querySelectorAll('[data-of]').forEach(bo => bo.addEventListener('click', async () => {
       if (!confirm('Vas a ofrecer este turno a tus compañeros.\n\n'
                  + 'Sigue siendo tuyo hasta que alguien lo tome y tu jefe confirme el cambio.')) return;
       bo.disabled = true;
-      try { await DATOS.ofrecerTurno(token, x.fecha); await pintarTrabajador(token); }
+      try { await DATOS.ofrecerTurno(token, bo.dataset.of); await pintarTrabajador(token); }
       catch (e) { bo.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">${esc(e.message)}</div>`; }
-    });
+    }));
     card.querySelectorAll('button[data-a]').forEach(b => {
       b.addEventListener('click', async () => {
         const campo = b.dataset.a, valor = b.dataset.v === '1';
@@ -1361,6 +1575,28 @@ function conectarApp() {
     setTimeout(() => { $('#msgSem').textContent = ''; }, 6000);
   });
   on('#btnDeshacer', 'click', deshacer);
+
+  /* --- el diálogo del turno --- */
+  on('#tabTurno', 'click', () => pestañaDlg(true));
+  on('#tabAus',   'click', () => pestañaDlg(false));
+  on('#dCancelar','click', () => $('#dlgTurno').close());
+  on('#dGuardar', 'click', guardarDlg);
+  on('#dBorrar',  'click', borrarDlg);
+  ['#dEntra','#dSale','#dPausa'].forEach(id => on(id, 'input', duraDlg));
+  // Elegir plantilla solo RELLENA los campos: después se editan. La plantilla
+  // deja de ser la verdad y pasa a ser un atajo para no teclear.
+  on('#dPlantilla', 'change', () => {
+    const t = turnoDe($('#dPlantilla').value); if (!t) return;
+    $('#dEntra').value = aHora(t.inicio);
+    $('#dSale').value  = aHora(t.fin);
+    $('#dPausa').value = Math.round(Number(t.colacion) * 60);
+    duraDlg();
+  });
+  on('#dRepetir', 'click', ev => {
+    const b = ev.target.closest('button[data-fe]'); if (!b) return;
+    b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    b.classList.toggle('on');
+  });
 
   // dejar en blanco la dotacion del DIA que se esta editando. Si quiere los
   // siete, limpia uno y lo copia a los demas: ya existe ese boton.

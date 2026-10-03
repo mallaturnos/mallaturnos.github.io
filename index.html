@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=33">
+<link rel="stylesheet" href="estilo.css?v=35">
 </head>
 <body>
 
@@ -147,7 +147,8 @@
     <div class="panel" id="p-eq" role="tabpanel" aria-labelledby="tab-eq" hidden>
       <div class="card">
         <h2>Equipo</h2>
-        <p class="hint">Sin RUT, sin dirección, sin teléfono: solo lo que hace falta para armar turnos y repartir propinas.</p>
+        <p class="hint">Sin RUT, sin dirección, sin teléfono: solo lo que hace falta para armar turnos y repartir propinas.<br>
+          El <b>puesto habitual</b> es solo el que se propone al asignar un turno: en la malla puedes cambiarlo turno por turno.</p>
         <div id="eqLista"></div>
         <div class="acciones" style="margin-top:14px">
           <button class="act" id="btnPersona">Agregar persona</button>
@@ -251,7 +252,49 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
-<script src="datos.js?v=33"></script>
-<script src="app.js?v=33"></script>
+<script src="datos.js?v=35"></script>
+<script src="app.js?v=35"></script>
+<dialog id="dlgTurno" class="dlg">
+  <form method="dialog" id="formTurno">
+    <h3 id="dlgTit">Agregar turno</h3>
+    <p class="hint" id="dlgSub"></p>
+
+    <div class="dlgtabs">
+      <button type="button" class="act primary" id="tabTurno">Turno</button>
+      <button type="button" class="act" id="tabAus">Ausencia</button>
+    </div>
+
+    <div id="paneTurno">
+      <div class="fldrow">
+        <div class="fld"><label for="dEntra">Entra</label><input type="time" id="dEntra" step="300" required></div>
+        <div class="fld"><label for="dSale">Sale</label><input type="time" id="dSale" step="300" required></div>
+        <div class="fld"><label for="dPausa">Pausa (min)</label><input type="number" id="dPausa" class="n" min="0" max="240" step="5" value="30"></div>
+        <div class="fld"><label>Duración</label><input type="text" id="dDura" class="n" readonly tabindex="-1"></div>
+      </div>
+      <div class="fldrow">
+        <div class="fld"><label for="dPlantilla">Plantilla</label><select id="dPlantilla"></select></div>
+        <div class="fld"><label for="dPuesto">Puesto</label><select id="dPuesto"></select></div>
+      </div>
+      <div class="fld"><label for="dNota">Nota</label><input type="text" id="dNota" maxlength="120" placeholder="opcional"></div>
+      <div class="fld" id="cajaRepetir">
+        <label>Repetir también en</label>
+        <div class="acciones diapills" id="dRepetir"></div>
+      </div>
+    </div>
+
+    <div id="paneAus" hidden>
+      <div class="fld"><label for="dAusencia">Motivo</label><select id="dAusencia"></select></div>
+      <p class="hint">La ausencia es una por día y reemplaza a los turnos que tenga ese día.</p>
+    </div>
+
+    <p class="msg" id="dlgMsg"></p>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="dCancelar">Cancelar</button>
+      <button type="button" class="act" id="dBorrar" hidden>Eliminar</button>
+      <button type="button" class="act primary" id="dGuardar">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
 </body>
 </html>
