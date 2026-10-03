@@ -55,6 +55,12 @@ li.bad  .pt{background:var(--bad-soft); color:var(--bad)}
 li.warn .pt{background:var(--warn-soft);color:var(--warn)}
 
 .form{display:flex;flex-direction:column;gap:12px;max-width:380px}
+/* Cualquier regla nuestra con `display:` le gana al `hidden` del navegador, y
+   entonces algo que se mandó a esconder se sigue viendo. Paso justo con
+   «Repetir también en», que es solo para turnos nuevos y aparecia tambien al
+   editar, porque .fld trae display:flex. Se corta de raiz para toda la app. */
+[hidden]{display:none !important}
+
 .fld{display:flex;flex-direction:column;gap:3px}
 .fld label{font-size:.6875rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint)}
 .fld input{font-family:var(--font-body);font-size:.9375rem;padding:9px 10px;border:1px solid var(--line);
