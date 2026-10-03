@@ -964,21 +964,50 @@ async function nuevoTurnoRapido() {
    repartida de verdad. Con todo en blanco no se entiende para que sirve nada.
 
    Todo lo que crea se deshace con Limpiar, Borrar las marcas y Deshacer. */
+// La gente del local de ejemplo. Nombres inventados a proposito: esto no se
+// mezcla con nadie real, y por eso tampoco lleva RUT, telefono ni correo.
+const EJEMPLO = [
+  { nombre:'Camila Reyes',    rol:'Barra',  equipo:'Fijos',       valor_hora:3500, horas_contrato:45, factor_propina:1 },
+  { nombre:'Alonso Tapia',    rol:'Garzón', equipo:'Fijos',       valor_hora:3200, horas_contrato:45, factor_propina:1 },
+  { nombre:'Carla Núñez',     rol:'Barra',  equipo:'Fijos',       valor_hora:3500, horas_contrato:45, factor_propina:1 },
+  { nombre:'Bernardita Soto', rol:'Garzón', equipo:'Por llamado', valor_hora:3200, horas_contrato:30, factor_propina:1 },
+  { nombre:'Ignacio Fuentes', rol:'Cocina', equipo:'Fijos',       valor_hora:4200, horas_contrato:45, factor_propina:0.5 },
+  { nombre:'Luz Carrasco',    rol:'Cocina', equipo:'Fijos',       valor_hora:3800, horas_contrato:45, factor_propina:0.5 },
+  { nombre:'Matías Vera',     rol:'Garzón', equipo:'Por llamado', valor_hora:3200, horas_contrato:20, factor_propina:1 },
+  { nombre:'Paula Lagos',     rol:'Barra',  equipo:'Fijos',       valor_hora:3500, horas_contrato:45, factor_propina:1 },
+];
+
 async function llenarEjemplo() {
   const m = $('#msgEjemplo');
-  if (!S.personas.length || !S.turnos.length) {
-    m.textContent = 'Primero necesitas gente en el equipo y al menos un turno.';
-    m.className = 'msg bad'; return;
-  }
-  const f = fechas();
-  if (!confirm(`Llenar «${S.local.nombre}» con datos de ejemplo, en la semana del `
-    + `${ddmm(f[0])} al ${ddmm(f[6])}.\n\n`
-    + 'Se agregan turnos, marcas, una ausencia, un turno sin asignar y las propinas.\n'
-    + 'Lo que ya tengas esa semana NO se borra: esto se suma.\n\n'
-    + 'Todo se puede deshacer con Limpiar y Borrar las marcas.')) return;
+  const b = $('#btnEjemplo');
+  if (!confirm('Se va a crear un local nuevo llamado «Ejemplo», aparte de los tuyos, '
+    + 'con su propia gente y una semana completa de turnos, marcas y propinas.\n\n'
+    + 'No se toca ninguno de tus locales. Para volver al tuyo, lo eliges arriba.')) return;
 
-  const b = $('#btnEjemplo'); b.disabled = true; b.textContent = 'Llenando…';
-  m.textContent = ''; m.className = 'msg';
+  b.disabled = true; b.textContent = 'Creando…';
+  m.textContent = 'Creando el local, la gente y los turnos…'; m.className = 'msg';
+
+  try {
+    S.local = await DATOS.crearLocal('Ejemplo');
+    await Promise.all([
+      DATOS.crearTurno(S.local.id, { nombre:'Apertura', inicio:8,  fin:16.5, colacion:0.5, orden:1 }),
+      DATOS.crearTurno(S.local.id, { nombre:'Tarde',    inicio:13, fin:21.5, colacion:0.5, orden:2 }),
+      DATOS.crearTurno(S.local.id, { nombre:'Cierre',   inicio:17, fin:25,   colacion:0.5, orden:3 }),
+    ]);
+    for (const q of ['Barra','Cocina','Garzón'])
+      try { await DATOS.crearPuesto(S.local.id, { nombre:q, color:(['Barra','Cocina','Garzón'].indexOf(q) % 4) + 1,
+                                                  orden:['Barra','Cocina','Garzón'].indexOf(q) + 1 }); }
+      catch (e) { /* si el SQL de puestos no está, se sigue igual */ }
+    for (const d of EJEMPLO) await DATOS.crearPersona(S.local.id, d);
+    try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
+    await refrescar();
+  } catch (e) {
+    b.disabled = false; b.textContent = 'Llenar con datos de ejemplo';
+    m.textContent = e.message; m.className = 'msg bad'; return;
+  }
+
+  const f = fechas();
+  m.textContent = 'Armando la semana…'; b.textContent = 'Llenando…';
   const ts = S.turnos.slice().sort((a,x) => Number(a.inicio) - Number(x.inicio));
   const gente = S.personas.slice();
   let creados = 0, marcados = 0;
@@ -1052,7 +1081,8 @@ async function llenarEjemplo() {
       });
 
     await refrescar();
-    m.textContent = `Listo: ${creados} turnos y ${marcados} marcas. Mira la Semana, el Día y Control horario.`;
+    m.textContent = `Listo. Estás en el local «Ejemplo» con ${creados} turnos y ${marcados} marcas. `
+      + 'Mira la Semana, el Día y Control horario. Arriba puedes volver a tu local.';
     m.className = 'msg ok';
   } catch (e) {
     S.hist.pop(); pintarDeshacer();
