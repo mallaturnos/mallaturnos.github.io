@@ -755,32 +755,37 @@ function pintarDia() {
   // Agrupados por HORARIO REAL y ordenados por hora de entrada, que es como se
   // lee el día. Antes se agrupaba por plantilla, pero ahora dos turnos de la
   // misma plantilla pueden tener horas distintas: la plantilla solo da el nombre.
+  // El grupo guarda el PAR persona+turno. Antes guardaba solo a la persona y
+  // usaba la asignación del primero para todos: resultado, todos mostraban el
+  // puesto del primero y, peor, hacer clic en cualquiera abría el turno del
+  // primero. Lo delató una captura de Pedro donde todos decían «Barra».
   const porHorario = {};
   conTurno.forEach(x => {
     const k = Number(x.a.inicio) + '|' + Number(x.a.fin) + '|' + Number(x.a.colacion||0);
-    (porHorario[k] = porHorario[k] || { a: x.a, gente: [] }).gente.push(x.p);
+    (porHorario[k] = porHorario[k] || { a: x.a, gente: [] }).gente.push(x);
   });
   Object.values(porHorario)
     .sort((u,v) => Number(u.a.inicio) - Number(v.a.inicio) || Number(u.a.fin) - Number(v.a.fin))
     .forEach(({ a: ta, gente }) => {
     const t = ta.turno_id ? turnoDe(ta.turno_id) : null;
     const hs = horasAsig(ta);
-    const costo = gente.reduce((s,p) => s + hs * (p.valor_hora||0), 0);
+    const costo = gente.reduce((s,x) => s + hs * (x.p.valor_hora||0), 0);
     caja.appendChild(el('div','turnodia', `
       <div class="turnodia-h">
         <b>${esc(t ? t.nombre : hhmm(ta.inicio) + '–' + hhmm(ta.fin))}</b>
         <span>${hhmm(ta.inicio)}–${hhmm(ta.fin)} · ${hfmt(hs)} h · ${gente.length} ${gente.length===1?'persona':'personas'} · ${clp(costo)}</span>
       </div>
-      <ul data-fecha="${fe}">${gente.map(p => {
-        const m = marcaDe(p.id, fe);
-        const hl = horaLlegada(m);
-        const tarde = hl !== null ? Math.round((hl - Number(ta.inicio))*60) : null;
-        const et = m.llego === true
+      <ul data-fecha="${fe}">${gente.map(({ p, a }) => {
+        // la marca de ESE turno, no la del día: con turno partido son distintas
+        const m = marcaAsig(a).entrada ? marcaAsig(a) : marcaDe(p.id, fe);
+        const hl = m.entrada ? horaDe(m.entrada) : horaLlegada(m);
+        const tarde = hl !== null ? Math.round((hl - Number(a.inicio))*60) : null;
+        const et = (m.llego === true || m.entrada)
                  ? `<span class="flag ok">llegó${hl !== null ? ' ' + hhmm(hl) : ''}${tarde > 5 ? ' · '+minFmt(tarde)+' tarde' : ''}</span>`
                  : m.confirmo === true ? '<span class="flag info">confirmó</span>'
                  : m.confirmo === false ? '<span class="flag bad">no puede</span>' : '';
-        return `<li data-p="${p.id}" data-asig="${ta.id}" role="button" tabindex="0"
-          title="Editar este turno"><b>${esc(p.nombre)}</b> <span class="rol">${esc(puestoDe(ta,p)||'')}</span> ${et}</li>`;
+        return `<li data-p="${p.id}" data-asig="${a.id}" role="button" tabindex="0"
+          title="Editar este turno"><b>${esc(p.nombre)}</b> <span class="rol">${esc(puestoDe(a,p)||'')}</span> ${et}</li>`;
       }).join('')}</ul>`));
   });
 
