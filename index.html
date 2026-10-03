@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=32">
+<link rel="stylesheet" href="estilo.css?v=33">
 </head>
 <body>
 
@@ -132,7 +132,10 @@
           <div class="scroll" style="border:0;background:transparent"><div id="needDia"></div></div>
           <div class="acciones" style="margin-top:12px">
             <button class="act" id="btnCopiarDotacion">Copiar este día a los demás</button>
+            <button class="act" id="btnLimpiarDot">Limpiar</button>
+            <button class="act" id="btnDeshacerDot" disabled>Deshacer</button>
           </div>
+          <p class="msg" id="msgDot"></p>
         </details>
       </div>
       <div class="card">
@@ -149,7 +152,10 @@
         <div class="acciones" style="margin-top:14px">
           <button class="act" id="btnPersona">Agregar persona</button>
           <button class="act" id="btnCerrarSemana">Cerrar la semana al saldo</button>
+          <button class="act" id="btnLimpiarEq">Limpiar</button>
+          <button class="act" id="btnDeshacerEq" disabled>Deshacer</button>
         </div>
+        <p class="msg" id="msgEq"></p>
         <p class="hint" style="margin-top:8px">«Cerrar la semana al saldo» suma a cada persona la diferencia entre las horas que le planificaste y las de su contrato. Hazlo <b>una vez por semana</b>.</p>
       </div>
       <div class="card">
@@ -245,7 +251,7 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
-<script src="datos.js?v=31"></script>
-<script src="app.js?v=32"></script>
+<script src="datos.js?v=33"></script>
+<script src="app.js?v=33"></script>
 </body>
 </html>

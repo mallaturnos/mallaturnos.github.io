@@ -38,7 +38,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
             lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobPuesto:'', cobDia:'0', dotacion:{}, canal:null,
-            hist:[], recien:null };
+            hist:[], histDot:[], histEq:[], recien:null };
 
 /* ---------- deshacer ----------
    Antes de cualquier cambio en la malla se guarda una foto de como estaba el
@@ -73,6 +73,76 @@ async function deshacer() {
   }
   pintarDeshacer();
   setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 5000);
+}
+
+/* ---------- deshacer de la DOTACION ----------
+   Se guarda la dotacion COMPLETA, no el dia que se ve: 'copiar este dia a los
+   demas' toca seis dias de una, y un paso atras que repusiera solo uno dejaria
+   la mitad del cambio puesto. Son unas decenas de numeros: cabe de sobra. */
+function fotoDotacion() {
+  const filas = [];
+  for (const perfil of Object.keys(S.dotacion))
+    for (const puesto of Object.keys(S.dotacion[perfil]))
+      for (const turnoId of Object.keys(S.dotacion[perfil][puesto]))
+        filas.push({ perfil, puesto, turno_id:turnoId, cantidad:S.dotacion[perfil][puesto][turnoId] });
+  return filas;
+}
+function recordarDot(que) {
+  S.histDot.push({ filas: fotoDotacion(), que: que || 'el ultimo cambio' });
+  if (S.histDot.length > MAX_HIST) S.histDot.shift();
+  pintarDeshacerDot();
+}
+function pintarDeshacerDot() {
+  const b = $('#btnDeshacerDot'); if (!b) return;
+  const h = S.histDot[S.histDot.length - 1];
+  b.disabled = !h;
+  b.title = h ? 'Deshacer ' + h.que : 'No hay nada que deshacer';
+}
+async function deshacerDot() {
+  const h = S.histDot.pop(); if (!h) return;
+  const m = $('#msgDot');
+  try {
+    await DATOS.reponerDotacion(S.local.id, h.filas);
+    await refrescar();
+    $('#detNecesita').open = true;
+    if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
+  } catch (e) {
+    S.histDot.push(h);                   // no se pudo: el paso atras sigue ahi
+    if (m) { m.textContent = e.message; m.className = 'msg bad'; }
+  }
+  pintarDeshacerDot();
+  setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 5000);
+}
+
+/* ---------- deshacer del EQUIPO ----------
+   Quitar a alguien es baja logica (activo = false), nunca un borrado: sus
+   turnos y sus marcas siguen ahi. Por eso aca basta con guardar los ids y el
+   paso atras repone exactamente lo que habia, sin perder historial. */
+function recordarEq(ids, que) {
+  if (!ids.length) return;
+  S.histEq.push({ ids, que: que || 'el ultimo cambio' });
+  if (S.histEq.length > MAX_HIST) S.histEq.shift();
+  pintarDeshacerEq();
+}
+function pintarDeshacerEq() {
+  const b = $('#btnDeshacerEq'); if (!b) return;
+  const h = S.histEq[S.histEq.length - 1];
+  b.disabled = !h;
+  b.title = h ? 'Deshacer ' + h.que : 'No hay nada que deshacer';
+}
+async function deshacerEq() {
+  const h = S.histEq.pop(); if (!h) return;
+  const m = $('#msgEq');
+  try {
+    await DATOS.activarPersonas(h.ids, true);
+    await refrescar();
+    if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
+  } catch (e) {
+    S.histEq.push(h);
+    if (m) { m.textContent = e.message; m.className = 'msg bad'; }
+  }
+  pintarDeshacerEq();
+  setTimeout(() => { const x = $('#msgEq'); if (x) x.textContent = ''; }, 5000);
 }
 
 // La franja horaria no se fija a mano: sale de los turnos que tenga el local.
@@ -565,7 +635,10 @@ function pintarEquipo() {
     });
     row.querySelector('[data-del]').addEventListener('click', async () => {
       if (!confirm('¿Quitar a ' + p.nombre + ' del equipo?\n\nSus turnos y marcas anteriores no se borran.')) return;
-      try { await DATOS.quitarPersona(p.id); await refrescar(); } catch (e) { error(e); }
+      try {
+        recordarEq([p.id], 'quitar a ' + p.nombre);
+        await DATOS.quitarPersona(p.id); await refrescar();
+      } catch (e) { S.histEq.pop(); pintarDeshacerEq(); error(e); }
     });
   });
 }
@@ -671,6 +744,7 @@ function pintarCobertura() {
           clearTimeout(tm);
           tm = setTimeout(async () => {
             const v = Number(inp.value) || 0;
+            recordarDot('cambiar un número');     // la foto, antes de tocar nada
             const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
             (pf[puesto] = pf[puesto] || {})[inp.dataset.t] = v;
             try { await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, inp.dataset.t, v); pintarCobertura(); }
@@ -1013,7 +1087,7 @@ function pintarLinks() {
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
   pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
-  pintarDeshacer();
+  pintarDeshacer(); pintarDeshacerDot(); pintarDeshacerEq();
 }
 
 /* ================= VISTA DEL TRABAJADOR ================= */
@@ -1261,11 +1335,12 @@ function conectarApp() {
     if (!filas.length) return alert(`${dia} no tiene ningún número puesto todavía.\n\nLlénalo primero y después cópialo.`);
     if (!confirm(`Copiar la dotación de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
     const b = $('#btnCopiarDotacion'); b.disabled = true;
+    recordarDot('copiar ' + dia + ' a los demás');
     try {
       await DATOS.guardarDotacionLote(filas);     // una sola llamada, no sesenta
       await refrescar();
       $('#detNecesita').open = true;
-    } catch (e) { error(e); }
+    } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
     b.disabled = false;
   });
   // dejar la hoja en blanco: todo el mundo libre, sin borrar nada mas
@@ -1286,6 +1361,48 @@ function conectarApp() {
     setTimeout(() => { $('#msgSem').textContent = ''; }, 6000);
   });
   on('#btnDeshacer', 'click', deshacer);
+
+  // dejar en blanco la dotacion del DIA que se esta editando. Si quiere los
+  // siete, limpia uno y lo copia a los demas: ya existe ese boton.
+  on('#btnLimpiarDot', 'click', async () => {
+    const dia = DIAS[Number(S.cobDia)];
+    const hoy = S.dotacion[S.cobDia] || {};
+    let cuantas = 0;
+    for (const puesto of Object.keys(hoy)) cuantas += Object.keys(hoy[puesto]).length;
+    if (!cuantas) return alert(`${dia} ya está en blanco.`);
+    if (!confirm(`Borrar los números de ${dia}.\n\n`
+      + `Son ${cuantas} ${cuantas === 1 ? 'casilla' : 'casillas'}. Los otros días no se tocan, `
+      + `y lo puedes deshacer.`)) return;
+    const m = $('#msgDot');
+    recordarDot('limpiar ' + dia);
+    try {
+      await DATOS.borrarDotacion(S.local.id, S.cobDia);
+      await refrescar();
+      $('#detNecesita').open = true;
+      m.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
+    } catch (e) { S.histDot.pop(); pintarDeshacerDot(); m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
+  });
+  on('#btnDeshacerDot', 'click', deshacerDot);
+
+  // sacar a todo el equipo de la lista. No borra: los deja inactivos, igual que
+  // el Quitar de cada fila, asi que sus turnos y sus marcas quedan intactos.
+  on('#btnLimpiarEq', 'click', async () => {
+    const ids = S.personas.map(p => p.id);
+    if (!ids.length) return alert('El equipo ya está vacío.');
+    if (!confirm(`Sacar de la lista a las ${ids.length} personas del equipo.\n\n`
+      + `No se borra nada: sus turnos, sus marcas y sus propinas quedan guardados, `
+      + `igual que cuando quitas a alguien de a uno. Lo puedes deshacer.`)) return;
+    const m = $('#msgEq');
+    recordarEq(ids, 'limpiar el equipo');
+    try {
+      await DATOS.activarPersonas(ids, false);
+      await refrescar();
+      m.textContent = 'Equipo vacío. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
+    } catch (e) { S.histEq.pop(); pintarDeshacerEq(); m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgEq'); if (x) x.textContent = ''; }, 6000);
+  });
+  on('#btnDeshacerEq', 'click', deshacerEq);
 
   on('#cobPuesto', 'change', ev => { S.cobPuesto = ev.target.value; pintarCobertura(); });
   on('#objetivoPct', 'change', async ev => {

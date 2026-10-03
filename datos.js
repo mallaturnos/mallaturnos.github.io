@@ -63,6 +63,12 @@
   const quitarPersona = (id) =>
     pedir(sb.from('personas').update({ activo: false }).eq('id', id).select().single());
 
+  // Varias de una vez, para el boton Limpiar del equipo y para su Deshacer.
+  // Como es baja logica, reponer es volver a poner activo = true en los mismos
+  // ids: los turnos y las marcas nunca se fueron.
+  const activarPersonas = (ids, activo) =>
+    pedir(sb.from('personas').update({ activo: !!activo }).in('id', ids).select());
+
   /* ---------- catálogo de turnos ---------- */
   const turnos = (localId) =>
     pedir(sb.from('turnos').select('*').eq('local_id', localId).order('orden').order('inicio'));
@@ -161,6 +167,26 @@
   const guardarDotacionLote = (filas) =>
     pedir(sb.from('dotacion').upsert(filas, { onConflict: 'local_id,perfil,puesto,turno_id' }).select());
 
+  // Dejar en blanco un dia de la semana, o la semana entera si no se pasa perfil.
+  const borrarDotacion = (localId, perfil) => {
+    let q = sb.from('dotacion').delete().eq('local_id', localId);
+    if (perfil != null) q = q.eq('perfil', String(perfil));
+    return pedir(q);
+  };
+
+  // Vuelve a dejar la dotacion exactamente como estaba. Se repone COMPLETA y no
+  // por dia, porque 'copiar a los demas' toca seis dias de una y un deshacer
+  // que solo repusiera uno dejaria la mitad del cambio puesto.
+  const reponerDotacion = async (localId, filas) => {
+    await borrarDotacion(localId);
+    if (!filas || !filas.length) return 0;
+    await pedir(sb.from('dotacion').insert(filas.map(f => ({
+      local_id: localId, perfil: String(f.perfil), puesto: f.puesto,
+      turno_id: f.turno_id, cantidad: f.cantidad,
+    }))).select());
+    return filas.length;
+  };
+
   /* ---------- turnos abiertos ---------- */
   const abiertos = (localId, desde) =>
     pedir(sb.from('turnos_abiertos').select('*').eq('local_id', localId)
@@ -198,11 +224,12 @@
   global.DATOS = {
     init, explicar,
     miLocal, misLocales, crearLocal, guardarLocal, dejarDeEscuchar,
-    personas, crearPersona, guardarPersona, quitarPersona,
+    personas, crearPersona, guardarPersona, quitarPersona, activarPersonas,
     turnos, crearTurno, guardarTurno, quitarTurno,
     asignaciones, ponerTurno, marcas, marcarComoJefe, copiarSemana,
     borrarAsignaciones, reponerAsignaciones,
     dias, guardarDia, dotacion, guardarDotacion, guardarDotacionLote,
+    borrarDotacion, reponerDotacion,
     abiertos, abrirTurno, cerrarTurno,
     miSemana, marcar, tomarTurno, ofrecerTurno,
     escuchar,
