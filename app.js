@@ -191,7 +191,7 @@ const solapan = (a, t) => Number(a.inicio) < Number(t.fin) && Number(t.inicio) <
 // cuando no aparece para elegirlo ni para pedir dotacion.
 const puestosConocidos = () => [...new Set([
   ...S.personas.map(p => (p.rol || '').trim()),
-  ...Object.values(S.asign).map(a => (a.puesto || '').trim()),
+  ...Object.values(S.asign).flat().map(a => (a.puesto || '').trim()),
 ].filter(Boolean))].sort();
 
 // El filtro por puesto aplica a las tres vistas del plan. No toca las propinas
@@ -1566,7 +1566,8 @@ function conectarApp() {
   // dejar la hoja en blanco: todo el mundo libre, sin borrar nada mas
   on('#btnLimpiarSem', 'click', async () => {
     const r = rango();
-    const cuantas = Object.values(S.asign).filter(a => a.fecha >= r.desde && a.fecha <= r.hasta).length;
+    const cuantas = Object.values(S.asign).flat()
+      .filter(a => a.fecha >= r.desde && a.fecha <= r.hasta).length;
     if (!cuantas) return alert('Esta hoja ya está en blanco.');
     if (!confirm(`Dejar libre a todo el mundo del ${ddmm(r.desde)} al ${ddmm(r.hasta)}.\n\n`
       + `Se borran ${cuantas} ${cuantas === 1 ? 'asignación' : 'asignaciones'}. `
