@@ -31,7 +31,11 @@
 }
 *{box-sizing:border-box}
 body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);line-height:1.5}
-.wrap{max-width:860px;margin:0 auto;padding:24px 16px 56px}
+/* 860px servían cuando esto era un formulario. Con la malla de 7 días por 8
+   personas, en un monitor ancho se desperdiciaba media pantalla y la tabla se
+   cortaba igual. Los textos no se estiran: .sub y .hint ya tienen su propio
+   límite en ch para que la línea se siga leyendo. */
+.wrap{max-width:1600px;margin:0 auto;padding:24px 20px 56px}
 h1,h2{font-family:var(--font-display);margin:0;letter-spacing:-.01em;text-wrap:balance}
 h1{font-size:clamp(1.5rem,4vw,2rem);font-weight:700}
 h2{font-size:1.0625rem;font-weight:600}
@@ -488,3 +492,14 @@ table.mes td.corte{width:8px;min-width:8px;max-width:8px;padding:0;
 /* Fila al pie con las horas de cada día y el total del mes. */
 tr.piemes th,tr.piemes td{background:var(--surface-2);font-weight:600;position:sticky;bottom:0}
 td.mpie{font-family:var(--font-mono);font-size:.625rem;text-align:center;color:var(--fg-dim)}
+
+/* El reloj control del trabajador: una tarjeta por turno, porque con turno
+   partido «llegué» una vez al día no significa nada. */
+.turnocard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:8px}
+.turnocard.dentro{border-color:var(--ok);background:var(--ok-soft)}
+.turnocard-h{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.turnocard-h b{font-family:var(--font-mono);font-size:.9375rem}
+.turnocard .marcado{margin:0 0 8px;font-size:.8125rem;color:var(--fg-dim)}
+.turnocard .btns{margin:0}
+.turnocard button.reloj{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.turnocard button.reloj.sale{background:var(--warn);border-color:var(--warn);color:#fff}
