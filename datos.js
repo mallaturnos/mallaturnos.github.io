@@ -17,14 +17,26 @@
   function explicar(e) {
     if (!e) return 'Error desconocido.';
     const m = (e.message || '') + ' ' + (e.details || '');
-    if (/relation .* does not exist/i.test(m))
-      return 'Esa tabla no existe en la base todavía. Falta aplicar el esquema.';
+    if (/relation .* does not exist/i.test(m)) {
+      const t = m.match(/relation "([^"]+)"/);
+      return `La tabla «${t ? t[1].replace(/^public\./,'') : '?'}» no existe en la base todavía. `
+           + 'Falta aplicar el archivo arreglo-*.sql que la crea.';
+    }
+    // «column X.Y does not exist» tambien dice exactamente que falta
+    const colf = m.match(/column ([a-z_]+)\.([a-z_]+) does not exist/i);
+    if (colf) return `A la base le falta la columna «${colf[2]}» de la tabla «${colf[1]}». `
+           + 'Falta aplicar el archivo arreglo-*.sql que la agrega.';
     // Postgres dice lo mismo («schema cache») cuando falta una COLUMNA, y decir
     // «faltan las tablas» ahi manda a buscar al lugar equivocado: la base esta,
     // lo que falta es el ultimo parche.
-    if (/schema cache/i.test(m))
-      return 'A la base le falta un cambio que la app ya está usando. '
-           + 'Hay que aplicar el último archivo arreglo-*.sql en el SQL Editor de Supabase.';
+    if (/schema cache/i.test(m)) {
+      // Decir QUE falta, no solo que falta algo: con cinco archivos arreglo-*.sql
+      // un mensaje generico manda a buscar a ciegas.
+      const col = m.match(/'([^']+)' column of '([^']+)'/);
+      const que = col ? `la columna «${col[1]}» de la tabla «${col[2]}»` : 'un cambio';
+      return `A la base le falta ${que}, que la app ya está usando. `
+           + 'Hay que aplicar el archivo arreglo-*.sql que la agrega.';
+    }
     if (/row-level security|violates row-level/i.test(m))
       return 'La base rechazó la operación por las reglas de acceso. Revisa que estés en tu propio local.';
     if (/duplicate key/i.test(m)) return 'Ese registro ya existe.';
