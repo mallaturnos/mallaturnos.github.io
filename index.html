@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=26">
+<link rel="stylesheet" href="estilo.css?v=27">
 </head>
 <body>
 
@@ -74,7 +74,8 @@
     <form id="formLocal" class="form">
       <div class="fld"><label for="nombreLocal">Nombre</label>
         <input type="text" id="nombreLocal" placeholder="Café Las Rosas" required></div>
-      <div class="acciones"><button class="act primary" type="submit">Crear</button></div>
+      <div class="acciones"><button class="act primary" type="submit">Crear</button>
+        <button class="act" type="button" id="cancelarLocal" hidden>Cancelar</button></div>
       <p class="msg" id="msgLocal" role="status"></p>
     </form>
   </div>
@@ -248,8 +249,8 @@
 </div>
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
-<script src="config.js?v=26"></script>
-<script src="datos.js?v=26"></script>
-<script src="app.js?v=26"></script>
+<script src="config.js?v=27"></script>
+<script src="datos.js?v=27"></script>
+<script src="app.js?v=27"></script>
 </body>
 </html>
