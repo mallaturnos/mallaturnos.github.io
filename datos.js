@@ -109,6 +109,25 @@
     return filas.length;
   };
 
+  // Borra todo lo asignado en un rango: la hoja queda en blanco y, al no haber
+  // fila, cada casilla se dibuja como "libre". No se borra nada mas (ni marcas
+  // ni propinas), solo la malla.
+  const borrarAsignaciones = (localId, desde, hasta) =>
+    pedir(sb.from('asignaciones').delete().eq('local_id', localId)
+            .gte('fecha', desde).lte('fecha', hasta));
+
+  // Vuelve a dejar el rango exactamente como estaba: lo que hay se borra y se
+  // reponen las filas guardadas. Es lo que usa el boton Deshacer.
+  const reponerAsignaciones = async (localId, desde, hasta, filas) => {
+    await borrarAsignaciones(localId, desde, hasta);
+    if (!filas || !filas.length) return 0;
+    await pedir(sb.from('asignaciones').insert(filas.map(a => ({
+      local_id: localId, persona_id: a.persona_id, fecha: a.fecha,
+      turno_id: a.turno_id || null, ausencia: a.turno_id ? null : (a.ausencia || 'L'),
+    }))).select());
+    return filas.length;
+  };
+
   const marcas = (localId, desde, hasta) =>
     pedir(sb.from('marcas').select('*, personas!inner(local_id)')
             .eq('personas.local_id', localId).gte('fecha', desde).lte('fecha', hasta));
@@ -136,6 +155,11 @@
   const guardarDotacion = (localId, perfil, puesto, turnoId, cantidad) =>
     pedir(sb.from('dotacion').upsert({ local_id: localId, perfil, puesto, turno_id: turnoId, cantidad },
       { onConflict: 'local_id,perfil,puesto,turno_id' }).select().single());
+
+  // Varias filas de dotacion de una vez: copiar un dia a los otros seis son
+  // decenas de casillas, y mandarlas una por una es lento y se corta a la mitad.
+  const guardarDotacionLote = (filas) =>
+    pedir(sb.from('dotacion').upsert(filas, { onConflict: 'local_id,perfil,puesto,turno_id' }).select());
 
   /* ---------- turnos abiertos ---------- */
   const abiertos = (localId, desde) =>
@@ -177,7 +201,8 @@
     personas, crearPersona, guardarPersona, quitarPersona,
     turnos, crearTurno, guardarTurno, quitarTurno,
     asignaciones, ponerTurno, marcas, marcarComoJefe, copiarSemana,
-    dias, guardarDia, dotacion, guardarDotacion,
+    borrarAsignaciones, reponerAsignaciones,
+    dias, guardarDia, dotacion, guardarDotacion, guardarDotacionLote,
     abiertos, abrirTurno, cerrarTurno,
     miSemana, marcar, tomarTurno, ofrecerTurno,
     escuchar,

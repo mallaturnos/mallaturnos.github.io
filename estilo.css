@@ -137,6 +137,12 @@ ul.people li:last-child{border-bottom:0;padding-bottom:0}
   padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line)}
 @media (max-width:760px){.rowline{grid-template-columns:1fr 1fr}}
 .rowline:last-of-type{border-bottom:0;margin-bottom:0}
+/* la persona recien agregada: la lista va ordenada por puesto, asi que no cae
+   debajo del boton sino donde le toca — se marca para que se vea cual es */
+.rowline.recien{outline:2px solid var(--accent);outline-offset:6px;border-radius:3px;
+  animation:aparece 1.6s ease-out}
+@keyframes aparece{0%{background:var(--accent-soft)}100%{background:transparent}}
+button.act[disabled]{opacity:.45;cursor:not-allowed}
 .grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,1fr));gap:10px}
 .fld input.n{font-family:var(--font-mono);text-align:right}
 button.mini{font-size:.75rem;padding:7px 10px;border:1px solid var(--line);border-radius:3px;

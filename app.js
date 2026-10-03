@@ -37,7 +37,43 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
-            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobPuesto:'', cobDia:'0', dotacion:{}, canal:null };
+            lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobPuesto:'', cobDia:'0', dotacion:{}, canal:null,
+            hist:[], recien:null };
+
+/* ---------- deshacer ----------
+   Antes de cualquier cambio en la malla se guarda una foto de como estaba el
+   rango que se ve en pantalla. Deshacer repone esa foto tal cual. Se guardan
+   las ultimas 20: es un paso atras de verdad, no un historial eterno. */
+const MAX_HIST = 20;
+function recordar(que) {
+  const r = rango();
+  const filas = Object.values(S.asign)
+    .filter(a => a.fecha >= r.desde && a.fecha <= r.hasta)
+    .map(a => ({ persona_id:a.persona_id, fecha:a.fecha, turno_id:a.turno_id, ausencia:a.ausencia }));
+  S.hist.push({ desde:r.desde, hasta:r.hasta, filas, que: que || 'el ultimo cambio' });
+  if (S.hist.length > MAX_HIST) S.hist.shift();
+  pintarDeshacer();
+}
+function pintarDeshacer() {
+  const b = $('#btnDeshacer'); if (!b) return;
+  const h = S.hist[S.hist.length - 1];
+  b.disabled = !h;
+  b.title = h ? 'Deshacer ' + h.que : 'No hay nada que deshacer';
+}
+async function deshacer() {
+  const h = S.hist.pop(); if (!h) return;
+  const m = $('#msgSem');
+  try {
+    await DATOS.reponerAsignaciones(S.local.id, h.desde, h.hasta, h.filas);
+    await refrescar();
+    if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
+  } catch (e) {
+    S.hist.push(h);                      // no se pudo: el paso atras sigue ahi
+    if (m) { m.textContent = e.message; m.className = 'msg bad'; }
+  }
+  pintarDeshacer();
+  setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 5000);
+}
 
 // La franja horaria no se fija a mano: sale de los turnos que tenga el local.
 // Un café que cierra a las 19 no tiene por qué mirar columnas hasta la 1 AM.
@@ -148,6 +184,17 @@ function traducir(m) {
   if (t.includes('rate limit') || t.includes('too many')) return 'Demasiados intentos seguidos. Espera unos minutos.';
   if (t.includes('password')) return 'La contraseña debe tener al menos 8 caracteres.';
   return m;
+}
+
+// Lleva a la vista la persona recien agregada y deja el cursor en su nombre,
+// con el texto seleccionado: se escribe encima y listo.
+function mostrarRecien() {
+  if (!S.recien) return;
+  const row = document.querySelector(`#eqLista [data-persona="${S.recien}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior:'smooth', block:'center' });
+  const inp = row.querySelector('input[data-k="nombre"]');
+  if (inp) { inp.focus(); inp.select(); }
 }
 
 /* ---------- varios locales: un selector, cada uno con su gente ---------- */
@@ -307,6 +354,7 @@ function pintarSemana() {
       sel.value = a ? (a.turno_id || 'a:' + (a.ausencia||'L')) : 'a:L';
       sel.addEventListener('change', async () => {
         const v = sel.value, esAus = v.startsWith('a:');
+        recordar('el turno de ' + p.nombre + ' del ' + ddmm(fe));
         try {
           const nueva = await DATOS.ponerTurno(S.local.id, p.id, fe, esAus ? null : v, esAus ? v.slice(2) : null);
           S.asign[p.id + '|' + fe] = nueva;
@@ -467,7 +515,7 @@ function pintarEquipo() {
   const box = $('#eqLista'); box.innerHTML = '';
   if (!S.personas.length) box.appendChild(el('p','vacio','Todavía no hay nadie. Agrega tu primera persona abajo.'));
   S.personas.forEach(p => {
-    const row = el('div','rowline', `
+    const row = el('div','rowline' + (p.id === S.recien ? ' recien' : ''), `
       ${filaCampo('Nombre','text',p.nombre,'data-k="nombre"')}
       ${filaCampo('Puesto','text',p.rol||'','data-k="rol" placeholder="Garzón"')}
       ${filaCampo('Equipo','text',p.equipo||'','data-k="equipo" placeholder="Fijos / Por llamado"')}
@@ -479,6 +527,7 @@ function pintarEquipo() {
       <div class="dispo"><span>No puede:</span>${DIAS.map((d,i) =>
         `<button type="button" class="dia ${(p.no_disponible||[]).includes(i) ? 'no' : ''}" data-dia="${i}"
           aria-pressed="${(p.no_disponible||[]).includes(i)}">${d}</button>`).join('')}</div>`);
+    row.dataset.persona = p.id;
     box.appendChild(row);
     let t = null;
     row.querySelectorAll('input[data-k]').forEach(inp => {
@@ -490,7 +539,11 @@ function pintarEquipo() {
           if (k === 'nombre' || k === 'rol' || k === 'equipo') v = inp.value;
           else if (k === 'valor_hora') { v = dePlata(inp.value); inp.value = aPlata(v); }
           else v = Number(inp.value) || 0;
-          try { Object.assign(p, await DATOS.guardarPersona(p.id, { [k]: v })); pintarSemana(); pintarPropinas(); pintarLinks(); }
+          try {
+            Object.assign(p, await DATOS.guardarPersona(p.id, { [k]: v }));
+            if (p.id === S.recien && k === 'nombre') { S.recien = null; row.classList.remove('recien'); }
+            pintarSemana(); pintarPropinas(); pintarLinks();
+          }
           catch (e) { error(e); }
         }, 600);
       });
@@ -955,6 +1008,7 @@ function pintarLinks() {
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
   pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
+  pintarDeshacer();
 }
 
 /* ================= VISTA DEL TRABAJADOR ================= */
@@ -1178,6 +1232,7 @@ function conectarApp() {
                + 'Se pisan los turnos que ya pusiste. Las ausencias NO se copian.')) return;
     m.textContent = 'Copiando…'; m.className = 'msg';
     try {
+      recordar('copiar la semana anterior');
       const n = await DATOS.copiarSemana(S.local.id, anterior, iso(S.lunes));
       await refrescar();
       m.textContent = n ? `Listo: ${n} turnos copiados.` : 'La semana anterior estaba vacía.';
@@ -1189,18 +1244,44 @@ function conectarApp() {
   // copiar la dotación de un día a los demás, para no teclear siete veces
   on('#btnCopiarDotacion', 'click', async () => {
     const dia = DIAS[Number(S.cobDia)];
-    if (!confirm(`Copiar la dotación de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
     const origen = S.dotacion[S.cobDia] || {};
+    const filas = [];
+    for (let d = 0; d < 7; d++) {
+      if (String(d) === S.cobDia) continue;
+      for (const puesto of Object.keys(origen))
+        for (const turnoId of Object.keys(origen[puesto]))
+          filas.push({ local_id:S.local.id, perfil:String(d), puesto,
+                       turno_id:turnoId, cantidad:origen[puesto][turnoId] });
+    }
+    if (!filas.length) return alert(`${dia} no tiene ningún número puesto todavía.\n\nLlénalo primero y después cópialo.`);
+    if (!confirm(`Copiar la dotación de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
+    const b = $('#btnCopiarDotacion'); b.disabled = true;
     try {
-      for (let d = 0; d < 7; d++) {
-        if (String(d) === S.cobDia) continue;
-        for (const puesto of Object.keys(origen))
-          for (const h of Object.keys(origen[puesto]))
-            await DATOS.guardarDotacion(S.local.id, String(d), puesto, Number(h), origen[puesto][h]);
-      }
+      await DATOS.guardarDotacionLote(filas);     // una sola llamada, no sesenta
       await refrescar();
+      $('#detNecesita').open = true;
     } catch (e) { error(e); }
+    b.disabled = false;
   });
+  // dejar la hoja en blanco: todo el mundo libre, sin borrar nada mas
+  on('#btnLimpiarSem', 'click', async () => {
+    const r = rango();
+    const cuantas = Object.values(S.asign).filter(a => a.fecha >= r.desde && a.fecha <= r.hasta).length;
+    if (!cuantas) return alert('Esta hoja ya está en blanco.');
+    if (!confirm(`Dejar libre a todo el mundo del ${ddmm(r.desde)} al ${ddmm(r.hasta)}.\n\n`
+      + `Se borran ${cuantas} ${cuantas === 1 ? 'asignación' : 'asignaciones'}. `
+      + `Las propinas y las marcas no se tocan, y lo puedes deshacer.`)) return;
+    const m = $('#msgSem');
+    recordar('limpiar la hoja');
+    try {
+      await DATOS.borrarAsignaciones(S.local.id, r.desde, r.hasta);
+      await refrescar();
+      m.textContent = 'Hoja en blanco. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
+    } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { $('#msgSem').textContent = ''; }, 6000);
+  });
+  on('#btnDeshacer', 'click', deshacer);
+
   on('#cobPuesto', 'change', ev => { S.cobPuesto = ev.target.value; pintarCobertura(); });
   on('#objetivoPct', 'change', async ev => {
     const v = Number(ev.target.value) || 30;
@@ -1244,9 +1325,17 @@ function conectarApp() {
     } catch (e) { error(e); }
   });
   on('#cancelarLocal', 'click', () => { $('#cardLocal').hidden = true; $('#app').hidden = false; });
+  // La lista va ordenada por puesto y nombre, asi que la persona recien creada
+  // NO aparece debajo del boton sino donde le toca por orden — y si hay diez,
+  // queda fuera de la pantalla y parece que el boton no hizo nada.
   on('#btnPersona', 'click', async () => {
-    try { await DATOS.crearPersona(S.local.id, { nombre:'Nueva persona', rol:'', valor_hora:2900,
-            horas_contrato:42, factor_propina:1 }); await refrescar(); } catch (e) { error(e); }
+    try {
+      const nueva = await DATOS.crearPersona(S.local.id, { nombre:'Nueva persona', rol:'', valor_hora:2900,
+            horas_contrato:42, factor_propina:1 });
+      S.recien = nueva.id;
+      await refrescar();
+      mostrarRecien();
+    } catch (e) { error(e); }
   });
   on('#btnTurno', 'click', async () => {
     try { await DATOS.crearTurno(S.local.id, { nombre:'Turno '+(S.turnos.length+1), inicio:9, fin:17,
