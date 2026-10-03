@@ -63,6 +63,11 @@
     return pedir(sb.from('locales').insert({ nombre, dueno_id: s.user.id }).select().single());
   };
 
+  // Borrar un local se lleva por delante TODO lo suyo: su gente, sus turnos, su
+  // malla y sus propinas. La base lo hace en cascada. Por eso arriba se pide
+  // escribir el nombre: un clic de mas no puede costar eso.
+  const borrarLocal = (id) => pedir(sb.from('locales').delete().eq('id', id));
+
   const guardarLocal = (id, campos) =>
     pedir(sb.from('locales').update(campos).eq('id', id).select().single());
 
@@ -350,7 +355,7 @@
 
   global.DATOS = {
     init, explicar,
-    miLocal, misLocales, crearLocal, guardarLocal, dejarDeEscuchar,
+    miLocal, misLocales, crearLocal, guardarLocal, borrarLocal, dejarDeEscuchar,
     personas, crearPersona, guardarPersona, quitarPersona, activarPersonas,
     turnos, crearTurno, guardarTurno, quitarTurno,
     puestos, crearPuesto, guardarPuesto, quitarPuesto, renombrarPuesto,

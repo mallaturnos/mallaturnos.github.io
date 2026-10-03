@@ -988,8 +988,19 @@ async function llenarEjemplo() {
   m.textContent = 'Creando el local, la gente y los turnos…'; m.className = 'msg';
 
   try {
-    S.local = await DATOS.crearLocal('Ejemplo');
-    await Promise.all([
+    const yaHay = (S.locales || []).filter(l => l.nombre === 'Ejemplo');
+    if (yaHay.length) {
+      if (!confirm(`Ya tienes ${yaHay.length === 1 ? 'un local' : yaHay.length + ' locales'} «Ejemplo».\n\n`
+        + 'Voy a usar el que ya está en vez de crear otro.')) {
+        b.disabled = false; b.textContent = 'Llenar con datos de ejemplo'; m.textContent = ''; return;
+      }
+      S.local = yaHay[0];
+      try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
+      await refrescar();
+    } else {
+      S.local = await DATOS.crearLocal('Ejemplo');
+    }
+    if (!S.turnos.length) await Promise.all([
       DATOS.crearTurno(S.local.id, { nombre:'Apertura', inicio:8,  fin:16.5, colacion:0.5, orden:1 }),
       DATOS.crearTurno(S.local.id, { nombre:'Tarde',    inicio:13, fin:21.5, colacion:0.5, orden:2 }),
       DATOS.crearTurno(S.local.id, { nombre:'Cierre',   inicio:17, fin:25,   colacion:0.5, orden:3 }),
@@ -998,7 +1009,10 @@ async function llenarEjemplo() {
       try { await DATOS.crearPuesto(S.local.id, { nombre:q, color:(['Barra','Cocina','Garzón'].indexOf(q) % 4) + 1,
                                                   orden:['Barra','Cocina','Garzón'].indexOf(q) + 1 }); }
       catch (e) { /* si el SQL de puestos no está, se sigue igual */ }
-    for (const d of EJEMPLO) await DATOS.crearPersona(S.local.id, d);
+    // si ya estaban, no se duplican
+    for (const d of EJEMPLO)
+      if (!S.personas.some(x => normal(x.nombre) === normal(d.nombre)))
+        await DATOS.crearPersona(S.local.id, d);
     try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
     await refrescar();
   } catch (e) {
@@ -2256,6 +2270,33 @@ function conectarApp() {
 
   /* --- cargar el equipo desde una planilla --- */
   on('#btnEjemplo', 'click', llenarEjemplo);
+
+  // Borrar un local es de lo poco que NO se puede deshacer en esta app, asi que
+  // se pide escribir el nombre. Un «¿seguro?» se aprieta sin leer; escribir el
+  // nombre obliga a mirar cual se esta borrando.
+  on('#btnBorrarLocal', 'click', async () => {
+    const m = $('#msgBorrarLocal');
+    if ((S.locales || []).length < 2) {
+      m.textContent = 'Es tu único local. Crea otro antes de borrar este.';
+      m.className = 'msg bad'; return;
+    }
+    const n = S.personas.length, t = Object.values(S.asign).flat().length;
+    const r = prompt(`Vas a borrar «${S.local.nombre}» con TODO lo suyo:\n\n`
+      + `· ${n} ${n === 1 ? 'persona' : 'personas'}\n`
+      + `· ${t} ${t === 1 ? 'turno' : 'turnos'} de esta semana\n`
+      + '· sus marcas, sus propinas y su historial\n\n'
+      + 'Esto NO se puede deshacer.\n\n'
+      + `Para confirmar, escribe el nombre del local: ${S.local.nombre}`);
+    if (r === null) return;
+    if (r.trim() !== S.local.nombre) {
+      m.textContent = 'El nombre no coincide. No se borró nada.'; m.className = 'msg bad'; return;
+    }
+    try {
+      await DATOS.borrarLocal(S.local.id);
+      try { localStorage.removeItem('malla-local'); } catch (e) {}
+      await verJefe();
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
 
   on('#btnPuesto', 'click', async () => {
     const nombre = prompt('¿Cómo se llama el puesto?\n\nPor ejemplo: Barra, Cocina, Garzón.');
