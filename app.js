@@ -497,7 +497,7 @@ async function guardarDlg() {
 
   const d = duraDlg();
   if (!d) { m.textContent = 'Faltan las horas.'; m.className = 'msg bad'; return; }
-  if (d.horas <= 0) { m.textContent = 'La pausa se come el turno entero.'; m.className = 'msg bad'; return; }
+  if (d.horas <= 0) { m.textContent = 'La colación se come el turno entero.'; m.className = 'msg bad'; return; }
 
   const campos = { turno_id: $('#dPlantilla').value || null, inicio: d.inicio, fin: d.fin,
                    colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim() };
