@@ -87,6 +87,19 @@
   const activarPersonas = (ids, activo) =>
     pedir(sb.from('personas').update({ activo: !!activo }).in('id', ids).select());
 
+  // Verdadero cuando el error es «esto todavia no existe en la base», mirando
+  // el error CRUDO de Postgres y no el texto que nosotros mostramos: ese texto
+  // se reescribe y la comprobacion se cae sin que nadie se entere. Ya paso.
+  //   42703 = columna que no existe · 42P01 = tabla que no existe
+  //   PGRST204/205 = PostgREST no la encuentra en su cache
+  const faltaEnLaBase = (e) => {
+    const c = (e && e.crudo) || {};
+    const cod = String(c.code || '');
+    if (['42703','42P01','PGRST204','PGRST205'].includes(cod)) return true;
+    const t = (c.message || '') + ' ' + (c.details || '') + ' ' + (e && e.message || '');
+    return /does not exist|schema cache|no existe|le falta la columna|no existe en la base/i.test(t);
+  };
+
   /* ---------- catálogo de puestos ----------
      Mientras no se aplique `arreglo-puestos.sql` la tabla no existe. La app
      tiene que seguir funcionando igual, asi que esta lectura DEVUELVE VACIO en
@@ -96,7 +109,7 @@
       return await pedir(sb.from('puestos').select('*').eq('local_id', localId)
                            .eq('activo', true).order('orden').order('nombre'));
     } catch (e) {
-      if (/no existe|does not exist|schema cache|falta un cambio/i.test(e.message || '')) return [];
+      if (faltaEnLaBase(e)) return [];
       throw e;
     }
   };
@@ -298,7 +311,7 @@
               .or('persona_id.is.null,ofrecido_por.not.is.null')
               .order('fecha').order('inicio'));
     } catch (e) {
-      if (/does not exist|no existe|schema cache|falta un cambio/i.test(e.message || '')) return [];
+      if (faltaEnLaBase(e)) return [];
       throw e;
     }
   };
