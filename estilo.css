@@ -249,7 +249,7 @@ table.conf th.r{padding:8px 10px;font-size:.8125rem;font-weight:500;min-width:14
 
 /* ===== vista del mes ===== */
 table.mes{min-width:900px}
-table.mes thead th{padding:6px 2px;text-align:center;min-width:26px}
+table.mes thead th{padding:6px 2px;text-align:center;min-width:46px}  /* cabe «08:00» */
 table.mes thead th .dsem{display:block;font-weight:400;opacity:.5}
 table.mes th.r{padding:6px 10px;font-size:.8125rem;font-weight:500;min-width:150px}
 table.mes th.r .rol{display:block;font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
@@ -452,3 +452,34 @@ tr.grupo.sinpuesto th .ojo{font-family:var(--font-body);font-weight:500;text-tra
   cursor:pointer;font-size:.8125rem;font-family:var(--font-body)}
 .cell .borrarbl:hover{opacity:1;background:var(--bad-soft);color:var(--bad)}
 .cell .borrarbl:focus-visible{opacity:1;outline:2px solid var(--accent);outline-offset:1px}
+
+/* Vista del mes: la casilla muestra el HORARIO y no una inicial. Del video de
+   Skello — el mes sirve para ver el patrón («tres garzones todos los sábados,
+   acá falta alguien»), y con una letra por día no se ve ningún patrón. */
+td.mcel{padding:2px}
+.mcel .mbl{display:block;font-family:var(--font-mono);font-size:.5625rem;line-height:1.25;
+  padding:2px 3px;border-radius:4px;margin-bottom:2px;white-space:nowrap;
+  background:var(--surface-2);color:var(--fg)}
+.mcel .mbl:last-child{margin-bottom:0}
+.mcel .mbl[data-c="1"]{background:#cde3e5;color:#0f4247}
+.mcel .mbl[data-c="2"]{background:#ecdcc0;color:#57411a}
+.mcel .mbl[data-c="3"]{background:#d7d1e6;color:#37305a}
+.mcel .mbl[data-c="4"]{background:#dde5cf;color:#3a4a26}
+.mcel .mbl.aus{background:var(--surface-3);color:var(--fg-faint);font-family:var(--font-body);
+  overflow:hidden;text-overflow:ellipsis;max-width:46px}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+:root[data-theme="dark"] .mcel .mbl[data-c="1"]{background:#1e4348;color:#bfe2e5}
+:root[data-theme="dark"] .mcel .mbl[data-c="2"]{background:#453b26;color:#e9d6b0}
+:root[data-theme="dark"] .mcel .mbl[data-c="3"]{background:#353050;color:#cec8e6}
+:root[data-theme="dark"] .mcel .mbl[data-c="4"]{background:#2f3a24;color:#cfdcbb}
+
+/* Columna fina entre domingo y lunes: parte el mes en semanas legibles. */
+.corte{width:8px;min-width:8px;padding:0;background:var(--surface-3);border:0}
+
+/* Fila al pie con las horas de cada día y el total del mes. */
+tr.piemes th,tr.piemes td{background:var(--surface-2);font-weight:600;position:sticky;bottom:0}
+td.mpie{font-family:var(--font-mono);font-size:.625rem;text-align:center;color:var(--fg-dim)}

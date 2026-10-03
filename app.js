@@ -769,31 +769,53 @@ function pintarMes() {
   const ref = new Date(ds[0] + 'T00:00:00');
   $('#semTitulo').textContent = ref.toLocaleDateString('es-CL', { month:'long', year:'numeric' });
 
-  $('#mesCab').innerHTML = '<th>Persona</th>' + ds.map(f => {
+  $('#mesCab').innerHTML = '<th>Persona</th>' + ds.map((f,n) => {
     const d = new Date(f + 'T00:00:00'), i = (d.getDay() + 6) % 7;
-    return `<th class="${i>=5?'fin':''}">${d.getDate()}<span class="dsem">${DIAS[i][0]}</span></th>`;
+    // una columna fina antes de cada lunes: parte el mes en semanas legibles
+    const corte = (i === 0 && n > 0) ? '<th class="corte"></th>' : '';
+    return corte + `<th class="${i>=5?'fin':''}">${d.getDate()}<span class="dsem">${DIAS[i][0]}</span></th>`;
   }).join('') + '<th>Horas</th>';
 
   const cuerpo = $('#mesCuerpo'); cuerpo.innerHTML = '';
   personasVisibles().forEach(p => {
     let horas = 0;
-    const celdas = ds.map(f => {
+    const celdas = ds.map((f,n) => {
+      const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
+      const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
       const ts = turnosDe(p.id, f), a = ausenciaDe(p.id, f);
-      const t = ts[0];
-      if (t) {
+      if (ts.length) {
         horas += horasDia(p.id, f);
-        const pl = t.turno_id ? turnoDe(t.turno_id) : null;
-        const ci = pl ? (S.turnos.findIndex(x => x.id === pl.id) % 4) + 1 : 5;
-        const tit = ts.map(x => hhmm(x.inicio) + '–' + hhmm(x.fin)).join(' + ');
-        // con turno partido la inicial sola miente: se marca que son dos
-        return `<td class="mcel" data-c="${ci}" title="${esc(tit)}">${esc(
-          (pl ? pl.nombre[0] : hhmm(t.inicio).slice(0,2)))}${ts.length > 1 ? '<sup>'+ts.length+'</sup>' : ''}</td>`; }
+        // Un bloque por turno, con las horas en dos líneas. El mes sirve para
+        // ver el patrón —«tres garzones todos los sábados»— y con una inicial
+        // no se ve nada.
+        return corte + '<td class="mcel">' + ts.map(x => {
+          const pl = x.turno_id ? turnoDe(x.turno_id) : null;
+          const ci = pl ? (S.turnos.findIndex(y => y.id === pl.id) % 4) + 1 : 5;
+          const pu = puestoDe(x, p);
+          return `<span class="mbl" data-c="${ci}" title="${esc((pu ? pu + ' · ' : '')
+            + hhmm(x.inicio) + '–' + hhmm(x.fin) + ' · ' + hfmt(horasAsig(x)) + ' h'
+            + (x.nota ? '\n' + x.nota : ''))}">${hhmm(x.inicio)}<br>${hhmm(x.fin)}</span>`;
+        }).join('') + '</td>';
+      }
       if (a && a.ausencia && a.ausencia !== 'L')
-        return `<td class="mcel aus" title="${AUSENCIAS[a.ausencia]}">${a.ausencia}</td>`;
-      return '<td class="mcel"></td>';
+        return corte + `<td class="mcel"><span class="mbl aus" title="${AUSENCIAS[a.ausencia]}">${AUSENCIAS[a.ausencia]}</span></td>`;
+      return corte + '<td class="mcel"></td>';
     }).join('');
     cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')}</span></th>${celdas}<td class="tot">${hfmt(horas)} h</td></tr>`;
   });
+
+  // Al pie, las horas de cada día y el total del mes: es lo que convierte la
+  // tabla en algo con lo que se decide, y no solo en una grilla de colores.
+  let totMes = 0;
+  const pie = ds.map((f,n) => {
+    const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
+    const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
+    const h = personasVisibles().reduce((x,p) => x + horasDia(p.id, f), 0);
+    totMes += h;
+    return corte + `<td class="mpie">${h ? hfmt(h) : ''}</td>`;
+  }).join('');
+  cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Horas del día</th>${pie}<td class="tot">${hfmt(totMes)} h</td></tr>`;
+
   $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = '';
 }
 
