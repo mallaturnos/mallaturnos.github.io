@@ -555,3 +555,44 @@ table.neces th .turnoEd{font-weight:500}
 /* Turno sin dueño en la malla: se distingue del asignado con un borde cortado. */
 .cell .bloque.libre{border:1px dashed var(--fg-faint);background:var(--surface-2)}
 .cell .bloque.libre em{font-style:italic}
+
+/* Vista del día como LÍNEA DE TIEMPO. Las horas corren de izquierda a derecha
+   y cada turno es una barra que ocupa su tramo, así los huecos se ven en vez
+   de calcularse. Antes era una lista de tarjetas por horario y Pedro dijo
+   «sigo sin entender Día»: el problema era el formato, no la explicación. */
+.linea{border:1px solid var(--line);border-radius:8px;background:var(--surface);overflow:hidden}
+.linea-cab,.linea-fila{display:grid;grid-template-columns:160px 1fr;align-items:stretch}
+.linea-fila{border-top:1px solid var(--line)}
+.linea-quien{padding:8px 10px;border-right:1px solid var(--line);background:var(--surface-2);
+  display:flex;flex-direction:column;justify-content:center;min-width:0}
+.linea-quien b{font-size:.8125rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.linea-quien .rol{font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
+.linea-cab .linea-quien{background:transparent;border-right-color:transparent}
+.linea-pista{position:relative;min-height:46px;cursor:pointer}
+.linea-cab .linea-pista{min-height:24px}
+.hmarca{position:absolute;top:4px;transform:translateX(-50%);font-family:var(--font-mono);
+  font-size:.625rem;color:var(--fg-faint);white-space:nowrap}
+.hlinea{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+.barra{position:absolute;top:5px;bottom:5px;border-radius:5px;padding:3px 6px;overflow:hidden;
+  display:flex;flex-direction:column;justify-content:center;min-width:0;
+  background:var(--surface-3);color:var(--fg)}
+.barra b{font-family:var(--font-mono);font-size:.625rem;white-space:nowrap}
+.barra em{font-style:normal;font-size:.6875rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.barra:hover{box-shadow:inset 0 0 0 2px var(--accent)}
+.barra:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.barra[data-c="1"]{background:#cde3e5;color:#0f4247}
+.barra[data-c="2"]{background:#ecdcc0;color:#57411a}
+.barra[data-c="3"]{background:#d7d1e6;color:#37305a}
+.barra[data-c="4"]{background:#dde5cf;color:#3a4a26}
+.barra.libre{border:1px dashed var(--fg-faint);background:var(--surface-2)}
+.barra .marcado{position:absolute;top:2px;right:4px;font-style:normal;color:var(--ok);font-size:1rem;line-height:1}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]) .barra[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) .barra[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) .barra[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) .barra[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+:root[data-theme="dark"] .barra[data-c="1"]{background:#1e4348;color:#bfe2e5}
+:root[data-theme="dark"] .barra[data-c="2"]{background:#453b26;color:#e9d6b0}
+:root[data-theme="dark"] .barra[data-c="3"]{background:#353050;color:#cec8e6}
+:root[data-theme="dark"] .barra[data-c="4"]{background:#2f3a24;color:#cfdcbb}
+@media (max-width:640px){ .linea-cab,.linea-fila{grid-template-columns:110px 1fr} }

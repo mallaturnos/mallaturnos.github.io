@@ -774,65 +774,90 @@ function pintarResumenSemana() {
     }).join('') + `<td>${clp(costoT)}<br><span style="font-size:.6875rem">${pfmt(pct)}</span></td></tr>`;
 }
 
-/* ---------- vista del día: quién está hoy, por turno ---------- */
+/* ---------- vista del día: una LÍNEA DE TIEMPO ----------
+   Pedro: «sigo sin entender Día». Tenía razón, y el problema no era la
+   explicación: era el formato. Estaba como una lista de tarjetas, una por
+   horario, y un día no es una lista. Así no se ve lo único que de verdad
+   importa mirar en un día — dónde quedan huecos —: había que calcularlo.
+
+   Skello lo hace como línea de tiempo: las horas corren de izquierda a
+   derecha y cada turno es una barra que ocupa su tramo. Los huecos se VEN. */
 function pintarDia() {
   const fe = iso(S.dia);
   const i = (S.dia.getDay() + 6) % 7;
   $('#semTitulo').textContent = DIAS[i] + ' ' + ddmm(fe);
 
   const caja = $('#cajaDia'); caja.innerHTML = '';
-  // Una persona con turno partido aparece una vez POR BLOQUE, no una sola.
-  const conTurno = personasVisibles().flatMap(p => turnosDe(p.id, fe).map(a => ({ p, a })));
 
-  if (!conTurno.length) {
-    caja.innerHTML = '<p class="vacio">Nadie tiene turno este día.</p>';
-    $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = ''; return;
+  // La franja se estira a lo que de verdad haya ese día, no solo al catálogo:
+  // un turno escrito a mano puede empezar antes o terminar después.
+  const todos = S.personas.flatMap(p => turnosDe(p.id, fe).map(a => ({ p, a })))
+    .concat(S.abiertos.filter(a => a.fecha === fe).map(a => ({ p: null, a })));
+  const base = franja();
+  const h0 = Math.floor(Math.min(base.h0, ...todos.map(x => Number(x.a.inicio))));
+  const h1 = Math.ceil(Math.max(base.h1, ...todos.map(x => Number(x.a.fin))));
+  const ancho = Math.max(h1 - h0, 1);
+  const pos = h => ((h - h0) / ancho) * 100;
+
+  if (!todos.length) {
+    caja.innerHTML = '<p class="vacio">Nadie tiene turno este día. '
+      + 'Aprieta una fila para agregar uno.</p>';
   }
 
-  // Agrupados por HORARIO REAL y ordenados por hora de entrada, que es como se
-  // lee el día. Antes se agrupaba por plantilla, pero ahora dos turnos de la
-  // misma plantilla pueden tener horas distintas: la plantilla solo da el nombre.
-  // El grupo guarda el PAR persona+turno. Antes guardaba solo a la persona y
-  // usaba la asignación del primero para todos: resultado, todos mostraban el
-  // puesto del primero y, peor, hacer clic en cualquiera abría el turno del
-  // primero. Lo delató una captura de Pedro donde todos decían «Barra».
-  const porHorario = {};
-  conTurno.forEach(x => {
-    const k = Number(x.a.inicio) + '|' + Number(x.a.fin) + '|' + Number(x.a.colacion||0);
-    (porHorario[k] = porHorario[k] || { a: x.a, gente: [] }).gente.push(x);
-  });
-  Object.values(porHorario)
-    .sort((u,v) => Number(u.a.inicio) - Number(v.a.inicio) || Number(u.a.fin) - Number(v.a.fin))
-    .forEach(({ a: ta, gente }) => {
-    const t = ta.turno_id ? turnoDe(ta.turno_id) : null;
-    const hs = horasAsig(ta);
-    const costo = gente.reduce((s,x) => s + hs * (x.p.valor_hora||0), 0);
-    caja.appendChild(el('div','turnodia', `
-      <div class="turnodia-h">
-        <b>${esc(t ? t.nombre : hhmm(ta.inicio) + '–' + hhmm(ta.fin))}</b>
-        <span>${hhmm(ta.inicio)}–${hhmm(ta.fin)} · ${hfmt(hs)} h · ${gente.length} ${gente.length===1?'persona':'personas'} · ${clp(costo)}</span>
-      </div>
-      <ul data-fecha="${fe}">${gente.map(({ p, a }) => {
-        // la marca de ESE turno, no la del día: con turno partido son distintas
-        const m = marcaAsig(a).entrada ? marcaAsig(a) : marcaDe(p.id, fe);
-        const hl = m.entrada ? horaDe(m.entrada) : horaLlegada(m);
-        const tarde = hl !== null ? Math.round((hl - Number(a.inicio))*60) : null;
-        const et = (m.llego === true || m.entrada)
-                 ? `<span class="flag ok">llegó${hl !== null ? ' ' + hhmm(hl) : ''}${tarde > 5 ? ' · '+minFmt(tarde)+' tarde' : ''}</span>`
-                 : m.confirmo === true ? '<span class="flag info">confirmó</span>'
-                 : m.confirmo === false ? '<span class="flag bad">no puede</span>' : '';
-        return `<li data-p="${p.id}" data-asig="${a.id}" role="button" tabindex="0"
-          title="Editar este turno"><b>${esc(p.nombre)}</b> <span class="rol">${esc(puestoDe(a,p)||'')}</span> ${et}</li>`;
-      }).join('')}</ul>`));
-  });
+  // regla de horas arriba
+  const horas = [];
+  for (let h = Math.ceil(h0); h <= h1; h++) horas.push(h);
+  const regla = horas.map(h => `<span class="hmarca" style="left:${pos(h)}%">${hhmm(h)}</span>`).join('');
 
-  // En el día también se edita. Antes era la única vista de solo lectura, y
-  // eso se notaba justo cuando hay que corregir algo: el día es cuando pasa.
+  // una fila por persona que trabaja, más la de sin asignar si hay
+  const filas = [];
+  personasVisibles().forEach(p => {
+    const ts = turnosDe(p.id, fe);
+    if (ts.length) filas.push({ p, ts });
+  });
+  const libres = S.abiertos.filter(a => a.fecha === fe);
+  if (libres.length) filas.unshift({ p: null, ts: libres });
+
+  caja.innerHTML = `
+    <div class="linea">
+      <div class="linea-cab"><div class="linea-quien"></div><div class="linea-pista">${regla}</div></div>
+      ${filas.map(({ p, ts }) => `
+        <div class="linea-fila" data-p="${p ? p.id : ''}">
+          <div class="linea-quien">${p ? `<b>${esc(p.nombre)}</b><span class="rol">${esc(p.rol||'')}</span>`
+                                       : '<b>Sin asignar</b><span class="rol">libre</span>'}</div>
+          <div class="linea-pista" data-fecha="${fe}">
+            ${horas.map(h => `<span class="hlinea" style="left:${pos(h)}%"></span>`).join('')}
+            ${ts.map(a => {
+              const t = a.turno_id ? turnoDe(a.turno_id) : null;
+              const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
+              const iz = pos(Number(a.inicio)), an = pos(Number(a.fin)) - iz;
+              const m = marcaAsig(a);
+              return `<span class="barra${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
+                role="button" tabindex="0"
+                style="left:${iz}%;width:${an}%"
+                title="${esc((puestoDe(a, p) || 'sin puesto') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
+                  + ' · ' + hfmt(horasAsig(a)) + ' h' + (a.nota ? '\n' + a.nota : ''))}">
+                <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
+                <em>${esc(puestoDe(a, p) || 'sin puesto')}</em>
+                ${m.entrada ? '<i class="marcado" title="marcó entrada">•</i>' : ''}
+              </span>`;
+            }).join('')}
+          </div>
+        </div>`).join('')}
+    </div>`;
+
+  // abrir un turno, o agregar uno en la fila de alguien
   caja.onclick = ev => {
-    const li = ev.target.closest('li[data-asig]'); if (!li) return;
-    const p = S.personas.find(x => x.id === li.dataset.p); if (!p) return;
-    const a = filasDe(p.id, fe).find(x => x.id === li.dataset.asig);
-    if (a) abrirTurno(p, fe, a);
+    const pista = ev.target.closest('.linea-pista[data-fecha]'); if (!pista) return;
+    const fila = pista.closest('.linea-fila');
+    const p = fila.dataset.p ? S.personas.find(x => x.id === fila.dataset.p) : null;
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      const lista = p ? filasDe(p.id, fe) : S.abiertos;
+      const a = lista.find(x => x.id === bl.dataset.asig);
+      if (a) return abrirTurno(p, fe, a);
+    }
+    abrirTurno(p, fe, null);
   };
 
   const ausentes = personasVisibles().map(p => ({ p, a: ausenciaDe(p.id, fe) }))
