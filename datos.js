@@ -187,12 +187,24 @@
 
   /* ---------- plata del día ---------- */
   // el jefe marca por alguien que perdio el telefono: queda registrado que fue EL
-  const marcarComoJefe = (personaId, fecha, campo, valor) =>
+  const marcarComoJefe = (asignacionId, personaId, fecha, campos) =>
     pedir(sb.from('marcas').upsert(
-      Object.assign({ persona_id: personaId, fecha, marcado_por: 'jefe' },
-                    { [campo]: valor },
-                    campo === 'llego' ? { hora_llego: valor ? new Date().toISOString() : null } : {}),
-      { onConflict: 'persona_id,fecha' }).select().single());
+      Object.assign({ asignacion_id: asignacionId, persona_id: personaId, fecha, marcado_por: 'jefe' }, campos),
+      { onConflict: 'asignacion_id' }).select().single());
+
+  // Las horas que SE PAGAN de un turno. Vacio = vale la regla del local.
+  // Es la tercera columna de Skello: se ve lo previsto y lo marcado, y esto
+  // es lo que de verdad se paga.
+  const horasPagadas = (asignacionId, horas) =>
+    pedir(sb.from('asignaciones').update({ horas_pagadas: horas })
+            .eq('id', asignacionId).select().single());
+
+  // Cerrar el dia es cuando se carga la venta: es el momento en que el jefe
+  // ya esta haciendo la caja, no una pestaña aparte que hay que acordarse.
+  const cerrarDia = (localId, fecha, venta) =>
+    pedir(sb.from('dias').upsert({ local_id: localId, fecha, venta,
+                                   cerrado_en: new Date().toISOString() },
+                                 { onConflict: 'local_id,fecha' }).select().single());
 
   const dias = (localId, desde, hasta) =>
     pedir(sb.from('dias').select('*').eq('local_id', localId).gte('fecha', desde).lte('fecha', hasta));
@@ -248,8 +260,11 @@
   const miSemana = (token, desde) =>
     pedir(sb.rpc('mi_semana', { p_token: token, p_desde: desde }));
 
-  const marcar = (token, fecha, campo, valor) =>
-    pedir(sb.rpc('marcar', { p_token: token, p_fecha: fecha, p_campo: campo, p_valor: valor }));
+  // Marcar es por TURNO, no por dia, y la hora la pone el SERVIDOR: si la
+  // pusiera el telefono, se cambia adelantando el reloj del aparato.
+  // Acciones: 'entrada' · 'salida' · 'confirmo' · 'no_puedo'.
+  const marcarTurno = (token, asignacionId, accion) =>
+    pedir(sb.rpc('marcar_turno', { p_token: token, p_asignacion: asignacionId, p_accion: accion }));
 
   const ofrecerTurno = (token, asignacionId) =>
     pedir(sb.rpc('ofrecer_turno', { p_token: token, p_asignacion: asignacionId }));
@@ -274,12 +289,12 @@
     personas, crearPersona, guardarPersona, quitarPersona, activarPersonas,
     turnos, crearTurno, guardarTurno, quitarTurno,
     asignaciones, crearAsignacion, editarAsignacion, borrarAsignacion, ponerAusencia, limpiarDia,
-    marcas, marcarComoJefe, copiarSemana,
+    marcas, marcarComoJefe, horasPagadas, cerrarDia, copiarSemana,
     borrarAsignaciones, reponerAsignaciones,
     dias, guardarDia, dotacion, guardarDotacion, guardarDotacionLote,
     borrarDotacion, reponerDotacion,
     abiertos, abrirTurno, cerrarTurno,
-    miSemana, marcar, tomarTurno, ofrecerTurno,
+    miSemana, marcarTurno, tomarTurno, ofrecerTurno,
     escuchar,
   };
 })(window);

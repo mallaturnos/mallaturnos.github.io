@@ -39,7 +39,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 let sb = null;
 const S = { local:null, personas:[], turnos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
             lunes:lunesDe(new Date()), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
-            hist:[], histDot:[], histEq:[], recien:null };
+            hist:[], histDot:[], histEq:[], recien:null, relojDia:null };
 
 /* ---------- deshacer ----------
    Antes de cualquier cambio en la malla se guarda una foto de como estaba el
@@ -356,7 +356,14 @@ async function cargar() {
     (S.asign[k] = S.asign[k] || []).push(a);
   });
   Object.values(S.asign).forEach(l => l.sort((x,y) => (x.inicio||0) - (y.inicio||0)));
-  S.marcas = {}; (marcas||[]).forEach(m => { S.marcas[m.persona_id + '|' + m.fecha] = m; });
+  // Las marcas van por TURNO: una persona puede tener dos el mismo día.
+  S.marcas = {};
+  (marcas||[]).forEach(m => {
+    if (m.asignacion_id) S.marcas['a:' + m.asignacion_id] = m;
+    // también por persona+fecha, para lo que todavía razona por día
+    const k = m.persona_id + '|' + m.fecha;
+    if (!S.marcas[k] || (m.entrada && !S.marcas[k].entrada)) S.marcas[k] = m;
+  });
   S.dias = {};   (dias||[]).forEach(d => { S.dias[d.fecha] = d; });
   S.dotacion = {};
   (dot||[]).forEach(x => {
@@ -1187,6 +1194,24 @@ function pintarAbiertos() {
 
 /* ================= CONFIRMACIONES ================= */
 const marcaDe = (pid, f) => S.marcas[pid + '|' + f] || {};
+// La marca de UN turno concreto, que es lo que manda desde el reloj control.
+const marcaAsig = a => (a && S.marcas['a:' + a.id]) || {};
+const horaDe = ts => { if (!ts) return null; const d = new Date(ts);
+  return d.getHours() + d.getMinutes()/60; };
+// Horas realmente trabajadas en un turno: de la entrada a la salida, menos la
+// colación. Si no están las dos marcas, no hay horas reales que mostrar.
+const horasReales = a => {
+  const m = marcaAsig(a);
+  if (!m.entrada || !m.salida) return null;
+  const h = (new Date(m.salida) - new Date(m.entrada)) / 3600000 - Number(a.colacion || 0);
+  return Math.max(h, 0);
+};
+// Lo que se paga: lo que el jefe fijó a mano, o la regla del local.
+const horasPagadasDe = a => {
+  if (a.horas_pagadas != null) return Number(a.horas_pagadas);
+  const r = horasReales(a);
+  return (S.local && S.local.pagar_marcado && r != null) ? r : horasAsig(a);
+};
 const horaLlegada = m => {
   if (!m || !m.hora_llego) return null;
   const d = new Date(m.hora_llego);
@@ -1336,10 +1361,81 @@ function pintarLinks() {
   }).join('\n\n———\n\n');
 }
 
+/* ---------- Control horario: previsto · marcado · se paga ----------
+   Es la pantalla de la Badgeuse de Skello. Lo importante es que NO elige sola
+   entre lo planificado y lo real: muestra los dos y deja que el jefe decida
+   qué se paga, viendo contra qué decide. Ese era justo el problema que Pedro
+   planteó con la propina: que el número no salga de la nada. */
+function pintarReloj() {
+  const f = fechas();
+  if (!S.relojDia || !f.includes(S.relojDia)) S.relojDia = f.includes(iso(new Date())) ? iso(new Date()) : f[0];
+  const fe = S.relojDia;
+
+  const tabs = $('#relojTabs'); if (!tabs) return;
+  tabs.innerHTML = '';
+  f.forEach((x,i) => {
+    const b = el('button','act' + (x === fe ? ' primary' : ''), DIAS[i] + ' ' + ddmm(x).slice(0,5));
+    b.addEventListener('click', () => { S.relojDia = x; pintarReloj(); });
+    tabs.appendChild(b);
+  });
+
+  $('#relojCab').innerHTML = '<tr><th>Persona</th><th>Previsto</th><th>Marcado</th>'
+    + '<th>Se paga</th><th></th></tr>';
+
+  const cuerpo = $('#relojCuerpo'); cuerpo.innerHTML = '';
+  const filas = S.personas.flatMap(p => turnosDe(p.id, fe).map(a => ({ p, a })));
+  if (!filas.length) {
+    cuerpo.innerHTML = '<tr><td colspan="5" class="vacio">Nadie tiene turno este día.</td></tr>';
+  }
+  let totPrev = 0, totPaga = 0;
+  filas.forEach(({ p, a }) => {
+    const m = marcaAsig(a);
+    const prev = horasAsig(a), real = horasReales(a), paga = horasPagadasDe(a);
+    totPrev += prev; totPaga += paga;
+    const hm = t => { const d = new Date(t); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
+    const marcado = m.entrada
+      ? hm(m.entrada) + '–' + (m.salida ? hm(m.salida) : '<i>sin salir</i>')
+        + (real != null ? ' · ' + hfmt(real) + ' h' : '')
+      : '<span class="sinmarca">sin marca</span>';
+    const difiere = real != null && Math.abs(real - prev) >= 0.08;
+    const tr = el('tr', difiere ? 'difiere' : '', `
+      <th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(puestoDe(a,p)||'')}</span></th>
+      <td class="n">${hhmm(a.inicio)}–${hhmm(a.fin)}<span class="num">${hfmt(prev)} h</span></td>
+      <td class="n">${marcado}</td>
+      <td><input type="number" class="n paga" step="0.25" min="0" max="24" value="${hfmt(paga).replace(',','.')}"
+            data-a="${a.id}" aria-label="Horas que se pagan a ${esc(p.nombre)}"></td>
+      <td>${a.horas_pagadas != null ? `<button class="mini" data-auto="${a.id}">Automático</button>` : ''}</td>`);
+    cuerpo.appendChild(tr);
+  });
+  if (filas.length)
+    cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Total</th>
+      <td class="n">${hfmt(totPrev)} h</td><td></td><td class="n">${hfmt(totPaga)} h</td><td></td></tr>`;
+
+  cuerpo.querySelectorAll('input.paga').forEach(inp => {
+    let t = null;
+    inp.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        try { await DATOS.horasPagadas(inp.dataset.a, Number(inp.value) || 0); await refrescar(); }
+        catch (e) { error(e); }
+      }, 700);
+    });
+  });
+  cuerpo.querySelectorAll('[data-auto]').forEach(b => b.addEventListener('click', async () => {
+    try { await DATOS.horasPagadas(b.dataset.auto, null); await refrescar(); } catch (e) { error(e); }
+  }));
+
+  const d = S.dias[fe];
+  $('#relojEstado').innerHTML = d && d.cerrado_en
+    ? `Cerrado · venta <b>${clp(d.venta)}</b>`
+    : 'Sin cerrar. Al cerrar se te pide la venta del día.';
+  $('#btnCerrarDia').textContent = d && d.cerrado_en ? 'Corregir la venta' : 'Cerrar el día';
+}
+
 /* ================= PINTAR TODO ================= */
 function pintarTodo() {
   $('#hLocal').textContent = S.local ? S.local.nombre : '';
-  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarLinks();
+  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPropinas(); pintarAbiertos(); pintarConf(); pintarReloj(); pintarLinks();
   pintarDeshacer(); pintarDeshacerDot(); pintarDeshacerEq();
 }
 
@@ -1376,17 +1472,19 @@ async function pintarTrabajador(token) {
 
   // Confirmar toda la semana de una: la mayoría de las semanas puede con todo,
   // y pedirle 5 toques para decir que sí es la mejor forma de que no lo haga.
-  const porConfirmar = dias.filter(x => (x.turnos||[]).length && x.confirmo !== true);
+  const porConfirmar = dias.filter(x => (x.turnos||[]).some(b => b.confirmo !== true));
   const btnTodo = $('#tConfTodo');
   if (porConfirmar.length > 1) {
     btnTodo.hidden = false;
+    const cuantos = porConfirmar.reduce((n,x) => n + (x.turnos||[]).filter(b => b.confirmo !== true).length, 0);
     btnTodo.innerHTML = `<button class="act primary" id="btnTodaSemana">Confirmo toda la semana
-      <span>${porConfirmar.length} turnos</span></button>
+      <span>${cuantos} ${cuantos === 1 ? 'turno' : 'turnos'}</span></button>
       <p class="soloHoy">Si alguno no puedes, lo cambias después uno por uno.</p>`;
     on('#btnTodaSemana', 'click', async ev => {
       const b = ev.currentTarget; b.disabled = true; b.textContent = 'Confirmando…';
       try {
-        for (const x of porConfirmar) await DATOS.marcar(token, x.fecha, 'confirmo', true);
+        for (const x of porConfirmar)
+          for (const b of (x.turnos || [])) await DATOS.marcarTurno(token, b.id, 'confirmo');
         await pintarTrabajador(token);
       } catch (e) {
         b.disabled = false;
@@ -1414,11 +1512,23 @@ async function pintarTrabajador(token) {
             : ''}
           ${x.propina ? `<span class="prop">${clp(x.propina)} de propina</span>` : ''}</div>
       </div>` +
-      (trabaja ? `<div class="btns">
-        <button data-a="confirmo" data-v="1" aria-pressed="${x.confirmo === true}">Confirmo</button>
-        <button class="no" data-a="confirmo" data-v="0" aria-pressed="${x.confirmo === false}">No puedo</button>
-        <button data-a="llego" data-v="1" aria-pressed="${x.llego === true}">Llegué</button>
-      </div>` + (x.ofrecido
+      (trabaja ? bloques.map(b => {
+        const dentro = b.entrada && !b.salida, listo = b.entrada && b.salida;
+        const hEnt = b.entrada ? new Date(b.entrada) : null, hSal = b.salida ? new Date(b.salida) : null;
+        const hm = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+        return `<div class="turnocard${dentro ? ' dentro' : ''}">
+          <div class="turnocard-h"><b>${hhmm(b.inicio)}–${hhmm(b.fin)}</b>
+            ${b.puesto ? `<span class="rol">${esc(b.puesto)}</span>` : ''}</div>
+          ${listo ? `<p class="marcado">Entraste a las <b>${hm(hEnt)}</b> y saliste a las <b>${hm(hSal)}</b>
+                       · <b>${hfmt(Math.max((hSal - hEnt)/3600000 - Number(b.colacion||0), 0))} h</b></p>`
+           : dentro ? `<p class="marcado">Entraste a las <b>${hm(hEnt)}</b>. Estás adentro.</p>` : ''}
+          <div class="btns">
+            ${!b.entrada ? `<button class="reloj" data-reloj="entrada" data-id="${b.id}">Marcar entrada</button>` : ''}
+            ${dentro ? `<button class="reloj sale" data-reloj="salida" data-id="${b.id}">Marcar salida</button>` : ''}
+            ${!b.entrada ? `<button data-a="confirmo" data-id="${b.id}" aria-pressed="${b.confirmo === true}">Confirmo</button>
+              <button class="no" data-a="no_puedo" data-id="${b.id}" aria-pressed="${b.confirmo === false}">No puedo</button>` : ''}
+          </div></div>`;
+      }).join('') + (x.ofrecido
         ? '<p class="ofrecido">Ofreciste este turno. Si alguien lo toma, tu jefe confirma el cambio.</p>'
         : bloques.map(b => `<button class="ofrecer" data-of="${b.id}">Ofrecer${bloques.length > 1
              ? ' el de ' + hhmm(b.inicio) : ' este turno'} a mis compañeros</button>`).join('')) : ''));
@@ -1430,14 +1540,21 @@ async function pintarTrabajador(token) {
       try { await DATOS.ofrecerTurno(token, bo.dataset.of); await pintarTrabajador(token); }
       catch (e) { bo.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">${esc(e.message)}</div>`; }
     }));
-    card.querySelectorAll('button[data-a]').forEach(b => {
+    card.querySelectorAll('button[data-a],button[data-reloj]').forEach(b => {
       b.addEventListener('click', async () => {
-        const campo = b.dataset.a, valor = b.dataset.v === '1';
-        const actual = campo === 'confirmo' ? x.confirmo : x.llego;
+        const accion = b.dataset.reloj || b.dataset.a;
+        if (accion === 'salida' && !confirm('¿Marcar tu salida?\n\nQueda la hora exacta y no se puede deshacer.')) return;
+        b.disabled = true;
         try {
-          await DATOS.marcar(token, x.fecha, campo, actual === valor ? null : valor);
+          const r = await DATOS.marcarTurno(token, b.dataset.id, accion);
+          if (r && r.ok === false) {
+            const porque = { ya_entro:'Ya marcaste tu entrada.', ya_salio:'Ya marcaste tu salida.',
+                             sin_entrada:'Primero tienes que marcar la entrada.',
+                             no_es_tuyo:'Ese turno no es tuyo.', link:'Tu link no es válido.' };
+            $('#tAviso').innerHTML = `<div class="avisoro">${esc(porque[r.motivo] || r.motivo)}</div>`;
+          }
           await pintarTrabajador(token);
-        } catch (e) { $('#tAviso').innerHTML = `<div class="avisoro">No se pudo guardar: ${esc(e.message)}</div>`; }
+        } catch (e) { b.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">No se pudo guardar: ${esc(e.message)}</div>`; }
       });
     });
   });
@@ -1688,6 +1805,31 @@ function conectarApp() {
     setTimeout(() => { const x = $('#msgEq'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerEq', 'click', deshacerEq);
+
+  // Cerrar el día es cuando se carga la venta. Skello la pide ahí y tiene
+  // razón: es el momento en que el jefe ya está haciendo la caja, y no una
+  // pestaña aparte que hay que acordarse de visitar.
+  on('#btnCerrarDia', 'click', async () => {
+    const fe = S.relojDia; if (!fe) return;
+    const d = S.dias[fe] || {};
+    const sinSalir = S.personas.flatMap(p => turnosDe(p.id, fe))
+      .filter(a => { const m = marcaAsig(a); return m.entrada && !m.salida; }).length;
+    if (sinSalir && !confirm(`Hay ${sinSalir} ${sinSalir === 1 ? 'persona que marcó entrada y no salida' : 'personas que marcaron entrada y no salida'}.\n\n`
+      + 'A esas se les va a pagar lo planificado. ¿Cierro igual?')) return;
+
+    const txt = prompt('¿Cuánto se vendió el ' + ddmm(fe) + '?\n\n'
+      + 'Sirve para el costo sobre venta. Lo puedes corregir después.',
+      d.venta ? String(d.venta) : '');
+    if (txt === null) return;
+    const venta = Number(soloDigitos(txt)) || 0;
+    const m = $('#msgReloj');
+    try {
+      await DATOS.cerrarDia(S.local.id, fe, venta);
+      await refrescar();
+      m.textContent = 'Día cerrado con una venta de ' + clp(venta) + '.'; m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgReloj'); if (x) x.textContent = ''; }, 6000);
+  });
 
   on('#objetivoPct', 'change', async ev => {
     const v = Number(ev.target.value) || 30;
