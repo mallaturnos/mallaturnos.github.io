@@ -866,6 +866,17 @@ function pintarMes() {
   $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = '';
 }
 
+async function nuevoTurnoRapido() {
+  const nombre = prompt('¿Cómo se llama el turno nuevo?\n\nPor ejemplo: Apertura, Tarde, Cierre.');
+  if (!nombre || !nombre.trim()) return;
+  try {
+    await DATOS.crearTurno(S.local.id, { nombre: nombre.trim(), inicio: 9, fin: 17, colacion: 0.5,
+                                         orden: S.turnos.length });
+    await refrescar();
+    $('#detNecesita').open = true;
+  } catch (e) { error(e); }
+}
+
 /* ---------- cargar el equipo desde una planilla ----------
    El valor no está en ahorrarle tiempo a Pedro con 8 personas: está en que un
    local de verdad con 25 YA TIENE su lista en una planilla, y nadie reescribe
@@ -1060,6 +1071,7 @@ function pintarTurnos() {
       ${filaCampo('Colación (min)','number',Math.round(t.colacion*60),'data-k="colacion" class="n" min="0" max="120" step="15"')}
       <div class="fld"><label>Horas</label><input type="text" value="${hfmt(horasDe(t))}" readonly tabindex="-1" class="n"></div>
       <button class="mini" data-del="1">Quitar</button>`);
+    row.dataset.turno = t.id;    // para poder saltar aquí desde la dotación
     box.appendChild(row);
     let tm = null;
     row.querySelectorAll('input[data-k]').forEach(inp => {
@@ -1136,14 +1148,17 @@ function pintarCobertura() {
   } else {
     const tabla = el('table','neces');
     tabla.innerHTML = '<thead><tr><th>Puesto</th>' +
-      ts.map(t => `<th>${esc(t.nombre)}<span class="num">${hhmm(t.inicio)}</span></th>`).join('') + '</tr></thead>';
+      ts.map(t => `<th><button type="button" class="turnoEd" data-t="${t.id}"
+        title="Editar este turno">${esc(t.nombre)}<span class="num">${hhmm(t.inicio)}–${hhmm(t.fin)}</span></button></th>`).join('')
+      + '<th><button type="button" class="turnoEd nuevo" data-nuevo="1" title="Agregar un turno">+ turno</button></th></tr></thead>';
     const tb = el('tbody');
     ps.forEach(puesto => {
       const tr = el('tr');
       tr.innerHTML = `<th scope="row">${esc(puesto)}</th>` +
         ts.map(t => `<td><input class="n" type="number" min="0" max="99"
           value="${necesita(S.cobDia, puesto, t.id)}" data-t="${t.id}"
-          aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('');
+          aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('')
+        + '<td></td>';
       tb.appendChild(tr);
       tr.querySelectorAll('input[data-t]').forEach(inp => {
         let tm = null;
@@ -1162,6 +1177,16 @@ function pintarCobertura() {
     });
     tabla.appendChild(tb);
     box.appendChild(tabla);
+
+    // abrir el turno desde su propio título, o crear uno nuevo
+    tabla.querySelectorAll('.turnoEd').forEach(b => b.addEventListener('click', () => {
+      if (b.dataset.nuevo) return nuevoTurnoRapido();
+      $('#tab-eq').click();
+      const fila = document.querySelector(`#eqTurnos [data-turno="${b.dataset.t}"]`);
+      if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
+        fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
+        const inp = fila.querySelector('input'); if (inp) inp.focus(); }
+    }));
   }
 
   /* ---- costo sobre venta ---- */

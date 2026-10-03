@@ -534,3 +534,10 @@ td.mcel.vacia:hover{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(-
 .turnodia li[data-asig]{cursor:pointer;border-radius:5px;padding:3px 5px;margin:0 -5px}
 .turnodia li[data-asig]:hover{background:var(--surface-2)}
 .turnodia li[data-asig]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* Los títulos de las columnas de dotación son los turnos y se pueden abrir. */
+table.neces .turnoEd{background:transparent;border:0;padding:4px 6px;border-radius:5px;
+  cursor:pointer;color:inherit;font:inherit;font-weight:600;text-align:center}
+table.neces .turnoEd .num{display:block;font-family:var(--font-mono);font-weight:400;
+  font-size:.6875rem;opacity:.6}
+table.neces .turnoEd:hover{background:var(--surface-2);color:var(--accent)}
+table.neces .turnoEd.nuevo{font-weight:500;color:var(--fg-faint);border:1px dashed var(--line)}
