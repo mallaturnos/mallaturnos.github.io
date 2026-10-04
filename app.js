@@ -2315,10 +2315,30 @@ function pintarModelos() {
   // pisar un mes entero sin querer es caro.
   if (!$('#pSemanas').dataset.listo) {
     $('#pSemanas').innerHTML = [1,2,3,4].map(n =>
-      `<button type="button" class="act dia${n === 1 ? ' on' : ''}" data-sem="${n}"
-         aria-pressed="${n === 1 ? 'true' : 'false'}">${n}</button>`).join('');
+      `<button type="button" class="act dia" data-sem="${n}"
+         aria-pressed="false">${n}</button>`).join('');
     $('#pSemanas').dataset.listo = '1';
   }
+  // Se abre siempre en 1: aplicar cuatro semanas pisa un mes entero, y que eso
+  // quede armado de la vez anterior es una sorpresa cara.
+  marcarSemanas(1);
+}
+
+/* El numero de semanas es una CANTIDAD, no una posicion: con el 3 marcado, el 1
+   y el 2 tambien van llenos, como un nivel. Lo pidio Pedro mirando la pantalla
+   —«si marcas el 2 queda en blanco el 1»— y tiene razon: tal como estaba se leia
+   «la tercera semana» en vez de «tres semanas».
+
+   OJO, el detalle que importa: el relleno va por CLASE y `aria-pressed` queda
+   SOLO en el elegido. `opcionesModelo()` lee el valor con un querySelector de
+   `aria-pressed="true"`, que devuelve el PRIMERO: si se marcaran los cuatro,
+   leeria 1 y aplicaria siempre una sola semana, en silencio. */
+function marcarSemanas(n) {
+  $('#pSemanas').querySelectorAll('button[data-sem]').forEach(b => {
+    const v = Number(b.dataset.sem);
+    b.classList.toggle('on', v <= n);
+    b.setAttribute('aria-pressed', v === n ? 'true' : 'false');
+  });
 }
 
 function marcarTodosTexto() {
@@ -2368,9 +2388,7 @@ function opcionesModelo() {
   // Una sola cantidad de semanas: estas pastillas son excluyentes.
   on('#pSemanas', 'click', ev => {
     const b = ev.target.closest('button[data-sem]'); if (!b) return;
-    $('#pSemanas').querySelectorAll('button[data-sem]').forEach(x => {
-      x.setAttribute('aria-pressed','false'); x.classList.remove('on'); });
-    b.setAttribute('aria-pressed','true'); b.classList.add('on');
+    marcarSemanas(Number(b.dataset.sem));
   });
 
   on('#pGuardar', 'click', async () => {

@@ -290,16 +290,8 @@
       puesto. Se guarda el día de la semana y no la fecha, así que sirve para cualquier semana.
       <b>Las ausencias no entran</b>, para que no se dupliquen.</p>
 
-    <div class="fld">
-      <label for="pNombre">Guardar la semana que estás viendo como modelo</label>
-      <div class="acciones">
-        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
-        <button type="button" class="act primary" id="pGuardar">Guardar</button>
-      </div>
-    </div>
-
-    <hr class="sepdlg">
-
+    <!-- Aplicar va PRIMERO: es lo que se hace todas las semanas. Guardar se hace
+         una vez y despues casi nunca, asi que va abajo. -->
     <div class="fld">
       <label for="pModelo">Aplicar un modelo</label>
       <select id="pModelo"></select>
@@ -316,14 +308,26 @@
       <label>En cuántas semanas seguidas, desde la que estás viendo</label>
       <div class="acciones diapills" id="pSemanas"></div>
     </div>
-
     <p class="hint">Al aplicar se <b>pisan los turnos</b> de esas semanas. Las ausencias que ya
       estén puestas se respetan.</p>
+    <div class="acciones">
+      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
+      <button type="button" class="act" id="pBorrar" hidden>Eliminar este modelo</button>
+    </div>
+
+    <hr class="sepdlg">
+
+    <div class="fld">
+      <label for="pNombre">Guardar la semana que estás viendo como modelo nuevo</label>
+      <div class="acciones">
+        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
+        <button type="button" class="act" id="pGuardar">Guardar</button>
+      </div>
+    </div>
+
     <p class="msg" id="pMsg"></p>
     <div class="acciones dlgpie">
       <button type="button" class="act" id="pCerrar">Cerrar</button>
-      <button type="button" class="act" id="pBorrar" hidden>Eliminar modelo</button>
-      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
     </div>
   </form>
 </dialog>
@@ -378,7 +382,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=68"></script>
-<script src="app.js?v=69"></script>
+<script src="app.js?v=70"></script>
 
 
 </body>
