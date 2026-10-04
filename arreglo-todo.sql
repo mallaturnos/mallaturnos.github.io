@@ -1456,3 +1456,22 @@ create policy modelo_turnos_tocar on modelo_turnos for all
                   where p.id = modelo_id and es_mi_local(p.local_id)))
   with check (exists (select 1 from modelos_semana p
                        where p.id = modelo_id and es_mi_local(p.local_id)));
+
+-- ---------------------------------------------------------------------
+-- PERMISOS. Esto no es opcional y es facil de olvidar.
+--
+-- `esquema.sql` hace un `grant ... on ALL TABLES in schema public`, pero eso
+-- alcanza a las tablas que existian EN ESE MOMENTO: una tabla creada despues
+-- nace sin permisos para `authenticated`, y la app falla con
+-- «permission denied for table ...» aunque la tabla exista y las reglas por
+-- fila esten bien puestas.
+--
+-- Pasa justamente eso el 04-10: se creo la tabla, se escribieron las policies
+-- y se olvido el grant. `arreglo-puestos.sql` ya traia el suyo por la misma
+-- razon; habia que copiarlo y no se copio.
+--
+-- Las policies deciden QUE FILAS ve cada uno; el grant decide si puede tocar
+-- la tabla siquiera. Hacen falta los dos.
+-- ---------------------------------------------------------------------
+grant select, insert, update, delete on modelos_semana to authenticated;
+grant select, insert, update, delete on modelo_turnos  to authenticated;
