@@ -974,12 +974,82 @@ function pintarResumenSemana() {
 
    Skello lo hace como línea de tiempo: las horas corren de izquierda a
    derecha y cada turno es una barra que ocupa su tramo. Los huecos se VEN. */
+/* ---------- la necesidad por hora, en la vista de dia ----------
+   La linea de tiempo ya estaba; lo que faltaba es lo de arriba: cuanta gente
+   SE NECESITA a cada hora contra cuanta HAY puesta. Convierte «mirar la malla y
+   contar cabezas» en «ver el hueco».
+
+   Lo puesto NO se teclea: sale solo de los turnos que ya estan asignados. Lo
+   unico que hay que definir es la necesidad, y eso ya existe en la dotacion.
+
+   Dos turnos que se pisan SUMAN su necesidad en las horas compartidas: si de
+   13 a 16:30 corren la mañana y la tarde, a esa hora se necesita la gente de
+   las dos. No es doble conteo, es lo que pide el local. */
+function necesidadPorHora(fe) {
+  const d = String((new Date(fe + 'T00:00:00').getDay() + 6) % 7);
+  const base = franja();
+  const ps = puestos();
+  const horas = [];
+  for (let h = base.h0; h < base.h1; h++) {
+    let req = 0;
+    S.turnos.forEach(t => {
+      if (Number(t.inicio) <= h && h < Number(t.fin))
+        ps.forEach(pu => { req += necesita(d, pu, t.id); });
+    });
+    // Cuenta PERSONAS. Un turno sin dueño esta planificado pero no hay nadie,
+    // que es justamente el hueco que esta pantalla tiene que mostrar.
+    const hay = S.personas.reduce((n, p) => n + (turnosDe(p.id, fe).some(a =>
+      Number(a.inicio) <= h && h < Number(a.fin)) ? 1 : 0), 0);
+    horas.push({ h, req, hay });
+  }
+  return horas;
+}
+
+/* Dicho en palabras, no solo en colores: el tramo que falta, de tal a tal hora.
+   Es la misma regla que ya sigue la cobertura de la semana. */
+function huecosEnPalabras(horas) {
+  const tramos = [];
+  let act = null;
+  horas.forEach(x => {
+    const falta = x.req - x.hay;
+    if (falta > 0) {
+      if (act && act.falta === falta && act.hasta === x.h) act.hasta = x.h + 1;
+      else { act = { desde: x.h, hasta: x.h + 1, falta }; tramos.push(act); }
+    } else act = null;
+  });
+  if (!tramos.length) return null;
+  return tramos.map(t => `falta${t.falta === 1 ? '' : 'n'} <b>${t.falta}</b> `
+    + `de <b>${hhmm(t.desde)}</b> a <b>${hhmm(t.hasta)}</b>`).join(' · ');
+}
+
+function pintarNecesidadDia(fe, caja) {
+  const horas = necesidadPorHora(fe);
+  const hayDotacion = horas.some(x => x.req > 0);
+  if (!hayDotacion) return;              // sin dotacion definida no hay nada que comparar
+
+  const celdas = horas.map(x => {
+    const cls = x.hay < x.req ? 'falta' : (x.req && x.hay > x.req ? 'sobra' : 'justo');
+    return `<div class="hncel ${cls}" title="${hhmm(x.h)}–${hhmm(x.h + 1)}: hay ${x.hay}, se necesita${x.req === 1 ? '' : 'n'} ${x.req}">
+      <span class="hnh">${hhmm(x.h).slice(0,2)}</span>
+      <b>${x.hay}</b><i>/${x.req}</i></div>`;
+  }).join('');
+
+  const faltan = huecosEnPalabras(horas);
+  const box = el('div', 'necdia');
+  box.innerHTML = `<div class="nectit">¿Alcanza la gente, hora por hora?
+      <span class="hint">arriba lo que hay, abajo lo que se necesita</span></div>
+    <div class="hnfila" style="grid-template-columns:repeat(${horas.length},1fr)">${celdas}</div>
+    <p class="necres ${faltan ? 'bad' : 'ok'}">${faltan ? faltan : 'No falta nadie en todo el día.'}</p>`;
+  caja.appendChild(box);
+}
+
 function pintarDia() {
   const fe = iso(S.dia);
   const i = (S.dia.getDay() + 6) % 7;
   $('#semTitulo').textContent = DIAS[i] + ' ' + ddmm(fe);
 
   const caja = $('#cajaDia'); caja.innerHTML = '';
+  pintarNecesidadDia(fe, caja);
 
   // La franja se estira a lo que de verdad haya ese día, no solo al catálogo:
   // un turno escrito a mano puede empezar antes o terminar después.

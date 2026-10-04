@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=55">
+<link rel="stylesheet" href="estilo.css?v=56">
 </head>
 <body>
 
@@ -98,13 +98,16 @@
             <button class="act" id="modoSemana" aria-pressed="true">Semana</button>
             <button class="act" id="modoMes">Mes</button>
           </div>
+          <!-- Agrupar es un CAMBIO DE VISTA, asi que vive con los otros cambios de
+               vista y no entre las flechas y los filtros. Pedro: «creo que no queda
+               muy intuitivo el boton en ese lado». -->
+          <span class="segm" role="group" aria-label="Agrupar por">
+            <button class="act primary" id="agrPersonas">Personas</button><button class="act" id="agrPuestos">Puestos</button>
+          </span>
           <button class="act" id="semAnt" aria-label="Anterior">←</button>
           <b id="semTitulo">—</b>
           <button class="act" id="semSig" aria-label="Siguiente">→</button>
           <button class="act" id="semHoy">Hoy</button>
-          <span class="segm" role="group" aria-label="Agrupar por">
-            <button class="act primary" id="agrPersonas">Personas</button><button class="act" id="agrPuestos">Puestos</button>
-          </span>
           <select id="filtroPuesto" aria-label="Filtrar por puesto"></select>
           <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
           <span class="sep"></span>
@@ -382,7 +385,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=68"></script>
-<script src="app.js?v=75"></script>
+<script src="app.js?v=76"></script>
 
 
 </body>

@@ -634,3 +634,21 @@ table.reloj td.marcar .mini{margin-right:4px}
 .bloque[draggable="true"]{cursor:grab}
 .bloque.llevando{opacity:.4;cursor:grabbing}
 td.cell.encima{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accent-soft)}
+
+/* La necesidad por hora, arriba de la línea de tiempo del día. Cada celda dice
+   cuánta gente HAY y cuánta se NECESITA; el color acompaña, pero el resumen de
+   abajo lo dice en palabras, que es lo que se lee sin interpretar nada. */
+.necdia{border:1px solid var(--line);border-radius:6px;padding:12px 13px;margin-bottom:14px;background:var(--surface)}
+.nectit{font-weight:600;margin-bottom:9px}
+.nectit .hint{font-weight:400;margin-left:8px}
+.hnfila{display:grid;gap:2px}
+.hncel{border-radius:4px;padding:5px 2px;text-align:center;font-family:var(--font-mono);font-size:.6875rem;line-height:1.25}
+.hncel .hnh{display:block;color:var(--fg-faint);font-size:.625rem}
+.hncel b{font-size:.8125rem}
+.hncel i{font-style:normal;color:var(--fg-faint)}
+.hncel.justo{background:var(--ok-soft);color:var(--ok)}
+.hncel.falta{background:var(--bad-soft);color:var(--bad)}
+.hncel.sobra{background:var(--warn-soft);color:var(--warn)}
+.necres{margin:9px 0 0;font-size:.875rem}
+.necres.bad{color:var(--bad)}
+.necres.ok{color:var(--ok)}
