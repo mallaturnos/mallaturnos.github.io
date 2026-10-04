@@ -461,8 +461,35 @@ let DLG = null;      // { p, fecha, asig }   asig null = turno nuevo
 
 const aHora = h => { const t = ((Number(h) % 24) + 24) % 24;
   return String(Math.floor(t)).padStart(2,'0') + ':' + String(Math.round((t - Math.floor(t)) * 60)).padStart(2,'0'); };
-const deHora = v => { const [h,m] = String(v||'').split(':').map(Number);
-  return isFinite(h) ? h + (m||0)/60 : null; };
+/* Lee una hora tecleada y la vuelve numero. Pasa SIEMPRE por el normalizador:
+   si alguien escribe «830» y aprieta Guardar sin salir del campo, partir por
+   «:» a secas daria 830 HORAS y eso llegaria a la base. El normalizador vive
+   mas abajo, pero esto corre dentro de una funcion, no al cargar. */
+const deHora = v => {
+  const t = normalizarHora(v);
+  if (!t) return null;
+  const [h, m] = t.split(':').map(Number);
+  return h + (m || 0) / 60;
+};
+
+/* Normaliza lo que se teclea en los campos de hora, SIEMPRE en 24 horas.
+   Acepta «8», «800», «8:0», «0800», «8.30» y devuelve «08:00» / «08:30».
+   Existe porque el `input type="time"` del navegador mostraba la hora en el
+   formato del sistema —a Pedro le salia «09:00 p.m.» junto a un «21:00» en la
+   malla— y el atributo `lang` NO lo fuerza: probado con en-GB, es-ES y es-CL,
+   los tres siguieron en 12 horas. */
+function normalizarHora(txt) {
+  const d = String(txt || '').replace(/[^\d]/g, '');
+  if (!d) return '';
+  let h, m;
+  if (d.length <= 2)      { h = Number(d);               m = 0; }
+  else if (d.length === 3){ h = Number(d.slice(0,1));    m = Number(d.slice(1)); }
+  else                    { h = Number(d.slice(0,2));    m = Number(d.slice(2,4)); }
+  if (!isFinite(h) || !isFinite(m)) return '';
+  h = Math.min(23, Math.max(0, h));
+  m = Math.min(59, Math.max(0, m));
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+}
 
 function duraDlg() {
   const i = deHora($('#dEntra').value), fRaw = deHora($('#dSale').value);
@@ -3219,6 +3246,12 @@ function opcionesModelo() {
   on('#dCancelar','click', () => $('#dlgTurno').close());
   on('#dGuardar', 'click', guardarDlg);
   on('#dBorrar',  'click', borrarDlg);
+  // Al salir del campo se acomoda lo tecleado: «830» queda «08:30». Mientras
+  // escribe no se toca, porque reescribirle el texto bajo los dedos es peor.
+  ['#dEntra','#dSale'].forEach(id => on(id, 'blur', () => {
+    const e = $(id), v = normalizarHora(e.value);
+    if (v && v !== e.value) { e.value = v; duraDlg(); }
+  }));
   ['#dEntra','#dSale','#dPausa'].forEach(id => on(id, 'input', () => {
     duraDlg();
     // Si las horas dejan de ser las de la plantilla, la plantilla SE SUELTA.

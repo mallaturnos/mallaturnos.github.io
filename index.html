@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=61">
+<link rel="stylesheet" href="estilo.css?v=62">
 </head>
 <body>
 
@@ -347,8 +347,15 @@
 
     <div id="paneTurno">
       <div class="fldrow">
-        <div class="fld"><label for="dEntra">Entra</label><input type="time" id="dEntra" step="300" required></div>
-        <div class="fld"><label for="dSale">Sale</label><input type="time" id="dSale" step="300" required></div>
+        <!-- Campo propio en vez de `type="time"`: el control nativo usa el formato
+             del sistema de cada uno, asi que a Pedro le salia «09:00 p.m.» adentro
+             del dialogo y «21:00» en la malla. Probado: `lang` NO lo fuerza. -->
+        <div class="fld"><label for="dEntra">Entra</label>
+          <input type="text" id="dEntra" class="hora" inputmode="numeric" maxlength="5"
+                 placeholder="08:00" autocomplete="off" required></div>
+        <div class="fld"><label for="dSale">Sale</label>
+          <input type="text" id="dSale" class="hora" inputmode="numeric" maxlength="5"
+                 placeholder="16:30" autocomplete="off" required></div>
         <div class="fld"><label for="dPausa">Colación (min)</label><input type="number" id="dPausa" class="n" min="0" max="240" step="5" value="30"></div>
         <div class="fld"><label>Duración</label><input type="text" id="dDura" class="n" readonly tabindex="-1"></div>
       </div>
@@ -385,7 +392,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=68"></script>
-<script src="app.js?v=84"></script>
+<script src="app.js?v=85"></script>
 
 
 </body>
