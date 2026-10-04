@@ -738,7 +738,12 @@ function pintarSemanaPorPuesto() {
         }).join('');
         // debajo de cada día, cuánta gente y cuántas horas: es la cobertura
         // metida en la misma pantalla, como la de Skello
+        // El boton «+ turno», igual que en la vista por personas. Sin el, una
+        // casilla que YA tiene un turno no ofrecia ninguna forma visible de
+        // agregar otro: se podia apretar el borde, pero eso no lo adivina nadie.
         return `<td class="cell" data-fecha="${fe}" data-puesto="${esc(q)}">${bloques}
+          <button type="button" class="anadir" data-anadir="${fe}"
+            aria-label="Agregar turno de ${esc(q)} el ${fe}">${aqui.length ? '+' : '+ turno'}</button>
           <span class="cuenta">${aqui.length} ${aqui.length === 1 ? 'pers.' : 'pers.'} · ${hfmt(hs)} h</span></td>`;
       }).join('') + `<td class="tot">${hfmt(horasQ)} h</td>`;
     cuerpo.appendChild(tr);
@@ -753,9 +758,10 @@ function pintarSemanaPorPuesto() {
       if (a) abrirTurno(p, bl.dataset.fecha, a);
       return;
     }
-    // Apretar un hueco tambien crea aca. La fila es un PUESTO, asi que el turno
-    // nace con ese puesto puesto y sin dueño: quien lo cubre se elige en el
-    // dialogo. Antes esta vista no dejaba crear y habia que cambiarse a otra.
+    // Apretar «+ turno» —o el hueco de la casilla— crea aca tambien. La fila es
+    // un PUESTO, asi que el turno nace con ese puesto puesto y sin dueño: quien
+    // lo cubre se elige en el dialogo. Vale aunque la casilla YA tenga turnos:
+    // un puesto puede necesitar dos personas el mismo dia.
     const cel = ev.target.closest('td.cell[data-fecha][data-puesto]'); if (!cel) return;
     abrirTurno(null, cel.dataset.fecha, null, cel.dataset.puesto);
   };
