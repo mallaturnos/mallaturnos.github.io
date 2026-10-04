@@ -704,9 +704,16 @@ function pintarSemanaPorPuesto() {
   S.personas.forEach(p => f.forEach(fe => turnosDe(p.id, fe).forEach(a => todas.push({ p, a }))));
   S.abiertos.filter(a => f.includes(a.fecha)).forEach(a => todas.push({ p: null, a }));
 
-  const lista = [...new Set(todas.map(x => puestoRot(x.a, x.p)))].sort();
+  /* Las filas salen del CATALOGO de puestos, no solo de los turnos que ya hay.
+     Con la semana en blanco no habia ninguna fila, asi que no habia donde
+     apretar para crear: la vista no se podia arrancar a si misma. Lo encontro
+     Pedro —«¿acá cómo agrego a un puesto o una persona?»— con la semana vacia.
+     Se suman ademas los puestos que aparezcan en turnos y no esten en el
+     catalogo, para no esconder nada. */
+  const lista = [...new Set([...puestos(), ...todas.map(x => puestoRot(x.a, x.p))])].sort();
   if (!lista.length) {
-    cuerpo.innerHTML = '<tr><td colspan="9" class="vacio">Todavía no hay turnos esta semana.</td></tr>';
+    cuerpo.innerHTML = '<tr><td colspan="9" class="vacio">Todavía no hay puestos. '
+      + 'Créalos en la pestaña <b>Equipo</b> y vuelve acá.</td></tr>';
     pintarResumenSemana(); return;
   }
 
@@ -1380,6 +1387,9 @@ function pintarDia() {
       if (!porPuesto.has(q)) porPuesto.set(q, []);
       porPuesto.get(q).push({ a, p: null });
     });
+    // Igual que en la semana: los puestos del CATALOGO salen aunque no tengan
+    // ningun turno ese dia. Si no, un dia en blanco no deja crear nada.
+    puestos().forEach(q => { if (!porPuesto.has(q)) porPuesto.set(q, []); });
     [...porPuesto.keys()].sort((x, y) => x.localeCompare(y, 'es'))
       .forEach(q => filas.push({ puesto: q, items: porPuesto.get(q) }));
   } else {
