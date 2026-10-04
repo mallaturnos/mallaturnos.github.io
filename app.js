@@ -2333,6 +2333,19 @@ function pintarModelos() {
    SOLO en el elegido. `opcionesModelo()` lee el valor con un querySelector de
    `aria-pressed="true"`, que devuelve el PRIMERO: si se marcaran los cuatro,
    leeria 1 y aplicaria siempre una sola semana, en silencio. */
+/* Una accion que termina cierra el dialogo: no tiene nada mas que ofrecer y
+   ademas TAPA la malla, que es justo lo que uno quiere ver despues de aplicar.
+   Lo pidio Pedro —«una vez creado y guardado no deberia desaparecer esta
+   pantalla?»—. El aviso se muestra donde ya lo muestra «Copiar la anterior»,
+   para no inventar un segundo lugar donde mirar.
+   Si algo FALLA, el dialogo se queda abierto: ahi si hay que volver a intentar. */
+function listoYCerrar(texto) {
+  $('#dlgModelos').close();
+  const m = $('#msgSem');
+  if (m) { m.textContent = texto; m.className = 'msg ok'; }
+  setTimeout(() => { const x = $('#msgSem'); if (x && x.textContent === texto) x.textContent = ''; }, 6000);
+}
+
 function marcarSemanas(n) {
   $('#pSemanas').querySelectorAll('button[data-sem]').forEach(b => {
     const v = Number(b.dataset.sem);
@@ -2408,10 +2421,12 @@ function opcionesModelo() {
       pintarModelos();
       $('#pModelo').value = r.id;
       $('#pNombre').value = '';
-      m.textContent = r.n
-        ? `${r.reemplazo ? 'Reemplazado' : 'Guardado'}: ${r.n} turno${r.n === 1 ? '' : 's'}.`
-        : 'Quedó guardado, pero la semana que estás viendo no tiene turnos.';
-      m.className = 'msg ' + (r.n ? 'ok' : '');
+      const dicho = r.n
+        ? `${r.reemplazo ? 'Reemplazado' : 'Guardado'} el modelo «${r.nombre}»: ${r.n} turno${r.n === 1 ? '' : 's'}.`
+        : `Guardé «${r.nombre}», pero la semana que estás viendo no tiene turnos.`;
+      // Sin turnos NO se cierra: es un resultado raro y conviene que lo lea aca.
+      if (r.n) return listoYCerrar(dicho);
+      m.textContent = dicho; m.className = 'msg';
     } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
   });
 
@@ -2433,11 +2448,11 @@ function opcionesModelo() {
       recordar('aplicar un modelo de semana');
       const r = await DATOS.aplicarModelo(S.local.id, id, iso(S.lunes), o);
       await refrescar();
-      m.textContent = r.turnos
-        ? `Listo: ${r.turnos} turno${r.turnos === 1 ? '' : 's'} en `
-          + (r.semanas === 1 ? '1 semana.' : r.semanas + ' semanas.')
-        : 'El modelo no tiene turnos para lo que marcaste.';
-      m.className = 'msg ' + (r.turnos ? 'ok' : '');
+      if (r.turnos)
+        return listoYCerrar(`Listo: ${r.turnos} turno${r.turnos === 1 ? '' : 's'} en `
+          + (r.semanas === 1 ? '1 semana.' : r.semanas + ' semanas.'));
+      m.textContent = 'El modelo no tiene turnos para lo que marcaste.';
+      m.className = 'msg';
     } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
   });
 
