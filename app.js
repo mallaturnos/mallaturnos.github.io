@@ -483,13 +483,46 @@ function duraDlg() {
 
    Se vuelve a pintar cuando cambia el puesto en el dialogo, porque si no la
    lista quedaria ordenada por el puesto anterior. */
+/* ¿Este turno se pisa con otro de la MISMA persona ese dia?
+   Pedro: «que no se dejen pisar los turnos». Nadie puede estar en dos lados a
+   la misma hora, y hasta hoy la app lo dejaba guardar: el unico control miraba
+   que la hora de ENTRADA no fuera identica, asi que 08:00–16:30 y 13:30–22:00
+   convivian sin que nadie dijera nada.
+
+   Devuelve el turno con el que choca, o null. `exceptoId` sirve al EDITAR, para
+   que un turno no choque consigo mismo.
+
+   Los turnos sin dueño no chocan con nadie: no son de ninguna persona. */
+function chocaCon(personaId, fecha, inicio, fin, exceptoId) {
+  if (!personaId) return null;
+  return (turnosDe(personaId, fecha) || []).find(x =>
+    x.id !== exceptoId
+    && Number(x.inicio) < Number(fin) && Number(inicio) < Number(x.fin)) || null;
+}
+
+const diceChoque = (nombre, x) =>
+  `${nombre} ya tiene ${hhmm(x.inicio)}–${hhmm(x.fin)} ese día: se pisan.`;
+
 function marcarTodosTextoDlg() { /* sin indicador en este dialogo, por ahora */ }
 
 function pintarPastillasPersonas(quien) {
   const puesto = ($('#dPuesto') && $('#dPuesto').value || '').trim().toLowerCase();
-  const pastilla = x => `<button type="button" class="act dia${x.id === quien ? ' on' : ''}"
+  // Quien YA tiene turno ese dia se marca con sus horas. No se esconde ni se
+  // bloquea —el turno partido es legitimo— pero se ve antes de elegir, que es
+  // justo lo que Pedro echaba de menos al verla repetida en la lista.
+  const fe = DLG && DLG.fecha;
+  const yaTiene = x => {
+    const ts = fe ? (turnosDe(x.id, fe) || []) : [];
+    return ts.length ? ts.map(t => hhmm(t.inicio) + '–' + hhmm(t.fin)).join(' · ') : '';
+  };
+  const pastilla = x => {
+    const ya = yaTiene(x);
+    return `<button type="button" class="act dia${x.id === quien ? ' on' : ''}${ya ? ' ocupada' : ''}"
       data-pid="${x.id}" aria-pressed="${x.id === quien ? 'true' : 'false'}"
-      title="${esc(x.nombre + ((x.rol || '').trim() ? ' · ' + x.rol : ''))}">${esc(x.nombre.split(' ')[0])}</button>`;
+      title="${esc(x.nombre + ((x.rol || '').trim() ? ' · ' + x.rol : '')
+        + (ya ? ' · ya tiene ' + ya + ' ese día' : ''))}">${esc(x.nombre.split(' ')[0])}`
+      + (ya ? `<span class="yatiene">${esc(ya)}</span>` : '') + '</button>';
+  };
   const suyos = puesto ? S.personas.filter(x => (x.rol || '').trim().toLowerCase() === puesto) : [];
   const otros = S.personas.filter(x => !suyos.includes(x));
   const sinAsignar = `<button type="button" class="act dia${quien ? '' : ' on'}" data-pid=""
@@ -598,7 +631,11 @@ async function guardarDlg() {
     recordar('la ausencia de ' + p.nombre + ' del ' + ddmm(fecha));
     try {
       await DATOS.ponerAusencia(S.local.id, p.id, fecha, $('#dAusencia').value);
-      await refrescar(); $('#dlgTurno').close();
+      await refrescar();
+    // Con choques el diálogo se queda abierto: el aviso hay que leerlo, y
+    // cerrarlo lo haría desaparecer junto con la explicación.
+    if (!(m.className || '').includes('bad') && !m.textContent.includes('se pisaban')
+        && !m.textContent.includes('Se pisaban')) $('#dlgTurno').close();
     } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
     return;
   }
@@ -629,18 +666,38 @@ async function guardarDlg() {
                 : 'agregar turno' + (p ? ' a ' + p.nombre : ' sin asignar'));
   try {
     if (asig) {
+      const ch = chocaCon(quienes[0], fecha, d.inicio, d.fin, asig.id);
+      if (ch) {
+        const nom = (S.personas.find(x => x.id === quienes[0]) || {}).nombre || 'Esa persona';
+        S.hist.pop(); pintarDeshacer();
+        m.textContent = diceChoque(nom.split(' ')[0], ch); m.className = 'msg bad';
+        return;
+      }
       await DATOS.editarAsignacion(asig.id, Object.assign({ persona_id: quienes[0] }, campos));
     } else {
       // tantos turnos como personas x días. Con 4 personas y 5 días son 20 de
       // una, que es justamente la gracia: antes eran 4 veces este diálogo.
       let hechos = 0;
+      const choques = [];
       for (const fe of dias) for (const q of quienes) {
         // si esa persona ya tiene el mismo bloque ese día, no se duplica
         if (q && turnosDe(q, fe).some(x => Number(x.inicio) === d.inicio)) continue;
+        // y si se PISA con otro suyo, tampoco se crea: nadie está en dos lados
+        // a la misma hora. Se salta esa combinación y se dice cuál fue.
+        const ch = chocaCon(q, fe, d.inicio, d.fin);
+        if (ch) {
+          const nom = (S.personas.find(x => x.id === q) || {}).nombre || '';
+          choques.push(`${nom.split(' ')[0]} el ${ddmm(fe)} (${hhmm(ch.inicio)}–${hhmm(ch.fin)})`);
+          continue;
+        }
         await DATOS.crearAsignacion(S.local.id, q, fe, campos);
         hechos++;
       }
-      if (!hechos) { m.textContent = 'Eso ya estaba puesto: no se agregó nada.'; m.className = 'msg'; }
+      if (choques.length) {
+        m.textContent = (hechos ? `Se crearon ${hechos}. ` : 'No se creó ninguno. ')
+          + 'Se pisaban con turnos que ya tenían: ' + choques.join(' · ') + '.';
+        m.className = 'msg ' + (hechos ? '' : 'bad');
+      } else if (!hechos) { m.textContent = 'Eso ya estaba puesto: no se agregó nada.'; m.className = 'msg'; }
       else creados = { n: hechos, dias, quienes };
     }
     await refrescar(); $('#dlgTurno').close();
@@ -862,6 +919,9 @@ async function soltarTurno(id, destino) {
       return aviso(`${nom(personaFinal)} tiene `
         + `${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} ese día. Quita la ausencia primero.`, 'bad');
   }
+
+  const ch = chocaCon(personaFinal, fechaFinal, Number(a.inicio), Number(a.fin), a.id);
+  if (ch) return aviso(diceChoque(nom(personaFinal), ch), 'bad');
 
   const campos = {};
   if (cambiaFecha) campos.fecha = d.fecha;
@@ -1238,6 +1298,9 @@ async function soltarEnDia(id, destino, horaNueva) {
                  + 'ese día. Quita la ausencia primero.', 'bad');
   }
 
+  const ch2 = chocaCon(personaFinal, a.fecha, inicio, fin, a.id);
+  if (ch2) return aviso(diceChoque(nom(personaFinal), ch2), 'bad');
+
   const campos = {};
   if (!mismaHora) { campos.inicio = inicio; campos.fin = fin; }
   if (cambiaPuesto) campos.puesto = (d.puesto || '').trim();
@@ -1315,6 +1378,13 @@ function engancharEstirar(caja) {
         m.textContent = texto; m.className = 'msg ' + clase;
         setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
       };
+      const ch3 = chocaCon(a.persona_id, a.fecha, ini, fin, a.id);
+      if (ch3) {
+        const q = S.personas.find(x => x.id === a.persona_id);
+        aviso(diceChoque(q ? q.nombre.split(' ')[0] : 'Esa persona', ch3), 'bad');
+        await refrescar();                   // devolver la barra a su sitio
+        return;
+      }
       try {
         recordar('cambiar la hora de un turno');
         await DATOS.editarAsignacion(a.id, { inicio: ini, fin });
@@ -3149,7 +3219,22 @@ function opcionesModelo() {
   on('#dCancelar','click', () => $('#dlgTurno').close());
   on('#dGuardar', 'click', guardarDlg);
   on('#dBorrar',  'click', borrarDlg);
-  ['#dEntra','#dSale','#dPausa'].forEach(id => on(id, 'input', duraDlg));
+  ['#dEntra','#dSale','#dPausa'].forEach(id => on(id, 'input', () => {
+    duraDlg();
+    // Si las horas dejan de ser las de la plantilla, la plantilla SE SUELTA.
+    // Si no, queda un turno que dice ser «Apertura 08:00–16:30» corriendo de
+    // 13:30 a 22:00 — y como el color sale de la plantilla, el color miente.
+    // Lo encontro Pedro: «¿por que Ana y Carla quedaron en el mismo color?».
+    const sel = $('#dPlantilla'); const t = turnoDe(sel.value);
+    if (!t) return;
+    const i = deHora($('#dEntra').value), f = deHora($('#dSale').value);
+    const c = Number($('#dPausa').value || 0) / 60;
+    const igual = i != null && f != null
+      && Math.abs(i - Number(t.inicio)) < 0.005
+      && Math.abs(f - Number(t.fin)) < 0.005
+      && Math.abs(c - Number(t.colacion || 0)) < 0.005;
+    if (!igual) sel.value = '';
+  }));
   // Elegir plantilla solo RELLENA los campos: después se editan. La plantilla
   // deja de ser la verdad y pasa a ser un atajo para no teclear.
   on('#dPlantilla', 'change', () => {
