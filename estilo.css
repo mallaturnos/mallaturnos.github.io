@@ -613,5 +613,10 @@ table.reloj td.marcar .mini{margin-right:4px}
 
 /* Diálogo de modelos de semana: un separador y la fila de la casilla. */
 .sepdlg{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
-.chk{display:flex;gap:8px;align-items:center;font-weight:400}
-.chk input{margin:0}
+/* OJO: el texto va envuelto en un <span>. En un contenedor flex CADA hijo es un
+   elemento, y los trozos de texto sueltos y los <b> cuentan por separado: sin el
+   span, «Pegar», «solo la forma» y «, como turnos sin asignar» se reparten en
+   columnas y la linea queda ilegible. Paso el 04-10. */
+.chk{display:flex;gap:8px;align-items:flex-start;font-weight:400}
+.chk input{margin:3px 0 0;flex:none}
+.chk span{flex:1}
