@@ -473,7 +473,9 @@ function duraDlg() {
   return { inicio: i, fin: f, colacion: (Number($('#dPausa').value) || 0) / 60, horas: h };
 }
 
-function abrirTurno(p, fecha, asig) {
+/* `puestoFijo` llega cuando el turno se crea desde una fila de PUESTO: la fila
+   ya dice en que puesto va, y lo unico que falta elegir es quien lo cubre. */
+function abrirTurno(p, fecha, asig, puestoFijo) {
   DLG = { p, fecha, asig };
   const esNuevo = !asig, esAus = asig && asig.ausencia;
   $('#dlgTit').textContent = esNuevo ? 'Agregar turno' : (esAus ? 'Editar ausencia' : 'Editar turno');
@@ -499,7 +501,8 @@ function abrirTurno(p, fecha, asig) {
         data-pid="${x.id}" aria-pressed="${x.id === quien ? 'true' : 'false'}">${esc(x.nombre.split(' ')[0])}</button>`).join('');
   $('#cajaPersonas').hidden = !esNuevo;
   $('#cajaPersona').hidden  = esNuevo;
-  $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p) : ((p && p.rol) || '').trim());
+  $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p)
+    : ((puestoFijo || '').trim() || ((p && p.rol) || '').trim()));
   $('#dAusencia').innerHTML = Object.entries(AUSENCIAS)
     .filter(([k]) => k !== 'L')
     .map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
@@ -701,8 +704,9 @@ function pintarSemanaPorPuesto() {
           const t = a.turno_id ? turnoDe(a.turno_id) : null;
           const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
           return `<span class="bloque${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
-            data-fecha="${fe}" data-p="${p ? p.id : ''}" role="button" tabindex="0"
-            title="${esc((p ? p.nombre : 'Sin asignar') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin))}">
+            data-fecha="${fe}" data-p="${p ? p.id : ''}" draggable="true" role="button" tabindex="0"
+            title="${esc((p ? p.nombre : 'Sin asignar') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
+              + ' · arrástralo a otro puesto o día')}">
             <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
             <em>${esc(p ? p.nombre.split(' ')[0] : 'sin asignar')}</em></span>`;
         }).join('');
@@ -715,12 +719,21 @@ function pintarSemanaPorPuesto() {
   });
 
   cuerpo.onclick = ev => {
-    const bl = ev.target.closest('[data-asig]'); if (!bl) return;
-    const p = bl.dataset.p ? S.personas.find(x => x.id === bl.dataset.p) : null;
-    const lista2 = p ? filasDe(p.id, bl.dataset.fecha) : S.abiertos;
-    const a = lista2.find(x => x.id === bl.dataset.asig);
-    if (a) abrirTurno(p, bl.dataset.fecha, a);
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      const p = bl.dataset.p ? S.personas.find(x => x.id === bl.dataset.p) : null;
+      const lista2 = p ? filasDe(p.id, bl.dataset.fecha) : S.abiertos;
+      const a = lista2.find(x => x.id === bl.dataset.asig);
+      if (a) abrirTurno(p, bl.dataset.fecha, a);
+      return;
+    }
+    // Apretar un hueco tambien crea aca. La fila es un PUESTO, asi que el turno
+    // nace con ese puesto puesto y sin dueño: quien lo cubre se elige en el
+    // dialogo. Antes esta vista no dejaba crear y habia que cambiarse a otra.
+    const cel = ev.target.closest('td.cell[data-fecha][data-puesto]'); if (!cel) return;
+    abrirTurno(null, cel.dataset.fecha, null, cel.dataset.puesto);
   };
+  engancharArrastre($('#tablaSem'));
   pintarResumenSemana();
 }
 
@@ -744,7 +757,13 @@ function turnoArrastrable(id) {
   return Object.values(S.asign).flat().concat(S.abiertos).find(a => a.id === id) || null;
 }
 
-async function soltarTurno(id, personaId, fecha) {
+/* Soltar un turno en otra casilla. `destino` trae SOLO lo que cambia:
+     { persona: id|null }  la fila era una persona
+     { puesto: 'Barra'  }  la fila era un puesto
+     { fecha: '2026-10-05' } la columna era otro dia
+   La regla que lo ordena, de Pedro (04-10): LA FILA DICE QUE CAMBIA. Si la fila
+   es una persona, soltar cambia de persona; si es un puesto, cambia de puesto. */
+async function soltarTurno(id, destino) {
   const a = turnoArrastrable(id);
   const m = $('#msgSem');
   const aviso = (texto, clase) => {
@@ -753,55 +772,80 @@ async function soltarTurno(id, personaId, fecha) {
     setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
   };
   if (!a) return;
-  const mismo = (a.persona_id || '') === (personaId || '') && a.fecha === fecha;
-  if (mismo) return;                       // lo soltó donde ya estaba
+  const d = destino || {};
+  const cambiaPersona = 'persona' in d && (a.persona_id || null) !== (d.persona || null);
+  const cambiaPuesto  = 'puesto'  in d && (a.puesto || '').trim() !== (d.puesto || '').trim();
+  const cambiaFecha   = 'fecha'   in d && a.fecha !== d.fecha;
+  if (!cambiaPersona && !cambiaPuesto && !cambiaFecha) return;   // lo soltó donde ya estaba
 
-  // Cambiar de dueño se CONFIRMA, igual que en la vista de dia. Pedro lo pidio
-  // para el dia («si modifica el turno de otra persona que arroje una alerta») y
-  // vale igual aca: es el mismo riesgo, y avisar en una vista y en la otra no
-  // seria peor que no avisar en ninguna. Cambiar solo de DIA no pregunta.
   const nom = x => { const q = x ? S.personas.find(y => y.id === x) : null;
                      return q ? q.nombre.split(' ')[0] : 'Sin asignar'; };
-  if ((a.persona_id || null) !== (personaId || null)) {
-    const mismoDia = a.fecha === fecha;
-    if (!confirm(`El turno pasa de ${nom(a.persona_id)} a ${nom(personaId)}.`
-               + (mismoDia ? '' : `\n\nY del ${ddmm(a.fecha)} al ${ddmm(fecha)}.`)
+
+  // Lo que le SACA un turno a alguien se confirma; correr de dia o cambiar de
+  // puesto, no. Pedro lo pidio para el dia («si modifica el turno de otra
+  // persona que arroje una alerta») y vale igual en las demas vistas.
+  if (cambiaPersona) {
+    if (!confirm(`El turno pasa de ${nom(a.persona_id)} a ${nom(d.persona)}.`
+               + (cambiaFecha ? `\n\nY del ${ddmm(a.fecha)} al ${ddmm(d.fecha)}.` : '')
                + '\n\n¿Lo hago?')) return;
   }
 
+  const fechaFinal = cambiaFecha ? d.fecha : a.fecha;
+  const personaFinal = 'persona' in d ? (d.persona || null) : (a.persona_id || null);
+
   // Si la persona de destino tiene AUSENCIA ese dia, la casilla solo dibuja la
   // ausencia: el turno quedaria guardado pero INVISIBLE. Mejor no dejarlo.
-  if (personaId) {
-    const aus = ausenciaDe(personaId, fecha);
-    if (aus && aus.ausencia !== 'L') {
-      const q = S.personas.find(x => x.id === personaId);
-      return aviso(`${q ? q.nombre.split(' ')[0] : 'Esa persona'} tiene `
+  if (personaFinal) {
+    const aus = ausenciaDe(personaFinal, fechaFinal);
+    if (aus && aus.ausencia !== 'L')
+      return aviso(`${nom(personaFinal)} tiene `
         + `${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} ese día. Quita la ausencia primero.`, 'bad');
-    }
+  }
+
+  const campos = {};
+  if (cambiaFecha) campos.fecha = d.fecha;
+  if (cambiaPuesto) campos.puesto = (d.puesto || '').trim();
+  if ('persona' in d) {
+    campos.persona_id = d.persona || null;
+    // `ofrecido_por` se limpia a proposito: la fila «Sin asignar» muestra los
+    // turnos sin persona Y los ofrecidos, asi que mover a alguien un turno
+    // ofrecido lo dejaria visible en los dos lados a la vez.
+    campos.ofrecido_por = null;
   }
   try {
     recordar('mover un turno');
-    // `ofrecido_por` se limpia a proposito. La fila «Sin asignar» muestra los
-    // turnos sin persona Y los OFRECIDOS, asi que mover a alguien un turno
-    // ofrecido lo dejaria visible en los dos lados a la vez. Al moverlo el jefe,
-    // la oferta queda resuelta: el turno es de quien el diga, o de nadie.
-    await DATOS.editarAsignacion(id, { persona_id: personaId || null, fecha,
-                                       ofrecido_por: null });
+    await DATOS.editarAsignacion(id, campos);
     await refrescar();
-    const q = personaId ? S.personas.find(x => x.id === personaId) : null;
-    aviso('Turno movido a ' + (q ? q.nombre.split(' ')[0] : 'sin asignar')
-          + ' · ' + ddmm(fecha) + '.', 'ok');
+    const partes = [];
+    if (cambiaPersona) partes.push('a ' + nom(d.persona));
+    if (cambiaPuesto) partes.push('a ' + (d.puesto || 'sin puesto'));
+    if (cambiaFecha) partes.push('al ' + ddmm(d.fecha));
+    aviso('Turno movido ' + partes.join(' · ') + '.', 'ok');
   } catch (e) {
     S.hist.pop(); pintarDeshacer();        // no se movio: el paso atras sobra
     aviso(e.message, 'bad');
   }
 }
 
-/* Engancha arrastrar/soltar a una tabla. Idempotente: se llama en cada
-   repintado y marca la tabla para no colgar dos veces lo mismo. */
+/* Engancha arrastrar/soltar a una tabla de casillas: sirve para la semana —por
+   personas o por puestos— y para el mes. Idempotente: se llama en cada
+   repintado y marca la tabla para no colgar dos veces lo mismo.
+
+   El destino se lee de la CASILLA, que es lo que hace que la regla «la fila dice
+   que cambia» se cumpla sola: una casilla con `data-puesto` cambia el puesto,
+   una con `data-p` cambia la persona. */
+function destinoDeCasilla(cel) {
+  const d = {};
+  if (cel.dataset.fecha) d.fecha = cel.dataset.fecha;
+  if ('puesto' in cel.dataset) d.puesto = cel.dataset.puesto;
+  else if ('p' in cel.dataset || 'noasig' in cel.dataset) d.persona = cel.dataset.p || null;
+  return d;
+}
+
 function engancharArrastre(tabla) {
   if (!tabla || tabla.dataset.arrastre) return;
   tabla.dataset.arrastre = '1';
+  const casilla = t => t.closest('td.cell[data-fecha], td.mcel[data-fecha]');
   tabla.addEventListener('dragstart', ev => {
     const bl = ev.target.closest('[data-asig]');
     if (!bl || bl.classList.contains('aus')) return ev.preventDefault();
@@ -815,8 +859,7 @@ function engancharArrastre(tabla) {
     tabla.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
   });
   tabla.addEventListener('dragover', ev => {
-    const cel = ev.target.closest('td.cell[data-fecha]');
-    if (!cel) return;
+    const cel = casilla(ev.target); if (!cel) return;
     ev.preventDefault();                    // sin esto el navegador no deja soltar
     ev.dataTransfer.dropEffect = 'move';
     if (!cel.classList.contains('encima')) {
@@ -825,12 +868,11 @@ function engancharArrastre(tabla) {
     }
   });
   tabla.addEventListener('drop', ev => {
-    const cel = ev.target.closest('td.cell[data-fecha]');
-    if (!cel) return;
+    const cel = casilla(ev.target); if (!cel) return;
     ev.preventDefault();
     cel.classList.remove('encima');
     const id = ev.dataTransfer.getData('text/plain');
-    if (id) soltarTurno(id, cel.dataset.p || null, cel.dataset.fecha);
+    if (id) soltarTurno(id, destinoDeCasilla(cel));
   });
 }
 
@@ -1096,19 +1138,20 @@ function horaDesdeX(pista, clientX, agarreFrac) {
   return Math.round(h / SALTO) * SALTO;
 }
 
-async function soltarEnDia(id, personaId, horaNueva, cambiaFila) {
+async function soltarEnDia(id, destino, horaNueva) {
   const a = turnoArrastrable(id);
   if (!a) return;
+  const d = destino || {};
   const dur = Number(a.fin) - Number(a.inicio);
   let inicio = Number(a.inicio);
   if (horaNueva != null && Math.abs(horaNueva - inicio) >= SALTO) inicio = horaNueva;
   if (inicio < 0) inicio = 0;
   const fin = inicio + dur;
-
-  const antes = a.persona_id || null;
-  const ahora = cambiaFila ? (personaId || null) : antes;
   const mismaHora = Math.abs(inicio - Number(a.inicio)) < 0.001;
-  if (ahora === antes && mismaHora) return;             // no cambio nada
+
+  const cambiaPersona = 'persona' in d && (a.persona_id || null) !== (d.persona || null);
+  const cambiaPuesto  = 'puesto'  in d && (a.puesto || '').trim() !== (d.puesto || '').trim();
+  if (!cambiaPersona && !cambiaPuesto && mismaHora) return;      // no cambió nada
 
   const m = $('#msgSem');
   const aviso = (texto, clase) => {
@@ -1120,25 +1163,33 @@ async function soltarEnDia(id, personaId, horaNueva, cambiaFila) {
                      return q ? q.nombre.split(' ')[0] : 'Sin asignar'; };
 
   // Pedro: «si modifica el turno de otra persona que arroje una alerta». Cambiar
-  // de dueño le saca el turno a alguien y se lo pone a otro: eso se confirma.
-  // Correr la hora dentro de la misma fila no pregunta — es el gesto frecuente.
-  if (ahora !== antes &&
-      !confirm(`El turno pasa de ${nom(antes)} a ${nom(ahora)}.\n\n`
+  // de dueño le saca el turno a alguien: eso se confirma. Correr la hora o
+  // cambiar de puesto, no — no se lo quita a nadie.
+  if (cambiaPersona &&
+      !confirm(`El turno pasa de ${nom(a.persona_id)} a ${nom(d.persona)}.\n\n`
              + `${hhmm(inicio)}–${hhmm(fin)}. ¿Lo hago?`)) return;
 
-  if (ahora) {
-    const aus = ausenciaDe(ahora, a.fecha);
+  const personaFinal = 'persona' in d ? (d.persona || null) : (a.persona_id || null);
+  if (personaFinal) {
+    const aus = ausenciaDe(personaFinal, a.fecha);
     if (aus && aus.ausencia !== 'L')
-      return aviso(`${nom(ahora)} tiene ${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} `
+      return aviso(`${nom(personaFinal)} tiene ${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} `
                  + 'ese día. Quita la ausencia primero.', 'bad');
   }
+
+  const campos = {};
+  if (!mismaHora) { campos.inicio = inicio; campos.fin = fin; }
+  if (cambiaPuesto) campos.puesto = (d.puesto || '').trim();
+  if ('persona' in d) { campos.persona_id = d.persona || null; campos.ofrecido_por = null; }
   try {
     recordar('mover un turno');
-    await DATOS.editarAsignacion(id, { persona_id: ahora, inicio, fin, ofrecido_por: null });
+    await DATOS.editarAsignacion(id, campos);
     await refrescar();
-    aviso(ahora === antes
-      ? `Turno corrido a ${hhmm(inicio)}–${hhmm(fin)}.`
-      : `Turno de ${nom(antes)} a ${nom(ahora)} · ${hhmm(inicio)}–${hhmm(fin)}.`, 'ok');
+    const partes = [];
+    if (cambiaPersona) partes.push('a ' + nom(d.persona));
+    if (cambiaPuesto) partes.push('a ' + (d.puesto || 'sin puesto'));
+    if (!mismaHora) partes.push(hhmm(inicio) + '–' + hhmm(fin));
+    aviso('Turno movido ' + partes.join(' · ') + '.', 'ok');
   } catch (e) {
     S.hist.pop(); pintarDeshacer();
     aviso(e.message, 'bad');
@@ -1179,10 +1230,12 @@ function engancharArrastreDia(caja) {
     pista.classList.remove('encima');
     const id = ev.dataTransfer.getData('text/plain'); if (!id) return;
     const fila = pista.closest('.linea-fila');
-    // Agrupado por puesto la fila no es de nadie, asi que soltar NO cambia de
-    // dueño: ahi arrastrar sirve para correr la hora y nada mas.
-    const cambiaFila = S.agrupar !== 'puestos';
-    soltarEnDia(id, fila.dataset.p || null, horaDesdeX(pista, ev.clientX, agarre), cambiaFila);
+    // La fila dice que cambia: si es una persona, el dueño; si es un puesto, el
+    // puesto. Y correrlo de lado cambia la hora en los dos casos.
+    const destino = S.agrupar === 'puestos'
+      ? { puesto: fila.dataset.puesto || '' }
+      : { persona: fila.dataset.p || null };
+    soltarEnDia(id, destino, horaDesdeX(pista, ev.clientX, agarre));
   });
 }
 
@@ -1260,6 +1313,7 @@ function pintarDia() {
         const rep = repartirEnCarriles(fila.items);
         return `
         <div class="linea-fila${porPuesto ? ' porpuesto' : ''}" data-p="${!porPuesto && fila.p ? fila.p.id : ''}"
+             ${porPuesto ? `data-puesto="${esc(fila.puesto)}"` : ''}
              style="--carriles:${rep.carriles}">
           <div class="linea-quien">${quien}</div>
           <div class="linea-pista" data-fecha="${fe}">
@@ -1302,9 +1356,10 @@ function pintarDia() {
       if (a) return abrirTurno(a.persona_id ? (S.personas.find(x => x.id === a.persona_id) || null) : null, fe, a);
       return;
     }
-    // Apretar un hueco crea un turno, pero solo cuando la fila dice de quien es.
-    // Agrupado por puesto no se sabe, igual que en la vista de semana por puestos.
-    if (S.agrupar === 'puestos') return;
+    // Apretar un hueco crea, con lo que la fila ya sabe: en fila de persona viene
+    // con la persona; en fila de puesto, con el puesto, y se elige a quien.
+    if (S.agrupar === 'puestos')
+      return abrirTurno(null, fe, null, fila.dataset.puesto || '');
     const p = fila.dataset.p ? S.personas.find(x => x.id === fila.dataset.p) : null;
     abrirTurno(p, fe, null);
   };
@@ -1349,7 +1404,8 @@ function pintarMes() {
       const t = a.turno_id ? turnoDe(a.turno_id) : null;
       const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
       const pu = (a.puesto || '').trim();
-      return `<span class="mbl" data-c="${ci}" data-asig="${a.id}" role="button" tabindex="0"
+      return `<span class="mbl" data-c="${ci}" data-asig="${a.id}" draggable="true"
+        role="button" tabindex="0"
         title="${esc('Sin asignar · ' + (pu ? pu + ' · ' : '')
         + hhmm(a.inicio) + '–' + hhmm(a.fin) + ' · ' + hfmt(horasAsig(a)) + ' h')}"
         >${hhmm(a.inicio)}<br>${hhmm(a.fin)}</span>`;
@@ -1375,7 +1431,8 @@ function pintarMes() {
           const pl = x.turno_id ? turnoDe(x.turno_id) : null;
           const ci = pl ? (S.turnos.findIndex(y => y.id === pl.id) % 4) + 1 : 5;
           const pu = puestoDe(x, p);
-          return `<span class="mbl" data-c="${ci}" data-asig="${x.id}" role="button" tabindex="0"
+          return `<span class="mbl" data-c="${ci}" data-asig="${x.id}" draggable="true"
+            role="button" tabindex="0"
             title="${esc((pu ? pu + ' · ' : '')
             + hhmm(x.inicio) + '–' + hhmm(x.fin) + ' · ' + hfmt(horasAsig(x)) + ' h'
             + (x.nota ? '\n' + x.nota : ''))}">${hhmm(x.inicio)}<br>${hhmm(x.fin)}</span>`;
@@ -1401,6 +1458,8 @@ function pintarMes() {
     return corte + `<td class="mpie">${h ? hfmt(h) : ''}</td>`;
   }).join('');
   cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Horas del día</th>${pie}<td class="tot">${hfmt(totMes)} h</td></tr>`;
+
+  engancharArrastre(cuerpo.closest('table') || cuerpo);
 
   // Un solo escuchador para toda la tabla. En el mes también se edita: Pedro
   // lo pidió y Skello lo hace («si veo algún desajuste puedo rectificarlo

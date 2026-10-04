@@ -637,7 +637,9 @@ table.reloj td.marcar .mini{margin-right:4px}
    casilla de destino se marca: sin las dos señales uno suelta a ciegas. */
 .bloque[draggable="true"]{cursor:grab}
 .bloque.llevando{opacity:.4;cursor:grabbing}
-td.cell.encima{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accent-soft)}
+td.cell.encima,td.mcel.encima{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accent-soft)}
+.mbl[draggable="true"]{cursor:grab}
+.mbl.llevando{opacity:.4;cursor:grabbing}
 
 /* La necesidad por hora, arriba de la línea de tiempo del día. Cada celda dice
    cuánta gente HAY y cuánta se NECESITA; el color acompaña, pero el resumen de
