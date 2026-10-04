@@ -2442,7 +2442,14 @@ function opcionesModelo() {
   // Una sola cantidad de semanas: estas pastillas son excluyentes.
   on('#pSemanas', 'click', ev => {
     const b = ev.target.closest('button[data-sem]'); if (!b) return;
-    marcarSemanas(Number(b.dataset.sem));
+    const v = Number(b.dataset.sem);
+    const sel = $('#pSemanas').querySelector('button[aria-pressed="true"]');
+    const hoy = sel ? Number(sel.dataset.sem) : 0;
+    // Apretar el ULTIMO encendido lo apaga y baja uno. Lo pidio Pedro: con el
+    // relleno de nivel, volver a apretar el 2 y que no pase nada se siente
+    // trabado. Pero no se baja de 1: aplicar un modelo a cero semanas no
+    // significa nada, asi que el 1 es el piso y volver a apretarlo no hace nada.
+    marcarSemanas(v === hoy ? Math.max(1, v - 1) : v);
   });
 
   on('#pGuardar', 'click', async () => {
