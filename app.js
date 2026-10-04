@@ -473,6 +473,34 @@ function duraDlg() {
   return { inicio: i, fin: f, colacion: (Number($('#dPausa').value) || 0) / 60, horas: h };
 }
 
+/* Las pastillas de «quiénes lo cubren», con LA GENTE DEL PUESTO ADELANTE.
+   Pedro (04-10): «está bien tener a todo el equipo como opción pero debería ser
+   claro en destacar a la gente [que] es del cargo».
+
+   Tiene razon: con catorce personas en una lista plana, elegir al que
+   corresponde es buscarlo. Siguen estando todos —un garzon puede cubrir barra
+   un dia— pero los del puesto van primero y rotulados, y el resto despues.
+
+   Se vuelve a pintar cuando cambia el puesto en el dialogo, porque si no la
+   lista quedaria ordenada por el puesto anterior. */
+function marcarTodosTextoDlg() { /* sin indicador en este dialogo, por ahora */ }
+
+function pintarPastillasPersonas(quien) {
+  const puesto = ($('#dPuesto') && $('#dPuesto').value || '').trim().toLowerCase();
+  const pastilla = x => `<button type="button" class="act dia${x.id === quien ? ' on' : ''}"
+      data-pid="${x.id}" aria-pressed="${x.id === quien ? 'true' : 'false'}"
+      title="${esc(x.nombre + ((x.rol || '').trim() ? ' · ' + x.rol : ''))}">${esc(x.nombre.split(' ')[0])}</button>`;
+  const suyos = puesto ? S.personas.filter(x => (x.rol || '').trim().toLowerCase() === puesto) : [];
+  const otros = S.personas.filter(x => !suyos.includes(x));
+  const sinAsignar = `<button type="button" class="act dia${quien ? '' : ' on'}" data-pid=""
+      aria-pressed="${quien ? 'false' : 'true'}">sin asignar</button>`;
+
+  $('#dPersonas').innerHTML = suyos.length
+    ? `<span class="pillcap">${esc($('#dPuesto').value)}</span>${sinAsignar}${suyos.map(pastilla).join('')}`
+      + (otros.length ? `<span class="pillcap">Otros</span>${otros.map(pastilla).join('')}` : '')
+    : sinAsignar + S.personas.map(pastilla).join('');
+}
+
 /* `puestoFijo` llega cuando el turno se crea desde una fila de PUESTO: la fila
    ya dice en que puesto va, y lo unico que falta elegir es quien lo cubre. */
 function abrirTurno(p, fecha, asig, puestoFijo) {
@@ -494,15 +522,13 @@ function abrirTurno(p, fecha, asig, puestoFijo) {
 
   // Al crear, varias personas de una vez. Un turno nuevo se le pone a quien
   // haga falta; uno que ya existe es de alguien, y ahí sigue siendo uno solo.
-  $('#dPersonas').innerHTML =
-    `<button type="button" class="act dia${quien ? '' : ' on'}" data-pid=""
-       aria-pressed="${quien ? 'false' : 'true'}">sin asignar</button>`
-    + S.personas.map(x => `<button type="button" class="act dia${x.id === quien ? ' on' : ''}"
-        data-pid="${x.id}" aria-pressed="${x.id === quien ? 'true' : 'false'}">${esc(x.nombre.split(' ')[0])}</button>`).join('');
   $('#cajaPersonas').hidden = !esNuevo;
   $('#cajaPersona').hidden  = esNuevo;
   $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p)
     : ((puestoFijo || '').trim() || ((p && p.rol) || '').trim()));
+  // DESPUES de llenar el puesto: las pastillas se ordenan por el, asi que
+  // pintarlas antes las habria ordenado por el puesto del turno anterior.
+  pintarPastillasPersonas(quien);
   $('#dAusencia').innerHTML = Object.entries(AUSENCIAS)
     .filter(([k]) => k !== 'L')
     .map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
@@ -3130,6 +3156,23 @@ function opcionesModelo() {
     $('#dPausa').value = Math.round(Number(t.colacion) * 60);
     duraDlg();
   });
+  // Al cambiar el puesto se reordenan las pastillas: la gente de ESE puesto
+  // adelante. Se conserva lo que ya estaba marcado.
+  on('#dPuesto', 'change', () => {
+    const marcados = [...$('#dPersonas').querySelectorAll('button[data-pid][aria-pressed="true"]')]
+      .map(b => b.dataset.pid).filter(Boolean);
+    pintarPastillasPersonas(marcados.length === 1 ? marcados[0] : null);
+    if (marcados.length > 1) marcados.forEach(id => {
+      const b = $('#dPersonas').querySelector(`button[data-pid="${id}"]`);
+      if (b) { b.setAttribute('aria-pressed', 'true'); b.classList.add('on'); }
+    });
+    if (marcados.length) {
+      const n = $('#dPersonas').querySelector('button[data-pid=""]');
+      if (n) { n.setAttribute('aria-pressed','false'); n.classList.remove('on'); }
+    }
+    marcarTodosTextoDlg();
+  });
+
   on('#dPersonas', 'click', ev => {
     const b = ev.target.closest('button[data-pid]'); if (!b) return;
     const sinAsignar = b.dataset.pid === '';
