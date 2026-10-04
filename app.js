@@ -2319,9 +2319,12 @@ function pintarModelos() {
          aria-pressed="false">${n}</button>`).join('');
     $('#pSemanas').dataset.listo = '1';
   }
-  // Se abre siempre en 1: aplicar cuatro semanas pisa un mes entero, y que eso
-  // quede armado de la vez anterior es una sorpresa cara.
-  marcarSemanas(1);
+  // OJO: aca NO se toca la cantidad de semanas elegida. `pintarModelos` se
+  // llama tambien DESPUES de guardar y de borrar, y un repintado que pisa lo
+  // que el usuario eligio es un error silencioso: elegia 4 semanas, guardaba
+  // un modelo y la seleccion volvia a 1 sin avisar. El reinicio a 1 se hace
+  // una sola vez, al ABRIR el dialogo.
+  if (!$('#pSemanas').querySelector('button[aria-pressed="true"]')) marcarSemanas(1);
 }
 
 /* El numero de semanas es una CANTIDAD, no una posicion: con el 3 marcado, el 1
@@ -2380,6 +2383,9 @@ function opcionesModelo() {
     $('#pSinAsignar').checked = false;
     $('#cajaPPersonas').hidden = false;
     pintarModelos();
+    // Al abrir siempre se parte en 1: aplicar cuatro semanas pisa un mes entero
+    // y que eso quede armado de la vez anterior es una sorpresa cara.
+    marcarSemanas(1);
     $('#dlgModelos').showModal();
   });
   on('#pCerrar', 'click', () => $('#dlgModelos').close());
