@@ -968,6 +968,34 @@ function pintarMes() {
   }).join('') + '<th>Horas</th>';
 
   const cuerpo = $('#mesCuerpo'); cuerpo.innerHTML = '';
+
+  /* Los turnos SIN DUEÑO, arriba de todo, igual que en la semana.
+     Hasta el 04-10 el mes solo dibujaba filas de PERSONAS, asi que un turno sin
+     asignar no aparecia en ninguna parte. Pedro aplico un modelo con «solo la
+     forma» —que crea justamente turnos sin dueño—, miro el mes y vio la pantalla
+     vacia. Si la app deja crearlos, el mes tiene que mostrarlos: si no, uno
+     planifica y concluye que no se guardo nada. */
+  const sinDueno = ds.map((f, n) => {
+    const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
+    const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
+    const aqui = S.abiertos.filter(a => a.fecha === f);
+    if (!aqui.length)
+      return corte + `<td class="mcel vacia" data-noasig="1" data-fecha="${f}"></td>`;
+    return corte + `<td class="mcel" data-noasig="1" data-fecha="${f}">` + aqui.map(a => {
+      const t = a.turno_id ? turnoDe(a.turno_id) : null;
+      const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
+      const pu = (a.puesto || '').trim();
+      return `<span class="mbl" data-c="${ci}" data-asig="${a.id}" role="button" tabindex="0"
+        title="${esc('Sin asignar · ' + (pu ? pu + ' · ' : '')
+        + hhmm(a.inicio) + '–' + hhmm(a.fin) + ' · ' + hfmt(horasAsig(a)) + ' h')}"
+        >${hhmm(a.inicio)}<br>${hhmm(a.fin)}</span>`;
+    }).join('') + '</td>';
+  }).join('');
+  const nSin = S.abiertos.length;
+  cuerpo.innerHTML = `<tr class="noasig"><th class="r" scope="row">Sin asignar`
+    + `<span class="rol">el primero que lo tome se lo queda</span></th>${sinDueno}`
+    + `<td class="tot">${nSin || ''}</td></tr>`;
+
   personasVisibles().forEach(p => {
     let horas = 0;
     const celdas = ds.map((f,n) => {
@@ -1014,6 +1042,13 @@ function pintarMes() {
   // lo pidió y Skello lo hace («si veo algún desajuste puedo rectificarlo
   // directamente desde aquí»), que es justamente para lo que sirve el mes.
   cuerpo.onclick = ev => {
+    // La fila sin dueño va primero: no tiene persona, y su lista es S.abiertos.
+    const sin = ev.target.closest('td.mcel[data-noasig]');
+    if (sin) {
+      const b = ev.target.closest('[data-asig]');
+      const a = b ? S.abiertos.find(x => x.id === b.dataset.asig) : null;
+      return abrirTurno(null, sin.dataset.fecha, a);
+    }
     const cel = ev.target.closest('td.mcel[data-p]'); if (!cel) return;
     const p = S.personas.find(x => x.id === cel.dataset.p); if (!p) return;
     const bl = ev.target.closest('[data-asig]');
