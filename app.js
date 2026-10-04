@@ -595,6 +595,7 @@ async function guardarDlg() {
     .map(b => b.dataset.fe).filter(Boolean);
   const dias = [...new Set([fecha, ...marcados])];
 
+  let creados = null;
   recordar(asig ? 'el turno de ' + (p ? p.nombre : 'sin asignar') + ' del ' + ddmm(fecha)
                 : 'agregar turno' + (p ? ' a ' + p.nombre : ' sin asignar'));
   try {
@@ -611,8 +612,26 @@ async function guardarDlg() {
         hechos++;
       }
       if (!hechos) { m.textContent = 'Eso ya estaba puesto: no se agregó nada.'; m.className = 'msg'; }
+      else creados = { n: hechos, dias, quienes };
     }
     await refrescar(); $('#dlgTurno').close();
+    // Decir QUE se creo. Antes se creaban los turnos y el dialogo se cerraba
+    // callado: desde la vista de Dia uno marca tres dias, ve un solo dia y no se
+    // entera de nada. Pedro lo noto («no es mejor que solo en dia se pueda
+    // agregar el del dia?») y el problema no era poder hacerlo, era el silencio.
+    if (creados) {
+      const w = $('#msgSem');
+      if (w) {
+        const gente = creados.quienes.map(q => q ? (S.personas.find(x => x.id === q) || {}).nombre : null)
+          .filter(Boolean).map(x => x.split(' ')[0]);
+        const dd = creados.dias.map(ddmm);
+        const txt = `Listo: ${creados.n} turno${creados.n === 1 ? '' : 's'}`
+          + (gente.length ? ' · ' + gente.join(', ') : ' · sin asignar')
+          + (dd.length > 1 ? ' · ' + dd.join(', ') : '') + '.';
+        w.textContent = txt; w.className = 'msg ok';
+        setTimeout(() => { if (w.textContent === txt) w.textContent = ''; }, 7000);
+      }
+    }
   } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
 }
 
@@ -1196,6 +1215,80 @@ async function soltarEnDia(id, destino, horaNueva) {
   }
 }
 
+/* ---------- estirar y acortar un turno ----------
+   Pedro (04-10): «si tengo un turno de las 9:00 a la 13:00 deberia poder
+   extenderlo a las 13:30 o reducirlo a las 12:00... esto en ambos sentidos».
+
+   Va con eventos de puntero y no con el arrastre del navegador: arrastrar sirve
+   para llevar la barra entera, y estirar es otra cosa. Mientras se estira, la
+   barra deja de ser `draggable` para que los dos gestos no se peleen.
+
+   Mismo salto de 15 minutos y un minimo de 15: un turno de duracion cero no
+   significa nada y la base lo guardaria igual. */
+function engancharEstirar(caja) {
+  if (!caja || caja.dataset.estirar) return;
+  caja.dataset.estirar = '1';
+
+  caja.addEventListener('pointerdown', ev => {
+    const tira = ev.target.closest('.tira[data-borde]'); if (!tira) return;
+    const barra = tira.closest('.barra[data-asig]'); if (!barra) return;
+    const pista = barra.closest('.linea-pista'); if (!pista) return;
+    const a = turnoArrastrable(barra.dataset.asig); if (!a) return;
+
+    ev.preventDefault(); ev.stopPropagation();
+    barra.draggable = false;                 // que no arranque el arrastre
+    barra.classList.add('estirando');
+    const borde = tira.dataset.borde;
+    const linea = pista.closest('.linea');
+    const h0 = Number(linea.dataset.h0), h1 = Number(linea.dataset.h1);
+    const r = pista.getBoundingClientRect();
+    let ini = Number(a.inicio), fin = Number(a.fin);
+
+    const horaEn = x => {
+      const h = h0 + ((x - r.left) / r.width) * (h1 - h0);
+      return Math.min(h1, Math.max(h0, Math.round(h / SALTO) * SALTO));
+    };
+    const pintar = () => {
+      const iz = ((ini - h0) / (h1 - h0)) * 100, an = ((fin - ini) / (h1 - h0)) * 100;
+      barra.style.left = iz + '%'; barra.style.width = an + '%';
+      const t = barra.querySelector('b'); if (t) t.textContent = hhmm(ini) + '–' + hhmm(fin);
+    };
+    const mover = e => {
+      const h = horaEn(e.clientX);
+      if (borde === 'inicio') ini = Math.min(h, fin - SALTO);
+      else                    fin = Math.max(h, ini + SALTO);
+      pintar();
+    };
+    const soltar = async e => {
+      document.removeEventListener('pointermove', mover);
+      document.removeEventListener('pointerup', soltar);
+      barra.classList.remove('estirando');
+      barra.draggable = true;
+      if (Math.abs(ini - Number(a.inicio)) < 0.001 && Math.abs(fin - Number(a.fin)) < 0.001) {
+        pintar(); return;                    // no se movio
+      }
+      const m = $('#msgSem');
+      const aviso = (texto, clase) => {
+        if (!m) return;
+        m.textContent = texto; m.className = 'msg ' + clase;
+        setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
+      };
+      try {
+        recordar('cambiar la hora de un turno');
+        await DATOS.editarAsignacion(a.id, { inicio: ini, fin });
+        await refrescar();
+        aviso(`Turno de ${hhmm(ini)} a ${hhmm(fin)}.`, 'ok');
+      } catch (err) {
+        S.hist.pop(); pintarDeshacer();
+        aviso(err.message, 'bad');
+        await refrescar();                   // deshacer lo pintado a mano
+      }
+    };
+    document.addEventListener('pointermove', mover);
+    document.addEventListener('pointerup', soltar);
+  });
+}
+
 function engancharArrastreDia(caja) {
   if (!caja || caja.dataset.arrastre) return;
   caja.dataset.arrastre = '1';
@@ -1336,6 +1429,8 @@ function pintarDia() {
                 <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
                 <em>${esc(pie)}</em>
                 ${m.entrada ? '<i class="marcado" title="marcó entrada">•</i>' : ''}
+                <i class="tira izq" data-borde="inicio" title="Cambiar la hora de entrada"></i>
+                <i class="tira der" data-borde="fin" title="Cambiar la hora de salida"></i>
               </span>`;
             }).join('')}
           </div>
@@ -1343,6 +1438,7 @@ function pintarDia() {
     </div>`;
 
   engancharArrastreDia(caja);
+  engancharEstirar(caja);
 
   // abrir un turno, o agregar uno en la fila de alguien
   caja.onclick = ev => {

@@ -663,3 +663,18 @@ td.cell.encima,td.mcel.encima{outline:2px solid var(--accent);outline-offset:-2p
 .linea-pista.encima{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
 .barra[draggable="true"]{cursor:grab}
 .barra.llevando{opacity:.4;cursor:grabbing}
+
+/* Tiras para estirar y acortar un turno en la línea de tiempo del día. Anchas
+   para el dedo (10px) pero discretas: solo se ven al pasar por encima.
+   OJO: NO poner aqui `.barra{position:relative}` — la barra ya es `absolute`
+   mas arriba y una regla posterior con la misma especificidad se la pisa,
+   dejando todos los turnos amontonados al principio del dia. `absolute` ya
+   sirve de contenedor para las tiras. */
+.tira{position:absolute;top:0;bottom:0;width:10px;cursor:ew-resize;opacity:0;
+  background:var(--accent);border-radius:4px;transition:opacity .12s}
+.tira.izq{left:0}
+.tira.der{right:0}
+.barra:hover .tira,.barra:focus-within .tira{opacity:.45}
+.tira:hover{opacity:.8 !important}
+.barra.estirando{box-shadow:inset 0 0 0 2px var(--accent)}
+.barra.estirando .tira{opacity:.8}
