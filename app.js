@@ -495,8 +495,11 @@ function pintarPastillasPersonas(quien) {
   const sinAsignar = `<button type="button" class="act dia${quien ? '' : ' on'}" data-pid=""
       aria-pressed="${quien ? 'false' : 'true'}">sin asignar</button>`;
 
+  // «sin asignar» va SUELTO arriba, no bajo el rotulo del puesto: no es una
+  // persona de ese puesto y ponerlo ahi lo hacia parecer una.
   $('#dPersonas').innerHTML = suyos.length
-    ? `<span class="pillcap">${esc($('#dPuesto').value)}</span>${sinAsignar}${suyos.map(pastilla).join('')}`
+    ? sinAsignar
+      + `<span class="pillcap">${esc($('#dPuesto').value)}</span>${suyos.map(pastilla).join('')}`
       + (otros.length ? `<span class="pillcap">Otros</span>${otros.map(pastilla).join('')}` : '')
     : sinAsignar + S.personas.map(pastilla).join('');
 }
