@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=51">
+<link rel="stylesheet" href="estilo.css?v=52">
 </head>
 <body>
 
@@ -108,6 +108,7 @@
           <select id="filtroPuesto" aria-label="Filtrar por puesto"></select>
           <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
           <span class="sep"></span>
+          <button class="act" id="btnModelos">Modelos de semana</button>
           <button class="act" id="btnCopiarSem">Copiar la anterior</button>
           <button class="act" id="btnLimpiarSem">Limpiar</button>
           <button class="act" id="btnDeshacer" disabled>Deshacer</button>
@@ -282,6 +283,51 @@
   <footer>Malla de Turnos · <span id="pie"></span></footer>
 </div>
 
+<dialog id="dlgModelos" class="dlg">
+  <form method="dialog" id="formModelos">
+    <h3>Modelos de semana</h3>
+    <p class="hint">Un modelo guarda <b>la forma</b> de una semana: qué días, a qué horas y en qué
+      puesto. Se guarda el día de la semana y no la fecha, así que sirve para cualquier semana.
+      <b>Las ausencias no entran</b>, para que no se dupliquen.</p>
+
+    <div class="fld">
+      <label for="pNombre">Guardar la semana que estás viendo como modelo</label>
+      <div class="acciones">
+        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
+        <button type="button" class="act primary" id="pGuardar">Guardar</button>
+      </div>
+    </div>
+
+    <hr class="sepdlg">
+
+    <div class="fld">
+      <label for="pModelo">Aplicar un modelo</label>
+      <select id="pModelo"></select>
+    </div>
+    <div class="fld" id="cajaPPersonas">
+      <label>Quiénes entran <span class="hint" id="pTodos"></span></label>
+      <div class="acciones diapills" id="pPersonas"></div>
+    </div>
+    <div class="fld">
+      <label class="chk"><input type="checkbox" id="pSinAsignar">
+        Pegar <b>solo la forma</b>, como turnos sin asignar</label>
+    </div>
+    <div class="fld">
+      <label>En cuántas semanas seguidas, desde la que estás viendo</label>
+      <div class="acciones diapills" id="pSemanas"></div>
+    </div>
+
+    <p class="hint">Al aplicar se <b>pisan los turnos</b> de esas semanas. Las ausencias que ya
+      estén puestas se respetan.</p>
+    <p class="msg" id="pMsg"></p>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="pCerrar">Cerrar</button>
+      <button type="button" class="act" id="pBorrar" hidden>Eliminar modelo</button>
+      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlgTurno" class="dlg">
   <form method="dialog" id="formTurno">
     <h3 id="dlgTit">Agregar turno</h3>
@@ -331,8 +377,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
-<script src="datos.js?v=66"></script>
-<script src="app.js?v=68"></script>
+<script src="datos.js?v=67"></script>
+<script src="app.js?v=69"></script>
 
 
 </body>

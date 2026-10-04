@@ -118,6 +118,7 @@
     await probar('asignaciones', 'inicio');
     await probar('asignaciones', 'ofrecido_por');
     await probar('asignaciones', 'horas_pagadas');
+    await probar('modelos_semana', 'nombre');
     return falta;
   };
 
@@ -369,6 +370,120 @@
       .subscribe();
   }
 
+  /* ---------- modelos de semana ----------
+     Lo que se guarda es el DIA DE LA SEMANA, no la fecha: por eso un modelo
+     sirve para cualquier semana.
+
+     Mientras no se aplique `arreglo-modelos.sql` las tablas no existen. La
+     LECTURA devuelve vacio en vez de reventar, igual que `puestos`, asi que el
+     resto de la app no se entera. Guardar y aplicar SI dejan pasar el error:
+     ahi el usuario pidio algo concreto y un silencio que parece exito es peor
+     que el mensaje de que falta el SQL. */
+  const modelos = async (localId) => {
+    try {
+      return await pedir(sb.from('modelos_semana')
+                           .select('*, modelo_turnos(id)')
+                           .eq('local_id', localId).order('nombre'));
+    } catch (e) {
+      if (faltaEnLaBase(e)) return [];
+      throw e;
+    }
+  };
+
+  const borrarModelo = (id) =>
+    pedir(sb.from('modelos_semana').delete().eq('id', id));
+
+  // Guarda la semana que esta a la vista como modelo con nombre.
+  // LAS AUSENCIAS NO ENTRAN (`inicio not null`): una vacacion de esta semana no
+  // se repite todas las semanas, y si el modelo la trae, se duplica.
+  // Si el nombre ya existe se REEMPLAZA su contenido y se avisa con `reemplazo`,
+  // para que quien llama pueda preguntar antes.
+  const guardarSemanaComoModelo = async (localId, nombre, lunes) => {
+    const hasta = new Date(lunes + 'T00:00:00');
+    hasta.setDate(hasta.getDate() + 6);
+    const previas = await pedir(sb.from('asignaciones').select('*')
+      .eq('local_id', localId)
+      .gte('fecha', lunes).lte('fecha', hasta.toISOString().slice(0, 10))
+      .not('inicio', 'is', null));
+
+    const limpio = String(nombre || '').trim();
+    if (!limpio) throw new Error('Ponle un nombre al modelo.');
+
+    const yaEsta = await pedir(sb.from('modelos_semana').select('id')
+      .eq('local_id', localId).ilike('nombre', limpio).maybeSingle());
+
+    let id, reemplazo = false;
+    if (yaEsta) {
+      id = yaEsta.id; reemplazo = true;
+      await pedir(sb.from('modelo_turnos').delete().eq('modelo_id', id));
+    } else {
+      const fila = await pedir(sb.from('modelos_semana')
+        .insert({ local_id: localId, nombre: limpio }).select().single());
+      id = fila.id;
+    }
+
+    const filas = (previas || []).map(a => ({
+      modelo_id: id,
+      dow: (new Date(a.fecha + 'T00:00:00').getDay() + 6) % 7,
+      persona_id: a.persona_id || null,
+      turno_id: a.turno_id || null,
+      inicio: a.inicio, fin: a.fin, colacion: a.colacion || 0,
+      puesto: a.puesto || '', nota: a.nota || '',
+    }));
+    if (filas.length) await pedir(sb.from('modelo_turnos').insert(filas));
+    return { id, nombre: limpio, n: filas.length, reemplazo };
+  };
+
+  /* Aplica un modelo a una o varias semanas seguidas.
+     opciones:
+       personas   lista de ids que entran; null = todas
+       sinAsignar true = pega solo LA FORMA, sin personas
+       semanas    cuantas semanas seguidas, contando la del lunes dado
+
+     Igual que `copiarSemana`: se limpia el destino y se inserta, porque sin la
+     clave (persona, fecha) no hay upsert. Y SOLO se borran turnos
+     (`inicio not null`): las ausencias del destino se respetan a proposito. */
+  const aplicarModelo = async (localId, modeloId, lunes, opciones) => {
+    const o = opciones || {};
+    const cuantas = Math.max(1, Number(o.semanas) || 1);
+    const turnos = await pedir(sb.from('modelo_turnos').select('*')
+                                 .eq('modelo_id', modeloId));
+    if (!turnos || !turnos.length) return { turnos: 0, semanas: cuantas };
+
+    // `sinAsignar` MANDA sobre el filtro de personas: si lo que se pega es solo
+    // la forma, elegir personas no significa nada y filtrar por ellas dejaria
+    // fuera media semana sin que nadie entienda por que.
+    const elegidas = (o.sinAsignar || !Array.isArray(o.personas)) ? null : new Set(o.personas);
+    // Un turno que en el modelo quedo sin persona entra siempre: no es de nadie,
+    // asi que no hay a quien dejar fuera.
+    const sirven = turnos.filter(t => !t.persona_id || !elegidas || elegidas.has(t.persona_id));
+
+    const filas = [];
+    for (let k = 0; k < cuantas; k++) {
+      for (const t of sirven) {
+        const d = new Date(lunes + 'T00:00:00');
+        d.setDate(d.getDate() + t.dow + k * 7);
+        filas.push({
+          local_id: localId,
+          persona_id: o.sinAsignar ? null : (t.persona_id || null),
+          fecha: d.toISOString().slice(0, 10),
+          turno_id: t.turno_id, ausencia: null,
+          inicio: t.inicio, fin: t.fin, colacion: t.colacion || 0,
+          puesto: t.puesto || '', nota: t.nota || '',
+        });
+      }
+    }
+    if (!filas.length) return { turnos: 0, semanas: cuantas };
+
+    const fin = new Date(lunes + 'T00:00:00');
+    fin.setDate(fin.getDate() + cuantas * 7 - 1);
+    await pedir(sb.from('asignaciones').delete().eq('local_id', localId)
+                  .gte('fecha', lunes).lte('fecha', fin.toISOString().slice(0, 10))
+                  .not('inicio', 'is', null));
+    await pedir(sb.from('asignaciones').insert(filas));
+    return { turnos: filas.length, semanas: cuantas };
+  };
+
   global.DATOS = {
     init, explicar,
     miLocal, misLocales, crearLocal, guardarLocal, borrarLocal, dejarDeEscuchar,
@@ -381,6 +496,7 @@
     borrarAsignaciones, reponerAsignaciones,
     dias, guardarDia, dotacion, guardarDotacion, guardarDotacionLote,
     borrarDotacion, reponerDotacion,
+    modelos, guardarSemanaComoModelo, aplicarModelo, borrarModelo,
     abiertos, abrirTurno, cerrarTurno,
     miSemana, marcarTurno, tomarTurno, ofrecerTurno,
     escuchar,

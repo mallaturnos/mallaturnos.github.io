@@ -7,6 +7,8 @@ Planificación de turnos para locales con turnos rotativos: restoranes, cafés, 
 - Muestra el costo de personal sobre la venta, día por día.
 - **Reparte las propinas** por horas trabajadas, con el factor que acuerda el equipo.
 - **Turnos abiertos**: se publica un turno sin dueño y el primero que lo toma se lo queda.
+- **Modelos de semana**: se guarda una semana tipo con nombre y se aplica a las que vengan,
+  con quién entra y en cuántas semanas de una vez.
 - Cada persona abre **su propia semana** con un link, sin cuenta ni contraseña.
 
 ## Cómo está armado

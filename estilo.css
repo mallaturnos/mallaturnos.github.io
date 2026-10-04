@@ -610,3 +610,8 @@ table.reloj td.marcar .mini{margin-right:4px}
    cobertura metida en la misma pantalla, como lo hace Skello. */
 .cell .cuenta{display:block;margin-top:3px;font-family:var(--font-mono);font-size:.625rem;
   color:var(--fg-faint);text-align:center}
+
+/* Diálogo de modelos de semana: un separador y la fila de la casilla. */
+.sepdlg{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
+.chk{display:flex;gap:8px;align-items:center;font-weight:400}
+.chk input{margin:0}

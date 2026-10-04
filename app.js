@@ -47,7 +47,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 let sb = null;
 const S = { local:null, personas:[], turnos:[], puestos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
             lunes:lunesDe(new Date()), mes:new Date(), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
-            hist:[], histDot:[], histEq:[], recien:null, relojDia:null, agrupar:'personas' };
+            hist:[], histDot:[], histEq:[], recien:null, relojDia:null, agrupar:'personas', modelos:[] };
 
 /* ---------- deshacer ----------
    Antes de cualquier cambio en la malla se guarda una foto de como estaba el
@@ -363,14 +363,15 @@ function pintarLocales() {
 /* ================= CARGAR TODO ================= */
 async function cargar() {
   const r = rango(), desde = r.desde, hasta = r.hasta;
-  const [personas, turnos, puestosCat, asign, marcas, dias, abiertos, dot] = await Promise.all([
+  const [personas, turnos, puestosCat, asign, marcas, dias, abiertos, dot, modelos] = await Promise.all([
     DATOS.personas(S.local.id), DATOS.turnos(S.local.id), DATOS.puestos(S.local.id),
     DATOS.asignaciones(S.local.id, desde, hasta), DATOS.marcas(S.local.id, desde, hasta),
     DATOS.dias(S.local.id, desde, hasta), DATOS.abiertos(S.local.id, desde, hasta),
-    DATOS.dotacion(S.local.id),
+    DATOS.dotacion(S.local.id), DATOS.modelos(S.local.id),
   ]);
   S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
   S.puestos = puestosCat || [];
+  S.modelos = modelos || [];
   // Un dia puede traer VARIOS turnos de la misma persona (turno partido), asi
   // que cada casilla guarda una LISTA, no una fila.
   S.asign = {};
@@ -428,6 +429,7 @@ function pintarPlan() {
   $('#cajaDia').hidden    = S.modo !== 'dia';
   $('#cajaMes').hidden    = S.modo !== 'mes';
   $('#btnCopiarSem').hidden = S.modo !== 'semana';
+  $('#btnModelos').hidden   = S.modo !== 'semana';
   // agrupar por puesto solo tiene sentido en la semana
   const seg = document.querySelector('.segm');
   if (seg) seg.hidden = S.modo !== 'semana';
@@ -2279,6 +2281,163 @@ function conectarApp() {
   });
 
   // copiar la semana anterior sobre esta
+/* ---------- modelos de semana ----------
+   Lo que mas ahorra tiempo de toda la lista: una semana de local se parece a la
+   anterior, pero hoy se arma turno por turno.
+
+   «Copiar la anterior» ya existia y resuelve el caso facil. Esto resuelve el de
+   verdad: el local tiene dos o tres semanas tipo y la anterior puede ser justo
+   la rara. Un modelo con nombre SE ELIGE; «la anterior» solo se acepta. */
+function pintarModelos() {
+  const sel = $('#pModelo');
+  const antes = sel.value;
+  sel.innerHTML = S.modelos.length
+    ? S.modelos.map(m => {
+        const n = (m.modelo_turnos || []).length;
+        return `<option value="${m.id}">${esc(m.nombre)} · ${n} turno${n === 1 ? '' : 's'}</option>`;
+      }).join('')
+    : '<option value="">— todavía no hay modelos guardados —</option>';
+  if (antes && S.modelos.some(m => m.id === antes)) sel.value = antes;
+
+  const hay = S.modelos.length > 0;
+  $('#pAplicar').disabled = !hay;
+  $('#pBorrar').hidden    = !hay;
+
+  // Las personas arrancan TODAS marcadas: el caso normal es aplicar el modelo
+  // completo, y desmarcar es mas rapido que marcar a quince.
+  $('#pPersonas').innerHTML = S.personas.map(x =>
+    `<button type="button" class="act dia on" data-pid="${x.id}"
+       aria-pressed="true">${esc(x.nombre.split(' ')[0])}</button>`).join('')
+    || '<span class="hint">No hay nadie en el equipo todavía.</span>';
+  marcarTodosTexto();
+
+  // Cuantas semanas seguidas. Mas de cuatro de una vez no lo pidio nadie y
+  // pisar un mes entero sin querer es caro.
+  if (!$('#pSemanas').dataset.listo) {
+    $('#pSemanas').innerHTML = [1,2,3,4].map(n =>
+      `<button type="button" class="act dia${n === 1 ? ' on' : ''}" data-sem="${n}"
+         aria-pressed="${n === 1 ? 'true' : 'false'}">${n}</button>`).join('');
+    $('#pSemanas').dataset.listo = '1';
+  }
+}
+
+function marcarTodosTexto() {
+  const t = $('#pPersonas').querySelectorAll('button[data-pid][aria-pressed="true"]').length;
+  const n = S.personas.length;
+  $('#pTodos').textContent = n ? (t === n ? '· todos' : `· ${t} de ${n}`) : '';
+}
+
+function opcionesModelo() {
+  const todas = S.personas.length;
+  const marcadas = [...$('#pPersonas').querySelectorAll('button[data-pid][aria-pressed="true"]')]
+    .map(b => b.dataset.pid);
+  const semBtn = $('#pSemanas').querySelector('button[aria-pressed="true"]');
+  return {
+    // null = todas, para no filtrar de mas si alguien se sumo al equipo
+    personas: marcadas.length === todas ? null : marcadas,
+    sinAsignar: $('#pSinAsignar').checked,
+    semanas: Number(semBtn ? semBtn.dataset.sem : 1) || 1,
+  };
+}
+
+  /* ---------- modelos de semana: los botones ---------- */
+  on('#btnModelos', 'click', () => {
+    $('#pMsg').textContent = '';
+    $('#pNombre').value = '';
+    $('#pSinAsignar').checked = false;
+    $('#cajaPPersonas').hidden = false;
+    pintarModelos();
+    $('#dlgModelos').showModal();
+  });
+  on('#pCerrar', 'click', () => $('#dlgModelos').close());
+
+  // Si se pega solo la forma, elegir personas no significa nada: se esconden en
+  // vez de dejarlas ahi sin efecto, que es como se construye una sorpresa.
+  on('#pSinAsignar', 'change', () => {
+    $('#cajaPPersonas').hidden = $('#pSinAsignar').checked;
+  });
+
+  on('#pPersonas', 'click', ev => {
+    const b = ev.target.closest('button[data-pid]'); if (!b) return;
+    const activo = b.getAttribute('aria-pressed') === 'true';
+    b.setAttribute('aria-pressed', activo ? 'false' : 'true');
+    b.classList.toggle('on', !activo);
+    marcarTodosTexto();
+  });
+
+  // Una sola cantidad de semanas: estas pastillas son excluyentes.
+  on('#pSemanas', 'click', ev => {
+    const b = ev.target.closest('button[data-sem]'); if (!b) return;
+    $('#pSemanas').querySelectorAll('button[data-sem]').forEach(x => {
+      x.setAttribute('aria-pressed','false'); x.classList.remove('on'); });
+    b.setAttribute('aria-pressed','true'); b.classList.add('on');
+  });
+
+  on('#pGuardar', 'click', async () => {
+    const m = $('#pMsg');
+    const nombre = $('#pNombre').value.trim();
+    if (!nombre) { m.textContent = 'Ponle un nombre al modelo.'; m.className = 'msg bad'; return; }
+    // Si el nombre ya existe se reemplaza, pero se pregunta: perder un modelo
+    // guardado por escribir el mismo nombre seria una sorpresa cara.
+    const choca = S.modelos.find(x => x.nombre.trim().toLowerCase() === nombre.toLowerCase());
+    if (choca && !confirm('Ya existe un modelo llamado «' + choca.nombre + '».\n\n'
+                        + 'Se reemplaza por la semana que estás viendo.')) return;
+    m.textContent = 'Guardando…'; m.className = 'msg';
+    try {
+      recordar('guardar el modelo de semana «' + nombre + '»');
+      const r = await DATOS.guardarSemanaComoModelo(S.local.id, nombre, iso(S.lunes));
+      await refrescar();
+      pintarModelos();
+      $('#pModelo').value = r.id;
+      $('#pNombre').value = '';
+      m.textContent = r.n
+        ? `${r.reemplazo ? 'Reemplazado' : 'Guardado'}: ${r.n} turno${r.n === 1 ? '' : 's'}.`
+        : 'Quedó guardado, pero la semana que estás viendo no tiene turnos.';
+      m.className = 'msg ' + (r.n ? 'ok' : '');
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
+
+  on('#pAplicar', 'click', async () => {
+    const m = $('#pMsg');
+    const id = $('#pModelo').value;
+    if (!id) { m.textContent = 'No hay ningún modelo para aplicar.'; m.className = 'msg bad'; return; }
+    const o = opcionesModelo();
+    if (!o.sinAsignar && Array.isArray(o.personas) && !o.personas.length) {
+      m.textContent = 'No marcaste a nadie. Marca a alguien, o usa «solo la forma».';
+      m.className = 'msg bad'; return;
+    }
+    const nombre = S.modelos.find(x => x.id === id);
+    if (!confirm('Aplicar «' + (nombre ? nombre.nombre : '') + '» a '
+               + (o.semanas === 1 ? 'esta semana' : o.semanas + ' semanas seguidas') + '.\n\n'
+               + 'Se pisan los turnos que ya haya. Las ausencias se respetan.')) return;
+    m.textContent = 'Aplicando…'; m.className = 'msg';
+    try {
+      recordar('aplicar un modelo de semana');
+      const r = await DATOS.aplicarModelo(S.local.id, id, iso(S.lunes), o);
+      await refrescar();
+      m.textContent = r.turnos
+        ? `Listo: ${r.turnos} turno${r.turnos === 1 ? '' : 's'} en `
+          + (r.semanas === 1 ? '1 semana.' : r.semanas + ' semanas.')
+        : 'El modelo no tiene turnos para lo que marcaste.';
+      m.className = 'msg ' + (r.turnos ? 'ok' : '');
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
+
+  on('#pBorrar', 'click', async () => {
+    const m = $('#pMsg');
+    const id = $('#pModelo').value; if (!id) return;
+    const x = S.modelos.find(y => y.id === id);
+    if (!confirm('Eliminar el modelo «' + (x ? x.nombre : '') + '».\n\n'
+               + 'No toca ninguna semana ya armada.')) return;
+    try {
+      recordar('eliminar un modelo de semana');
+      await DATOS.borrarModelo(id);
+      await refrescar();
+      pintarModelos();
+      m.textContent = 'Modelo eliminado.'; m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
+
   on('#btnCopiarSem', 'click', async () => {
     const m = $('#msgSem');
     const anterior = iso(masDias(S.lunes, -7));
