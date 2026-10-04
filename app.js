@@ -59,7 +59,14 @@ function recordar(que) {
   // S.asign guarda una LISTA por casilla desde que existe el turno partido, y
   // la foto tiene que llevarse las horas: sin ellas, deshacer repondria turnos
   // vacios que el CHECK de la base rechaza.
+  // Los turnos SIN DUEÑO van tambien en la foto. `reponerAsignaciones` borra el
+  // rango entero y repone lo fotografiado: si no estuvieran aca, deshacer
+  // CUALQUIER cambio los borraria en silencio. Se nota poco hasta que existen
+  // en cantidad, y desde los modelos de semana con «solo la forma» existen.
+  // Solo los que no tienen persona: `S.abiertos` trae ademas los turnos
+  // OFRECIDOS, que siguen siendo de alguien y ya estan en S.asign.
   const filas = Object.values(S.asign).flat()
+    .concat(S.abiertos.filter(a => !a.persona_id))
     .filter(a => a.fecha >= r.desde && a.fecha <= r.hasta)
     .map(a => ({ persona_id:a.persona_id, fecha:a.fecha, turno_id:a.turno_id,
                  ausencia:a.ausencia, inicio:a.inicio, fin:a.fin,
@@ -640,7 +647,8 @@ function pintarCasilla(p, fe) {
     const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
     const pu = puestoDe(a, p);
     return `<span class="bloque" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
-              role="button" tabindex="0" title="Editar este turno">
+              draggable="true" role="button" tabindex="0"
+              title="Editar este turno · o arrástralo a otro día o persona">
               <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b><i>${hfmt(horasAsig(a))} h</i>
               <em>${esc(pu || 'sin puesto')}</em>
               <button type="button" class="borrarbl" data-borrar="${a.id}" data-fecha="${fe}"
@@ -714,6 +722,103 @@ function pintarSemanaPorPuesto() {
   pintarResumenSemana();
 }
 
+/* ---------- mover un turno arrastrandolo ----------
+   Cambiar un turno de persona o de dia era: abrir el dialogo, cambiar el campo,
+   guardar. Tres pasos para algo que mentalmente es uno: «este turno pasalo a
+   Carla». Es la operacion mas repetida al cubrir una falla.
+
+   Un solo escuchador en la TABLA, no en cada bloque: las casillas se repintan
+   enteras y los escuchadores por bloque quedarian huerfanos en cada repintado.
+   Es la misma razon por la que el clic ya se escucha a nivel de fila.
+
+   Las AUSENCIAS no se arrastran: son una por dia y reemplazan a los turnos, asi
+   que moverlas abre casos raros que nadie pidio.
+
+   Y va SOLO en la vista por personas. En la de puestos las filas no son gente,
+   asi que «soltar aca» no quiere decir nada claro: sus celdas no llevan persona
+   y el turno quedaria sin dueño sin que nadie lo haya pedido. Si alguna vez se
+   agrega ahi, soltar tendria que cambiar el PUESTO y respetar a la persona. */
+function turnoArrastrable(id) {
+  return Object.values(S.asign).flat().concat(S.abiertos).find(a => a.id === id) || null;
+}
+
+async function soltarTurno(id, personaId, fecha) {
+  const a = turnoArrastrable(id);
+  const m = $('#msgSem');
+  const aviso = (texto, clase) => {
+    if (!m) return;
+    m.textContent = texto; m.className = 'msg ' + clase;
+    setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
+  };
+  if (!a) return;
+  const mismo = (a.persona_id || '') === (personaId || '') && a.fecha === fecha;
+  if (mismo) return;                       // lo soltó donde ya estaba
+
+  // Si la persona de destino tiene AUSENCIA ese dia, la casilla solo dibuja la
+  // ausencia: el turno quedaria guardado pero INVISIBLE. Mejor no dejarlo.
+  if (personaId) {
+    const aus = ausenciaDe(personaId, fecha);
+    if (aus && aus.ausencia !== 'L') {
+      const q = S.personas.find(x => x.id === personaId);
+      return aviso(`${q ? q.nombre.split(' ')[0] : 'Esa persona'} tiene `
+        + `${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} ese día. Quita la ausencia primero.`, 'bad');
+    }
+  }
+  try {
+    recordar('mover un turno');
+    // `ofrecido_por` se limpia a proposito. La fila «Sin asignar» muestra los
+    // turnos sin persona Y los OFRECIDOS, asi que mover a alguien un turno
+    // ofrecido lo dejaria visible en los dos lados a la vez. Al moverlo el jefe,
+    // la oferta queda resuelta: el turno es de quien el diga, o de nadie.
+    await DATOS.editarAsignacion(id, { persona_id: personaId || null, fecha,
+                                       ofrecido_por: null });
+    await refrescar();
+    const q = personaId ? S.personas.find(x => x.id === personaId) : null;
+    aviso('Turno movido a ' + (q ? q.nombre.split(' ')[0] : 'sin asignar')
+          + ' · ' + ddmm(fecha) + '.', 'ok');
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();        // no se movio: el paso atras sobra
+    aviso(e.message, 'bad');
+  }
+}
+
+/* Engancha arrastrar/soltar a una tabla. Idempotente: se llama en cada
+   repintado y marca la tabla para no colgar dos veces lo mismo. */
+function engancharArrastre(tabla) {
+  if (!tabla || tabla.dataset.arrastre) return;
+  tabla.dataset.arrastre = '1';
+  tabla.addEventListener('dragstart', ev => {
+    const bl = ev.target.closest('[data-asig]');
+    if (!bl || bl.classList.contains('aus')) return ev.preventDefault();
+    ev.dataTransfer.setData('text/plain', bl.dataset.asig);
+    ev.dataTransfer.effectAllowed = 'move';
+    bl.classList.add('llevando');
+  });
+  tabla.addEventListener('dragend', ev => {
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) bl.classList.remove('llevando');
+    tabla.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+  });
+  tabla.addEventListener('dragover', ev => {
+    const cel = ev.target.closest('td.cell[data-fecha]');
+    if (!cel) return;
+    ev.preventDefault();                    // sin esto el navegador no deja soltar
+    ev.dataTransfer.dropEffect = 'move';
+    if (!cel.classList.contains('encima')) {
+      tabla.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+      cel.classList.add('encima');
+    }
+  });
+  tabla.addEventListener('drop', ev => {
+    const cel = ev.target.closest('td.cell[data-fecha]');
+    if (!cel) return;
+    ev.preventDefault();
+    cel.classList.remove('encima');
+    const id = ev.dataTransfer.getData('text/plain');
+    if (id) soltarTurno(id, cel.dataset.p || null, cel.dataset.fecha);
+  });
+}
+
 function pintarSemana() {
   if (S.agrupar === 'puestos') return pintarSemanaPorPuesto();
   const f = fechas();
@@ -739,12 +844,13 @@ function pintarSemana() {
   sinDueno.innerHTML = '<th scope="row">Sin asignar<span class="rol">el primero que lo tome se lo queda</span></th>' +
     f.map(fe => {
       const aqui = S.abiertos.filter(a => a.fecha === fe);
-      return `<td class="cell" data-fecha="${fe}">` + aqui.map(a => {
+      return `<td class="cell" data-fecha="${fe}" data-p="">` + aqui.map(a => {
         const t = a.turno_id ? turnoDe(a.turno_id) : null;
         const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
         const of = a.ofrecido_por ? S.personas.find(x => x.id === a.ofrecido_por) : null;
         return `<span class="bloque libre" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
-          role="button" tabindex="0" title="${of ? 'Lo ofreció ' + esc(of.nombre) : 'Nadie lo ha tomado'}">
+          draggable="true" role="button" tabindex="0"
+          title="${of ? 'Lo ofreció ' + esc(of.nombre) : 'Nadie lo ha tomado'} · arrástralo a alguien para asignárselo">
           <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b><i>${hfmt(horasAsig(a))} h</i>
           <em>${esc(a.puesto || 'sin puesto')}${of ? ' · ofrece ' + esc(of.nombre.split(' ')[0]) : ''}</em></span>`;
       }).join('') + `<button type="button" class="anadir" data-anadir="${fe}"
@@ -775,7 +881,7 @@ function pintarSemana() {
     }
     const tr = el('tr');
     tr.innerHTML = `<th scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')} · ${clp(p.valor_hora)}/h · ${hfmt(p.horas_contrato)} h</span></th>` +
-      f.map(fe => `<td class="cell">${pintarCasilla(p, fe)}</td>`).join('')
+      f.map(fe => `<td class="cell" data-fecha="${fe}" data-p="${p.id}">${pintarCasilla(p, fe)}</td>`).join('')
       + `<td class="tot"><span class="hcell" id="h-${p.id}"></span></td>`;
     cuerpo.appendChild(tr);
 
@@ -793,6 +899,7 @@ function pintarSemana() {
       }
     });
   });
+  engancharArrastre($('#tablaSem'));
   pintarResumenSemana();
 }
 
