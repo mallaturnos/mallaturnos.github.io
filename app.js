@@ -437,9 +437,11 @@ function pintarPlan() {
   $('#cajaMes').hidden    = S.modo !== 'mes';
   $('#btnCopiarSem').hidden = S.modo !== 'semana';
   $('#btnModelos').hidden   = S.modo !== 'semana';
-  // agrupar por puesto solo tiene sentido en la semana
+  // Agrupar por puesto vale en la semana Y en el dia (Pedro, 04-10: «ok, agregar
+  // a dia»). En el MES no: quedaria un conteo por dia y poco mas, asi que ahi se
+  // esconde — es una decision, no un olvido.
   const seg = document.querySelector('.segm');
-  if (seg) seg.hidden = S.modo !== 'semana';
+  if (seg) seg.hidden = S.modo === 'mes';
   // la franja de cobertura vive junto a la malla, no en otra pestaña:
   // sirve MIENTRAS planificas, no después
   const caja = $('#cardCobertura');
@@ -754,6 +756,19 @@ async function soltarTurno(id, personaId, fecha) {
   const mismo = (a.persona_id || '') === (personaId || '') && a.fecha === fecha;
   if (mismo) return;                       // lo soltó donde ya estaba
 
+  // Cambiar de dueño se CONFIRMA, igual que en la vista de dia. Pedro lo pidio
+  // para el dia («si modifica el turno de otra persona que arroje una alerta») y
+  // vale igual aca: es el mismo riesgo, y avisar en una vista y en la otra no
+  // seria peor que no avisar en ninguna. Cambiar solo de DIA no pregunta.
+  const nom = x => { const q = x ? S.personas.find(y => y.id === x) : null;
+                     return q ? q.nombre.split(' ')[0] : 'Sin asignar'; };
+  if ((a.persona_id || null) !== (personaId || null)) {
+    const mismoDia = a.fecha === fecha;
+    if (!confirm(`El turno pasa de ${nom(a.persona_id)} a ${nom(personaId)}.`
+               + (mismoDia ? '' : `\n\nY del ${ddmm(a.fecha)} al ${ddmm(fecha)}.`)
+               + '\n\n¿Lo hago?')) return;
+  }
+
   // Si la persona de destino tiene AUSENCIA ese dia, la casilla solo dibuja la
   // ausencia: el turno quedaria guardado pero INVISIBLE. Mejor no dejarlo.
   if (personaId) {
@@ -1043,6 +1058,134 @@ function pintarNecesidadDia(fe, caja) {
   caja.appendChild(box);
 }
 
+/* Reparte turnos que se pisan en CARRILES dentro de la misma fila.
+   Sin esto, dos personas de 08:00 a 16:30 en el mismo puesto caen una encima de
+   la otra y se ve UNA SOLA — lo pregunto Pedro antes de que pasara.
+   Cada turno va al primer carril donde no choque con el ultimo que hay ahi. */
+function repartirEnCarriles(items) {
+  const orden = items.slice().sort((x, y) => Number(x.a.inicio) - Number(y.a.inicio)
+                                          || Number(x.a.fin) - Number(y.a.fin));
+  const finDe = [];                       // hasta que hora llega cada carril
+  orden.forEach(it => {
+    let c = finDe.findIndex(f => f <= Number(it.a.inicio));
+    if (c === -1) { c = finDe.length; finDe.push(0); }
+    finDe[c] = Number(it.a.fin);
+    it.carril = c;
+  });
+  return { items: orden, carriles: Math.max(1, finDe.length) };
+}
+
+/* ---------- arrastrar en la vista de DIA ----------
+   Pedro eligio la opcion A (04-10, msg 3673): correrlo de lado cambia la HORA,
+   soltarlo en otra fila cambia la PERSONA. Y pidio que cambiar de persona AVISE.
+
+   El salto es de 15 minutos (msg 3677: «no sera mejor el desplazamiento cada 15
+   minutos?»). Mas fino que media hora y alcanza para cualquier horario real.
+
+   Se respeta DONDE se agarro la barra: si uno la toma por la mitad, la barra no
+   salta para que su inicio quede bajo el cursor. */
+const SALTO = 0.25;                        // 15 minutos, en horas
+
+function horaDesdeX(pista, clientX, agarreFrac) {
+  const linea = pista.closest('.linea');
+  const h0 = Number(linea.dataset.h0), h1 = Number(linea.dataset.h1);
+  const r = pista.getBoundingClientRect();
+  if (!r.width) return null;
+  const frac = (clientX - r.left) / r.width - (agarreFrac || 0);
+  const h = h0 + frac * (h1 - h0);
+  return Math.round(h / SALTO) * SALTO;
+}
+
+async function soltarEnDia(id, personaId, horaNueva, cambiaFila) {
+  const a = turnoArrastrable(id);
+  if (!a) return;
+  const dur = Number(a.fin) - Number(a.inicio);
+  let inicio = Number(a.inicio);
+  if (horaNueva != null && Math.abs(horaNueva - inicio) >= SALTO) inicio = horaNueva;
+  if (inicio < 0) inicio = 0;
+  const fin = inicio + dur;
+
+  const antes = a.persona_id || null;
+  const ahora = cambiaFila ? (personaId || null) : antes;
+  const mismaHora = Math.abs(inicio - Number(a.inicio)) < 0.001;
+  if (ahora === antes && mismaHora) return;             // no cambio nada
+
+  const m = $('#msgSem');
+  const aviso = (texto, clase) => {
+    if (!m) return;
+    m.textContent = texto; m.className = 'msg ' + clase;
+    setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
+  };
+  const nom = x => { const q = x ? S.personas.find(y => y.id === x) : null;
+                     return q ? q.nombre.split(' ')[0] : 'Sin asignar'; };
+
+  // Pedro: «si modifica el turno de otra persona que arroje una alerta». Cambiar
+  // de dueño le saca el turno a alguien y se lo pone a otro: eso se confirma.
+  // Correr la hora dentro de la misma fila no pregunta — es el gesto frecuente.
+  if (ahora !== antes &&
+      !confirm(`El turno pasa de ${nom(antes)} a ${nom(ahora)}.\n\n`
+             + `${hhmm(inicio)}–${hhmm(fin)}. ¿Lo hago?`)) return;
+
+  if (ahora) {
+    const aus = ausenciaDe(ahora, a.fecha);
+    if (aus && aus.ausencia !== 'L')
+      return aviso(`${nom(ahora)} tiene ${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} `
+                 + 'ese día. Quita la ausencia primero.', 'bad');
+  }
+  try {
+    recordar('mover un turno');
+    await DATOS.editarAsignacion(id, { persona_id: ahora, inicio, fin, ofrecido_por: null });
+    await refrescar();
+    aviso(ahora === antes
+      ? `Turno corrido a ${hhmm(inicio)}–${hhmm(fin)}.`
+      : `Turno de ${nom(antes)} a ${nom(ahora)} · ${hhmm(inicio)}–${hhmm(fin)}.`, 'ok');
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();
+    aviso(e.message, 'bad');
+  }
+}
+
+function engancharArrastreDia(caja) {
+  if (!caja || caja.dataset.arrastre) return;
+  caja.dataset.arrastre = '1';
+  let agarre = 0;                          // donde se tomo la barra, 0..1 de la pista
+  caja.addEventListener('dragstart', ev => {
+    const b = ev.target.closest('.barra[data-asig]');
+    if (!b) return ev.preventDefault();
+    const pista = b.closest('.linea-pista');
+    const r = pista.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    agarre = r.width ? (ev.clientX - rb.left) / r.width : 0;
+    ev.dataTransfer.setData('text/plain', b.dataset.asig);
+    ev.dataTransfer.effectAllowed = 'move';
+    b.classList.add('llevando');
+  });
+  caja.addEventListener('dragend', ev => {
+    const b = ev.target.closest('.barra[data-asig]');
+    if (b) b.classList.remove('llevando');
+    caja.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+  });
+  caja.addEventListener('dragover', ev => {
+    const pista = ev.target.closest('.linea-pista[data-fecha]'); if (!pista) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    if (!pista.classList.contains('encima')) {
+      caja.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+      pista.classList.add('encima');
+    }
+  });
+  caja.addEventListener('drop', ev => {
+    const pista = ev.target.closest('.linea-pista[data-fecha]'); if (!pista) return;
+    ev.preventDefault();
+    pista.classList.remove('encima');
+    const id = ev.dataTransfer.getData('text/plain'); if (!id) return;
+    const fila = pista.closest('.linea-fila');
+    // Agrupado por puesto la fila no es de nadie, asi que soltar NO cambia de
+    // dueño: ahi arrastrar sirve para correr la hora y nada mas.
+    const cambiaFila = S.agrupar !== 'puestos';
+    soltarEnDia(id, fila.dataset.p || null, horaDesdeX(pista, ev.clientX, agarre), cambiaFila);
+  });
+}
+
 function pintarDia() {
   const fe = iso(S.dia);
   const i = (S.dia.getDay() + 6) % 7;
@@ -1071,54 +1214,98 @@ function pintarDia() {
   for (let h = Math.ceil(h0); h <= h1; h++) horas.push(h);
   const regla = horas.map(h => `<span class="hmarca" style="left:${pos(h)}%">${hhmm(h)}</span>`).join('');
 
-  // una fila por persona que trabaja, más la de sin asignar si hay
-  const filas = [];
-  personasVisibles().forEach(p => {
-    const ts = turnosDe(p.id, fe);
-    if (ts.length) filas.push({ p, ts });
-  });
+  /* Las filas: por PERSONA o por PUESTO, segun el mismo control de la semana.
+     Agrupado por puesto se ve de un golpe QUE PUESTO tiene el hoyo y a que hora,
+     que es lo que la franja de necesidad de arriba no dice: ella avisa que
+     faltan dos a las 20:00, pero no de que. */
   const libres = S.abiertos.filter(a => a.fecha === fe);
-  if (libres.length) filas.unshift({ p: null, ts: libres });
+  const filas = [];
+  if (S.agrupar === 'puestos') {
+    // Cada turno lleva SU puesto, no el de la persona: alguien puede hacer barra
+    // el lunes y cocina el martes. Se agrupa por el del turno.
+    const porPuesto = new Map();
+    personasVisibles().forEach(p => turnosDe(p.id, fe).forEach(a => {
+      const q = puestoRot(a, p);
+      if (!porPuesto.has(q)) porPuesto.set(q, []);
+      porPuesto.get(q).push({ a, p });
+    }));
+    libres.forEach(a => {
+      const q = (a.puesto || '').trim() || 'Sin puesto';
+      if (!porPuesto.has(q)) porPuesto.set(q, []);
+      porPuesto.get(q).push({ a, p: null });
+    });
+    [...porPuesto.keys()].sort((x, y) => x.localeCompare(y, 'es'))
+      .forEach(q => filas.push({ puesto: q, items: porPuesto.get(q) }));
+  } else {
+    personasVisibles().forEach(p => {
+      const ts = turnosDe(p.id, fe);
+      if (ts.length) filas.push({ p, items: ts.map(a => ({ a, p })) });
+    });
+    if (libres.length) filas.unshift({ p: null, items: libres.map(a => ({ a, p: null })) });
+  }
 
+  // h0/h1 viajan en el DOM: el manejador de arrastre vive fuera de esta funcion
+  // y necesita convertir una posicion en pantalla a una hora.
   caja.innerHTML = `
-    <div class="linea">
+    <div class="linea" data-h0="${h0}" data-h1="${h1}" data-fecha="${fe}">
       <div class="linea-cab"><div class="linea-quien"></div><div class="linea-pista">${regla}</div></div>
-      ${filas.map(({ p, ts }) => `
-        <div class="linea-fila" data-p="${p ? p.id : ''}">
-          <div class="linea-quien">${p ? `<b>${esc(p.nombre)}</b><span class="rol">${esc(p.rol||'')}</span>`
-                                       : '<b>Sin asignar</b><span class="rol">libre</span>'}</div>
+      ${filas.map(fila => {
+        const porPuesto = S.agrupar === 'puestos';
+        // En la vista por puestos la fila NO es de nadie: su `data-p` queda vacio
+        // a proposito, para que soltar ahi no le adjudique el turno a nadie.
+        const quien = porPuesto
+          ? `<b>${esc(fila.puesto)}</b><span class="rol">${fila.items.length} turno${fila.items.length === 1 ? '' : 's'}</span>`
+          : (fila.p ? `<b>${esc(fila.p.nombre)}</b><span class="rol">${esc(fila.p.rol || '')}</span>`
+                    : '<b>Sin asignar</b><span class="rol">libre</span>');
+        const rep = repartirEnCarriles(fila.items);
+        return `
+        <div class="linea-fila${porPuesto ? ' porpuesto' : ''}" data-p="${!porPuesto && fila.p ? fila.p.id : ''}"
+             style="--carriles:${rep.carriles}">
+          <div class="linea-quien">${quien}</div>
           <div class="linea-pista" data-fecha="${fe}">
             ${horas.map(h => `<span class="hlinea" style="left:${pos(h)}%"></span>`).join('')}
-            ${ts.map(a => {
+            ${rep.items.map(({ a, p, carril }) => {
               const t = a.turno_id ? turnoDe(a.turno_id) : null;
               const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
               const iz = pos(Number(a.inicio)), an = pos(Number(a.fin)) - iz;
               const m = marcaAsig(a);
+              // Agrupado por puesto, lo util en la barra es QUIEN lo cubre; por
+              // persona, es el puesto. La misma barra dice lo que falta saber.
+              const pie = porPuesto ? (p ? p.nombre.split(' ')[0] : 'sin asignar')
+                                    : (puestoDe(a, p) || 'sin puesto');
               return `<span class="barra${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
-                role="button" tabindex="0"
-                style="left:${iz}%;width:${an}%"
-                title="${esc((puestoDe(a, p) || 'sin puesto') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
+                draggable="true" role="button" tabindex="0"
+                style="left:${iz}%;width:${an}%;--carril:${carril}"
+                title="${esc((p ? p.nombre + ' · ' : 'Sin asignar · ')
+                  + (puestoDe(a, p) || 'sin puesto') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
                   + ' · ' + hfmt(horasAsig(a)) + ' h' + (a.nota ? '\n' + a.nota : ''))}">
                 <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
-                <em>${esc(puestoDe(a, p) || 'sin puesto')}</em>
+                <em>${esc(pie)}</em>
                 ${m.entrada ? '<i class="marcado" title="marcó entrada">•</i>' : ''}
               </span>`;
             }).join('')}
           </div>
-        </div>`).join('')}
+        </div>`; }).join('')}
     </div>`;
+
+  engancharArrastreDia(caja);
 
   // abrir un turno, o agregar uno en la fila de alguien
   caja.onclick = ev => {
     const pista = ev.target.closest('.linea-pista[data-fecha]'); if (!pista) return;
     const fila = pista.closest('.linea-fila');
-    const p = fila.dataset.p ? S.personas.find(x => x.id === fila.dataset.p) : null;
     const bl = ev.target.closest('[data-asig]');
     if (bl) {
-      const lista = p ? filasDe(p.id, fe) : S.abiertos;
-      const a = lista.find(x => x.id === bl.dataset.asig);
-      if (a) return abrirTurno(p, fe, a);
+      // El dueño sale del TURNO, no de la fila: agrupado por puesto la fila no
+      // es de nadie, y buscar por fila abriria el turno como «sin asignar».
+      const a = turnoArrastrable(bl.dataset.asig);
+      if (a) return abrirTurno(a.persona_id ? (S.personas.find(x => x.id === a.persona_id) || null) : null, fe, a);
+      return;
     }
+    // Apretar un hueco crea un turno, pero solo cuando la fila dice de quien es.
+    // Agrupado por puesto no se sabe, igual que en la vista de semana por puestos.
+    if (S.agrupar === 'puestos') return;
+    const p = fila.dataset.p ? S.personas.find(x => x.id === fila.dataset.p) : null;
     abrirTurno(p, fe, null);
   };
 

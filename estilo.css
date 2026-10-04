@@ -568,12 +568,16 @@ table.neces th .turnoEd{font-weight:500}
 .linea-quien b{font-size:.8125rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
 .linea-quien .rol{font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
 .linea-cab .linea-quien{background:transparent;border-right-color:transparent}
-.linea-pista{position:relative;min-height:46px;cursor:pointer}
+/* La pista crece con los CARRILES: dos turnos que se pisan no pueden quedar uno
+   encima del otro, porque se veria solo uno. --carriles lo pone el JS por fila. */
+.linea-pista{position:relative;min-height:calc(var(--carriles, 1) * 46px);cursor:pointer}
 .linea-cab .linea-pista{min-height:24px}
 .hmarca{position:absolute;top:4px;transform:translateX(-50%);font-family:var(--font-mono);
   font-size:.625rem;color:var(--fg-faint);white-space:nowrap}
 .hlinea{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
-.barra{position:absolute;top:5px;bottom:5px;border-radius:5px;padding:3px 6px;overflow:hidden;
+/* Cada barra en su carril: alto fijo y desplazada hacia abajo por el suyo.
+   Sin `bottom`, que peleaba con la altura por carril. */
+.barra{position:absolute;top:calc(var(--carril, 0) * 46px + 5px);height:36px;border-radius:5px;padding:3px 6px;overflow:hidden;
   display:flex;flex-direction:column;justify-content:center;min-width:0;
   background:var(--surface-3);color:var(--fg)}
 .barra b{font-family:var(--font-mono);font-size:.625rem;white-space:nowrap}
@@ -652,3 +656,8 @@ td.cell.encima{outline:2px solid var(--accent);outline-offset:-2px;background:va
 .necres{margin:9px 0 0;font-size:.875rem}
 .necres.bad{color:var(--bad)}
 .necres.ok{color:var(--ok)}
+
+/* Destino del arrastre en la línea de tiempo del día. */
+.linea-pista.encima{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
+.barra[draggable="true"]{cursor:grab}
+.barra.llevando{opacity:.4;cursor:grabbing}
