@@ -37,6 +37,14 @@
       return `A la base le falta ${que}, que la app ya está usando. `
            + 'Hay que aplicar el archivo arreglo-*.sql que la agrega.';
     }
+    // «permission denied for table X» NO es lo mismo que un rechazo por reglas
+    // de acceso, aunque las dos suenen a permisos: aca la tabla existe pero le
+    // falta el GRANT, y mandar a revisar las reglas por fila —que estan bien—
+    // hace perder el tiempo. Se dice la causa real y que se vuelva a aplicar.
+    const sinPermiso = m.match(/permission denied for (?:table|relation) ([a-z_]+)/i);
+    if (sinPermiso)
+      return `La tabla «${sinPermiso[1]}» existe, pero la app no tiene permiso sobre ella: `
+           + 'le falta la línea «grant» de su archivo arreglo-*.sql. Vuelve a aplicarlo.';
     if (/row-level security|violates row-level/i.test(m))
       return 'La base rechazó la operación por las reglas de acceso. Revisa que estés en tu propio local.';
     if (/duplicate key/i.test(m)) return 'Ese registro ya existe.';
@@ -97,12 +105,17 @@
   // se reescribe y la comprobacion se cae sin que nadie se entere. Ya paso.
   //   42703 = columna que no existe · 42P01 = tabla que no existe
   //   PGRST204/205 = PostgREST no la encuentra en su cache
+  //   42501 = la tabla existe pero no hay permiso sobre ella. Cuenta como
+  //           «todavia no esta»: una tabla creada SIN su grant es una migracion
+  //           aplicada a medias, y para la app es lo mismo que si faltara. Si no
+  //           se tolera, el arranque se cae entero por una pieza opcional —
+  //           paso el 04-10 con modelos_semana.
   const faltaEnLaBase = (e) => {
     const c = (e && e.crudo) || {};
     const cod = String(c.code || '');
-    if (['42703','42P01','PGRST204','PGRST205'].includes(cod)) return true;
+    if (['42703','42P01','PGRST204','PGRST205','42501'].includes(cod)) return true;
     const t = (c.message || '') + ' ' + (c.details || '') + ' ' + (e && e.message || '');
-    return /does not exist|schema cache|no existe|le falta la columna|no existe en la base/i.test(t);
+    return /does not exist|schema cache|permission denied|no existe|le falta la columna|no existe en la base/i.test(t);
   };
 
   // ¿Esta la base al dia con lo que la app necesita? Se comprueba pidiendo las
