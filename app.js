@@ -47,7 +47,7 @@ const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 let sb = null;
 const S = { local:null, personas:[], turnos:[], puestos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
             lunes:lunesDe(new Date()), mes:new Date(), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
-            hist:[], histDot:[], histEq:[], recien:null, relojDia:null };
+            hist:[], histDot:[], histEq:[], recien:null, relojDia:null, agrupar:'personas' };
 
 /* ---------- deshacer ----------
    Antes de cualquier cambio en la malla se guarda una foto de como estaba el
@@ -428,6 +428,9 @@ function pintarPlan() {
   $('#cajaDia').hidden    = S.modo !== 'dia';
   $('#cajaMes').hidden    = S.modo !== 'mes';
   $('#btnCopiarSem').hidden = S.modo !== 'semana';
+  // agrupar por puesto solo tiene sentido en la semana
+  const seg = document.querySelector('.segm');
+  if (seg) seg.hidden = S.modo !== 'semana';
   // la franja de cobertura vive junto a la malla, no en otra pestaña:
   // sirve MIENTRAS planificas, no después
   const caja = $('#cardCobertura');
@@ -475,6 +478,16 @@ function abrirTurno(p, fecha, asig) {
   const quien = asig ? (asig.persona_id || '') : (p ? p.id : '');
   $('#dPersona').innerHTML = `<option value=""${quien ? '' : ' selected'}>— sin asignar —</option>`
     + S.personas.map(x => `<option value="${x.id}"${x.id === quien ? ' selected' : ''}>${esc(x.nombre)}</option>`).join('');
+
+  // Al crear, varias personas de una vez. Un turno nuevo se le pone a quien
+  // haga falta; uno que ya existe es de alguien, y ahí sigue siendo uno solo.
+  $('#dPersonas').innerHTML =
+    `<button type="button" class="act dia${quien ? '' : ' on'}" data-pid=""
+       aria-pressed="${quien ? 'false' : 'true'}">sin asignar</button>`
+    + S.personas.map(x => `<button type="button" class="act dia${x.id === quien ? ' on' : ''}"
+        data-pid="${x.id}" aria-pressed="${x.id === quien ? 'true' : 'false'}">${esc(x.nombre.split(' ')[0])}</button>`).join('');
+  $('#cajaPersonas').hidden = !esNuevo;
+  $('#cajaPersona').hidden  = esNuevo;
   $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p) : ((p && p.rol) || '').trim());
   $('#dAusencia').innerHTML = Object.entries(AUSENCIAS)
     .filter(([k]) => k !== 'L')
@@ -525,7 +538,9 @@ function pestañaDlg(turno) {
 
 // Una ausencia es DE ALGUIEN: en un turno sin asignar no significa nada.
 function ajustarAusencia() {
-  const hayPersona = !!$('#dPersona').value;
+  const hayPersona = $('#cajaPersonas').hidden
+    ? !!$('#dPersona').value
+    : [...$('#dPersonas').querySelectorAll('[aria-pressed="true"]')].some(b => b.dataset.pid);
   $('#tabAus').hidden = !hayPersona;
   if (!hayPersona) pestañaDlg(true);
 }
@@ -549,10 +564,16 @@ async function guardarDlg() {
   if (!d) { m.textContent = 'Faltan las horas.'; m.className = 'msg bad'; return; }
   if (d.horas <= 0) { m.textContent = 'La colación se come el turno entero.'; m.className = 'msg bad'; return; }
 
-  const quien = $('#dPersona').value || null;
+  const esNuevo = !asig;
+  // al crear, las pastillas; al editar, el desplegable de siempre
+  const quienes = esNuevo
+    ? [...$('#dPersonas').querySelectorAll('[aria-pressed="true"]')].map(b => b.dataset.pid || null)
+    : [$('#dPersona').value || null];
+  if (!quienes.length) {
+    m.textContent = 'Elige al menos a alguien, o «sin asignar».'; m.className = 'msg bad'; return;
+  }
   const campos = { turno_id: $('#dPlantilla').value || null, inicio: d.inicio, fin: d.fin,
-                   colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim(),
-                   persona_id: quien };
+                   colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim() };
   // Solo los botones que LLEVAN fecha: el del día del propio turno va marcado
   // pero sin `data-fe`, y colarlo aquí mandaba a la base una fila con la fecha
   // vacía. El Set evita además repetir ese mismo día.
@@ -563,11 +584,19 @@ async function guardarDlg() {
   recordar(asig ? 'el turno de ' + (p ? p.nombre : 'sin asignar') + ' del ' + ddmm(fecha)
                 : 'agregar turno' + (p ? ' a ' + p.nombre : ' sin asignar'));
   try {
-    if (asig) await DATOS.editarAsignacion(asig.id, campos);
-    else for (const fe of dias) {
-      // si esa persona ya tiene el mismo bloque ese día, no se duplica
-      if (quien && turnosDe(quien, fe).some(x => Number(x.inicio) === d.inicio)) continue;
-      await DATOS.crearAsignacion(S.local.id, quien, fe, campos);
+    if (asig) {
+      await DATOS.editarAsignacion(asig.id, Object.assign({ persona_id: quienes[0] }, campos));
+    } else {
+      // tantos turnos como personas x días. Con 4 personas y 5 días son 20 de
+      // una, que es justamente la gracia: antes eran 4 veces este diálogo.
+      let hechos = 0;
+      for (const fe of dias) for (const q of quienes) {
+        // si esa persona ya tiene el mismo bloque ese día, no se duplica
+        if (q && turnosDe(q, fe).some(x => Number(x.inicio) === d.inicio)) continue;
+        await DATOS.crearAsignacion(S.local.id, q, fe, campos);
+        hechos++;
+      }
+      if (!hechos) { m.textContent = 'Eso ya estaba puesto: no se agregó nada.'; m.className = 'msg'; }
     }
     await refrescar(); $('#dlgTurno').close();
   } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
@@ -630,7 +659,61 @@ function opcionesPuesto(actual) {
         `<option value="${esc(x)}"${x === actual ? ' selected' : ''}>${esc(x)}</option>`).join('');
 }
 
+function pintarSemanaPorPuesto() {
+  const f = fechas();
+  $('#semCab').innerHTML = '<th>Puesto</th>' +
+    DIAS.map((d,i) => `<th class="${i>=4?'fin':''}">${d}<span class="num">${ddmm(f[i])}</span></th>`).join('') + '<th>Horas</th>';
+
+  const cuerpo = $('#semCuerpo'); cuerpo.innerHTML = '';
+  // todas las asignaciones de la semana, con su persona (o sin ella)
+  const todas = [];
+  S.personas.forEach(p => f.forEach(fe => turnosDe(p.id, fe).forEach(a => todas.push({ p, a }))));
+  S.abiertos.filter(a => f.includes(a.fecha)).forEach(a => todas.push({ p: null, a }));
+
+  const lista = [...new Set(todas.map(x => puestoRot(x.a, x.p)))].sort();
+  if (!lista.length) {
+    cuerpo.innerHTML = '<tr><td colspan="9" class="vacio">Todavía no hay turnos esta semana.</td></tr>';
+    pintarResumenSemana(); return;
+  }
+
+  lista.forEach(q => {
+    const horasQ = todas.filter(x => puestoRot(x.a, x.p) === q)
+                        .reduce((n,x) => n + horasAsig(x.a), 0);
+    const tr = el('tr');
+    tr.innerHTML = `<th scope="row">${esc(q)}<span class="rol">${hfmt(horasQ)} h en la semana</span></th>` +
+      f.map(fe => {
+        const aqui = todas.filter(x => x.a.fecha === fe && puestoRot(x.a, x.p) === q)
+                          .sort((u,v) => Number(u.a.inicio) - Number(v.a.inicio));
+        const hs = aqui.reduce((n,x) => n + horasAsig(x.a), 0);
+        const bloques = aqui.map(({ p, a }) => {
+          const t = a.turno_id ? turnoDe(a.turno_id) : null;
+          const ci = t ? (S.turnos.findIndex(x => x.id === t.id) % 4) + 1 : 5;
+          return `<span class="bloque${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
+            data-fecha="${fe}" data-p="${p ? p.id : ''}" role="button" tabindex="0"
+            title="${esc((p ? p.nombre : 'Sin asignar') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin))}">
+            <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
+            <em>${esc(p ? p.nombre.split(' ')[0] : 'sin asignar')}</em></span>`;
+        }).join('');
+        // debajo de cada día, cuánta gente y cuántas horas: es la cobertura
+        // metida en la misma pantalla, como la de Skello
+        return `<td class="cell" data-fecha="${fe}" data-puesto="${esc(q)}">${bloques}
+          <span class="cuenta">${aqui.length} ${aqui.length === 1 ? 'pers.' : 'pers.'} · ${hfmt(hs)} h</span></td>`;
+      }).join('') + `<td class="tot">${hfmt(horasQ)} h</td>`;
+    cuerpo.appendChild(tr);
+  });
+
+  cuerpo.onclick = ev => {
+    const bl = ev.target.closest('[data-asig]'); if (!bl) return;
+    const p = bl.dataset.p ? S.personas.find(x => x.id === bl.dataset.p) : null;
+    const lista2 = p ? filasDe(p.id, bl.dataset.fecha) : S.abiertos;
+    const a = lista2.find(x => x.id === bl.dataset.asig);
+    if (a) abrirTurno(p, bl.dataset.fecha, a);
+  };
+  pintarResumenSemana();
+}
+
 function pintarSemana() {
+  if (S.agrupar === 'puestos') return pintarSemanaPorPuesto();
   const f = fechas();
   $('#semTitulo').textContent = ddmm(f[0]) + ' al ' + ddmm(f[6]);
   $('#semCab').innerHTML = '<th>Persona</th>' +
@@ -2181,6 +2264,15 @@ function conectarApp() {
   };
   on('#semAnt', 'click', () => mover(-1));
   on('#semSig', 'click', () => mover(1));
+  const agrupar = modo => {
+    S.agrupar = modo;
+    $('#agrPersonas').classList.toggle('primary', modo === 'personas');
+    $('#agrPuestos').classList.toggle('primary', modo === 'puestos');
+    pintarPlan();
+  };
+  on('#agrPersonas', 'click', () => agrupar('personas'));
+  on('#agrPuestos',  'click', () => agrupar('puestos'));
+
   on('#semHoy', 'click', () => {
     S.dia = new Date(); S.lunes = lunesDe(new Date()); S.mes = new Date();
     refrescar().catch(error);
@@ -2263,6 +2355,23 @@ function conectarApp() {
     $('#dPausa').value = Math.round(Number(t.colacion) * 60);
     duraDlg();
   });
+  on('#dPersonas', 'click', ev => {
+    const b = ev.target.closest('button[data-pid]'); if (!b) return;
+    const sinAsignar = b.dataset.pid === '';
+    const activo = b.getAttribute('aria-pressed') === 'true';
+    // «sin asignar» es excluyente: un turno es de nadie o de alguien
+    if (sinAsignar && !activo)
+      $('#dPersonas').querySelectorAll('button[data-pid]').forEach(x => {
+        x.setAttribute('aria-pressed','false'); x.classList.remove('on'); });
+    if (!sinAsignar && !activo) {
+      const n = $('#dPersonas').querySelector('button[data-pid=""]');
+      if (n) { n.setAttribute('aria-pressed','false'); n.classList.remove('on'); }
+    }
+    b.setAttribute('aria-pressed', activo ? 'false' : 'true');
+    b.classList.toggle('on', !activo);
+    ajustarAusencia();
+  });
+
   on('#dRepetir', 'click', ev => {
     const b = ev.target.closest('button[data-fe]'); if (!b) return;
     b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');

@@ -599,3 +599,14 @@ table.neces th .turnoEd{font-weight:500}
 /* Botones para marcar por la persona, en la tabla del control horario. */
 table.reloj td.marcar{white-space:nowrap}
 table.reloj td.marcar .mini{margin-right:4px}
+
+/* Cambio entre agrupar por Personas o por Puestos, pegados como un solo control. */
+.segm{display:inline-flex}
+.segm .act{border-radius:0}
+.segm .act:first-child{border-radius:6px 0 0 6px}
+.segm .act:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+
+/* Vista por puestos: debajo de cada día, cuánta gente y cuántas horas. Es la
+   cobertura metida en la misma pantalla, como lo hace Skello. */
+.cell .cuenta{display:block;margin-top:3px;font-family:var(--font-mono);font-size:.625rem;
+  color:var(--fg-faint);text-align:center}
