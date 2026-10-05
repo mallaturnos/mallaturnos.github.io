@@ -2808,10 +2808,24 @@ function pintarNecesidad(box) {
     caja.querySelector('.trmas').addEventListener('click', () => {
       const l = leer();
       const ultimo = l[l.length - 1];
+      const h = franja();
       // El tramo nuevo empieza donde termino el anterior: encadenar es lo que
       // uno quiere el 90 % de las veces, y si no, se corrige.
-      const desde = ultimo && ultimo.hasta != null ? ultimo.hasta : franja().h0;
-      l.push({ desde, hasta: Math.min(desde + 4, franja().h1), cantidad: 1 });
+      const desde = ultimo && ultimo.hasta != null ? Number(ultimo.hasta) : h.h0;
+      /* Si el ultimo tramo ya llega al cierre no queda hueco donde encadenar, y
+         el que se creaba tenia `desde === hasta`: `normalizarTramos` lo tiraba
+         —con razon, un tramo de cero horas no existe— y el boton se quedaba
+         MUDO. Apretar y que no pase nada ni se diga nada es lo peor de los dos
+         mundos. Lo pregunto Pedro: «por que tramo agrega? no entendi eso»
+         (msg 4075), con la Barra llegando justo hasta las 01:00. */
+      if (desde >= h.h1) {
+        const m = $('#msgDot');
+        if (m) { m.textContent = 'Ya hay tramos hasta el cierre (' + hhmm(h.h1)
+               + '). Cambia la hora de término de uno, o quita uno, para agregar otro.';
+                 m.className = 'msg bad'; }
+        return;
+      }
+      l.push({ desde, hasta: Math.min(desde + 4, h.h1), cantidad: 1 });
       DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(l))
         .then(() => { recordarTr('agregar un tramo'); return refrescar(); })
         .then(() => { verSub('nec'); })
