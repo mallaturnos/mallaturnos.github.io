@@ -2863,6 +2863,7 @@ function pintarCobertura() {
     // Los huecos del día, por hora y por puesto, dichos en palabras.
     const base = franja();
     const trozos = [];
+    let faltaDia = 0;
     ps.forEach(pu => {
       let act = null;
       for (let h = base.h0; h < base.h1; h++) {
@@ -2870,16 +2871,32 @@ function pintarCobertura() {
         if (req) hayDotacion = true;
         const falta = req - asignadosHora(fe, pu, h);
         if (falta > 0) {
-          faltanTot += falta;
+          faltanTot += falta; faltaDia += falta;
           if (act && act.falta === falta && act.hasta === h) act.hasta = h + 1;
           else { act = { pu, falta, desde: h, hasta: h + 1 }; trozos.push(act); }
         } else { act = null; if (req) sobranTot += Math.max(0, -falta); }
       }
     });
-    const dice = trozos.length
-      ? trozos.map(x => `falta${x.falta === 1 ? '' : 'n'} <b>${x.falta} ${esc(x.pu.toLowerCase())}</b>`
-          + ` de ${hhmm(x.desde)} a ${hhmm(x.hasta)}`).join(' · ')
-      : '';
+    /* Un dia SIN NADIE asignado no se enumera. Pedro lo vio en la pagina
+       publicada (msg 4064): de martes a sabado no habia nadie, asi que el panel
+       escupia los ocho huecos de cada dia, identicos cinco veces. Cuando falta
+       todo, listar todo es ruido y no ayuda a decidir nada.
+
+       Es ademas lo que hacen los dos que miramos: Skello no escribe la falta,
+       la dibuja como curva por hora; 7shifts la resume arriba en dos numeros y
+       deja el detalle a pedido. Ninguno de los dos escribe la lista entera.
+       El resumen de la semana y la curva quedaron para despues (msg 4068). */
+    /* «Nadie asignado» se comprueba contra las filas del dia, NO contra la
+       grilla de horas. `franja()` solo abarca del primer turno del catalogo al
+       ultimo, y una fila puede llevar horario propio fuera de ese rango: contra
+       la grilla, esa persona no existe y la frase mentiria. */
+    const nadie = !Object.values(S.asign).flat()
+      .some(a => a.fecha === fe && a.inicio != null);
+    const dice = !trozos.length ? ''
+      : nadie
+        ? `<b>Nadie asignado</b> — falta el día entero, ${faltaDia} persona${faltaDia === 1 ? '' : 's'}-hora`
+        : trozos.map(x => `falta${x.falta === 1 ? '' : 'n'} <b>${x.falta} ${esc(x.pu.toLowerCase())}</b>`
+            + ` de ${hhmm(x.desde)} a ${hhmm(x.hasta)}`).join(' · ');
     cont.appendChild(el('div','cobfila', `<div class="covday">${DIAS[d]} <span class="num">${ddmm(fe)}</span></div>
       <div class="cobcels" style="grid-template-columns:repeat(${ts.length},1fr)">${celdas}</div>`
       + (dice ? `<p class="cobfalta">${dice}</p>` : '')));
