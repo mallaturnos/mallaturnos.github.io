@@ -694,3 +694,27 @@ td.cell.encima,td.mcel.encima{outline:2px solid var(--accent);outline-offset:-2p
 /* Campos de hora propios, en 24 h: monoespaciados y angostos para que se lean
    como hora y no como texto libre. */
 .fld input.hora{font-family:var(--font-mono);letter-spacing:.04em;max-width:130px}
+
+/* ---------- cuánta gente necesito, por TRAMO (Prototipo 3) ----------
+   Reemplaza a la tabla de puesto x turno. Cada puesto es una caja con sus
+   tramos y su dibujo de barras: así el ojo compara un puesto consigo mismo a lo
+   largo del día, que es la pregunta real, y no un puesto contra otro. */
+.trpuesto{border:1px solid var(--linea,#e3e8e5);border-radius:10px;padding:10px 12px;margin-bottom:10px;background:#fff}
+.trtit{display:flex;align-items:center;justify-content:space-between;margin-bottom:6px}
+.trtit b{font-size:1.05rem}
+table.tramos{border-collapse:collapse;width:auto}
+table.tramos td{padding:3px 6px 3px 0;vertical-align:middle}
+table.tramos td.gui{color:#9aa29d;padding:0 2px}
+input.trh{width:5.2em;text-align:center;font-variant-numeric:tabular-nums}
+input.trn{width:4.2em;text-align:center;font-weight:700}
+.trx{font-size:.82rem;padding:3px 8px;color:#8a5050}
+/* El dibujo no lleva eje ni números: no es un gráfico para leer, es la forma
+   del día de un vistazo. Los números exactos están en la tabla de arriba. */
+.grn{display:flex;align-items:flex-end;gap:2px;height:60px;margin-top:8px}
+.grb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
+.grb i{display:block;width:100%;background:#bcd9c8;border-radius:3px 3px 0 0;min-height:2px}
+.grb span{font-size:.62rem;color:#9aa29d;margin-top:2px}
+/* Las casillas de turno dicen un hecho, no un veredicto: el color se fue de
+   ahí y el juicio bajó a esta línea, que se calcula por hora. */
+.cobcel.dato{background:#fafbfa;border-color:#e6eae8}
+.cobfalta{margin:4px 0 0;font-size:.86rem;color:#9c3a1e;line-height:1.4}

@@ -378,6 +378,62 @@
     return pedir(q);
   };
 
+  /* ---------- la necesidad POR TRAMO HORARIO ----------
+     Reemplaza a `dotacion` en el Prototipo 3. La vieja sigue viva porque el
+     /p2/ la lee y Pedro lo usa en vivo.
+
+     Igual que `puestos` y `modelos`: si todavia no se aplico el SQL, la LECTURA
+     devuelve vacio en vez de reventar. La app no puede quedar inservible por un
+     SQL pendiente. */
+  const tramos = async (localId) => {
+    try {
+      return await pedir(sb.from('dotacion_tramos').select('*').eq('local_id', localId)
+                           .order('perfil').order('puesto').order('desde'));
+    } catch (e) {
+      // null = la tabla NO existe todavia (falta pegar el SQL). Vacio = existe
+      // y no hay nada. La pantalla necesita distinguirlos: en el primer caso
+      // tiene que seguir mostrando la dotacion vieja y decir que falta el SQL.
+      if (faltaEnLaBase(e)) return null;
+      throw e;
+    }
+  };
+
+  /* Los tramos de un dia y un puesto se guardan ENTEROS: se borra lo que habia
+     y se escribe la lista nueva. Es mas simple que ir fila por fila, y ademas
+     correcto — al mover un tramo cambia su clave (`desde`), asi que un upsert
+     dejaria el viejo ahi y quedarian dos. */
+  const guardarTramos = async (localId, perfil, puesto, lista) => {
+    await pedir(sb.from('dotacion_tramos').delete()
+                  .eq('local_id', localId).eq('perfil', perfil).eq('puesto', puesto));
+    const filas = (lista || []).filter(t => Number(t.cantidad) > 0 && Number(t.hasta) > Number(t.desde))
+      .map(t => ({ local_id: localId, perfil, puesto,
+                   desde: Number(t.desde), hasta: Number(t.hasta),
+                   cantidad: Number(t.cantidad) }));
+    if (filas.length) await pedir(sb.from('dotacion_tramos').insert(filas));
+    return filas.length;
+  };
+
+  // Copiar un dia a los otros seis, que es lo que se hace siempre.
+  const copiarTramosDia = async (localId, perfilOrigen, destinos) => {
+    const todos = await tramos(localId);
+    const mios = todos.filter(t => String(t.perfil) === String(perfilOrigen));
+    await pedir(sb.from('dotacion_tramos').delete()
+                  .eq('local_id', localId).in('perfil', destinos));
+    const filas = [];
+    for (const p of destinos)
+      for (const t of mios)
+        filas.push({ local_id: localId, perfil: p, puesto: t.puesto,
+                     desde: t.desde, hasta: t.hasta, cantidad: t.cantidad });
+    if (filas.length) await pedir(sb.from('dotacion_tramos').insert(filas));
+    return filas.length;
+  };
+
+  const borrarTramos = (localId, perfil) => {
+    let q = sb.from('dotacion_tramos').delete().eq('local_id', localId);
+    if (perfil != null) q = q.eq('perfil', String(perfil));
+    return pedir(q);
+  };
+
   // Vuelve a dejar la dotacion exactamente como estaba. Se repone COMPLETA y no
   // por dia, porque 'copiar a los demas' toca seis dias de una y un deshacer
   // que solo repusiera uno dejaria la mitad del cambio puesto.
@@ -570,6 +626,7 @@
     borrarAsignaciones, reponerAsignaciones,
     dias, guardarDia, dotacion, guardarDotacion, guardarDotacionLote,
     borrarDotacion, reponerDotacion,
+    tramos, guardarTramos, copiarTramosDia, borrarTramos,
     modelos, guardarSemanaComoModelo, aplicarModelo, borrarModelo,
     abiertos, abrirTurno, cerrarTurno,
     miSemana, marcarTurno, tomarTurno, ofrecerTurno,

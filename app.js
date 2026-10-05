@@ -143,7 +143,10 @@ async function deshacerDot() {
   const h = S.histDot.pop(); if (!h) return;
   const m = $('#msgDot');
   try {
-    await DATOS.reponerDotacion(S.local.id, h.filas);
+    // Un mismo boton para los dos modelos: mientras el SQL de tramos no este
+    // aplicado se sigue deshaciendo la dotacion vieja.
+    if (h.tramos) await reponerTramos(h.tramos);
+    else await DATOS.reponerDotacion(S.local.id, h.filas);
     await refrescar();
     $('#detNecesita').open = true;
     if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
@@ -153,6 +156,37 @@ async function deshacerDot() {
   }
   pintarDeshacerDot();
   setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 5000);
+}
+
+/* ---------- deshacer de los TRAMOS ----------
+   Mismo criterio que la dotacion vieja: se guarda la lista COMPLETA, porque
+   «copiar este dia a los demas» toca seis dias de una. Son unas pocas decenas
+   de filas. */
+function fotoTramos() {
+  const filas = [];
+  for (const perfil of Object.keys(S.tramos || {}))
+    for (const puesto of Object.keys(S.tramos[perfil]))
+      S.tramos[perfil][puesto].forEach(t => filas.push(
+        { perfil, puesto, desde: Number(t.desde), hasta: Number(t.hasta),
+          cantidad: Number(t.cantidad) }));
+  return filas;
+}
+function recordarTr(que) {
+  S.histDot.push({ tramos: fotoTramos(), que: que || 'el ultimo cambio' });
+  if (S.histDot.length > MAX_HIST) S.histDot.shift();
+  pintarDeshacerDot();
+}
+async function reponerTramos(filas) {
+  await DATOS.borrarTramos(S.local.id, null);
+  const porClave = {};
+  filas.forEach(f => {
+    const k = f.perfil + '|' + f.puesto;
+    (porClave[k] = porClave[k] || []).push(f);
+  });
+  for (const k of Object.keys(porClave)) {
+    const [perfil, puesto] = k.split('|');
+    await DATOS.guardarTramos(S.local.id, perfil, puesto, porClave[k]);
+  }
 }
 
 /* ---------- deshacer del EQUIPO ----------
@@ -203,6 +237,36 @@ const perfilDe = fecha => String((new Date(fecha + 'T00:00:00').getDay() + 6) % 
 // como piensa un dueño: "el sábado en la tarde necesito tres garzones".
 const necesita = (perfil, puesto, turnoId) => ((S.dotacion[perfil] || {})[puesto] || {})[turnoId] || 0;
 
+/* ---------- cuanta gente se necesita A ESA HORA ----------
+   Es LA pregunta del Prototipo 3, y reemplaza a «cuanta en ese turno».
+
+   El caso que lo obligo lo trajo Pedro (msg 3892): con un corrido de 8 h y un
+   refuerzo de 4 h, el numero por turno no significa lo mismo en los dos — en el
+   corrido es «cuanta quiero» y en el refuerzo «cuanta MAS». Por hora, un numero
+   tiene un solo significado.
+
+   Los tramos NO se suman entre si: se toma el mayor. Dos tramos no deberian
+   pisarse —la clave primaria va por `desde` y el editor los ordena— pero si
+   alguno queda mal, sumar volveria a inventar gente, que es justo el error del
+   que venimos. Con el maximo, lo peor que pasa es que se respete el mas alto.
+
+   Mientras no se aplique `arreglo-tramos.sql` no hay tramos, y entonces se
+   deduce de la dotacion vieja sumando los turnos que pasan por esa hora: es
+   como se leia hasta hoy, asi que la pantalla no cambia de un dia para otro. */
+function necesitaHora(perfil, puesto, h) {
+  const lista = (S.tramos[perfil] || {})[puesto];
+  if (lista && lista.length) {
+    let n = 0;
+    lista.forEach(t => {
+      if (Number(t.desde) <= h && h < Number(t.hasta)) n = Math.max(n, Number(t.cantidad) || 0);
+    });
+    return n;
+  }
+  return S.turnos.reduce((n, t) =>
+    n + ((Number(t.inicio) <= h && h < Number(t.fin)) ? necesita(perfil, puesto, t.id) : 0), 0);
+}
+const hayTramos = () => Object.keys(S.tramos || {}).length > 0;
+
 // El puesto que se trabaja ESE turno. Si la asignacion no lo trae (una vieja,
 // de antes del cambio), vale el habitual de la persona.
 const puestoDe = (a, p) => ((a && a.puesto) || '').trim() || ((p && p.rol) || '').trim();
@@ -216,6 +280,13 @@ const asignados = (fecha, turnoId, puesto) => {
   return S.personas.reduce((n, p) => n + (turnosDe(p.id, fecha).some(a =>
     (puesto ? puestoRot(a, p) === puesto : true) && solapan(a, t)) ? 1 : 0), 0);
 };
+// Cuanta gente de ese puesto esta trabajando A ESA HORA. Es el companero de
+// `necesitaHora`: los dos miran la hora, no el turno, que es lo unico que no
+// miente cuando los turnos se pisan.
+const asignadosHora = (fecha, puesto, h) => S.personas.reduce((n, p) =>
+  n + (turnosDe(p.id, fecha).some(a => Number(a.inicio) <= h && h < Number(a.fin)
+       && (!puesto || puestoRot(a, p) === puesto)) ? 1 : 0), 0);
+
 // Dos bloques se pisan si comparten aunque sea un minuto. Se compara por horas
 // y no por turno_id porque un turno asignado puede no venir de ninguna
 // plantilla: se le escribieron las horas y ya.
@@ -431,11 +502,11 @@ function pintarLocales() {
 /* ================= CARGAR TODO ================= */
 async function cargar() {
   const r = rango(), desde = r.desde, hasta = r.hasta;
-  const [personas, turnos, puestosCat, asign, marcas, dias, abiertos, dot, modelos] = await Promise.all([
+  const [personas, turnos, puestosCat, asign, marcas, dias, abiertos, dot, modelos, tramos] = await Promise.all([
     DATOS.personas(S.local.id), DATOS.turnos(S.local.id), DATOS.puestos(S.local.id),
     DATOS.asignaciones(S.local.id, desde, hasta), DATOS.marcas(S.local.id, desde, hasta),
     DATOS.dias(S.local.id, desde, hasta), DATOS.abiertos(S.local.id, desde, hasta),
-    DATOS.dotacion(S.local.id), DATOS.modelos(S.local.id),
+    DATOS.dotacion(S.local.id), DATOS.modelos(S.local.id), DATOS.tramos(S.local.id),
   ]);
   S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
   S.puestos = puestosCat || [];
@@ -464,6 +535,16 @@ async function cargar() {
     const perfil = S.dotacion[x.perfil] = S.dotacion[x.perfil] || {};
     (perfil[x.puesto || ''] = perfil[x.puesto || ''] || {})[x.turno_id] = x.cantidad;
   });
+  // La necesidad POR TRAMO, que reemplaza a la de arriba en el Prototipo 3.
+  // `null` quiere decir que falta pegar `arreglo-tramos.sql`.
+  S.sinTablaTramos = (tramos === null);
+  S.tramos = {};
+  (tramos||[]).forEach(x => {
+    const perfil = S.tramos[x.perfil] = S.tramos[x.perfil] || {};
+    (perfil[x.puesto || ''] = perfil[x.puesto || ''] || []).push(x);
+  });
+  Object.values(S.tramos).forEach(p => Object.values(p)
+    .forEach(l => l.sort((a,b) => Number(a.desde) - Number(b.desde))));
 }
 
 async function refrescar() { await cargar(); pintarTodo(); }
@@ -1260,10 +1341,7 @@ function necesidadPorHora(fe) {
   const horas = [];
   for (let h = base.h0; h < base.h1; h++) {
     let req = 0;
-    S.turnos.forEach(t => {
-      if (Number(t.inicio) <= h && h < Number(t.fin))
-        ps.forEach(pu => { req += necesita(d, pu, t.id); });
-    });
+    ps.forEach(pu => { req += necesitaHora(d, pu, h); });
     // Cuenta PERSONAS. Un turno sin dueño esta planificado pero no hay nadie,
     // que es justamente el hueco que esta pantalla tiene que mostrar.
     const hay = S.personas.reduce((n, p) => n + (turnosDe(p.id, fe).some(a =>
@@ -2564,6 +2642,122 @@ function diceMotivos(motivos) {
     : motivos[k] + ' ' + MOTIVOS[k]).join(', ');
 }
 
+/* ================= CUANTA GENTE NECESITO, POR TRAMO =================
+   Reemplaza a la tabla de puesto x turno. El caso que la mato lo trajo Pedro
+   (msg 3892): con un corrido de 8 h y un refuerzo de 4 h, el mismo numero
+   significaba dos cosas — «cuanta quiero» en uno y «cuanta MAS» en el otro— y
+   la tabla no lo decia en ninguna parte. Con sus propios numeros eso eran seis
+   personas de diferencia en la semana.
+
+   Acá un numero tiene UN significado: cuanta gente quiero a esa hora. */
+
+const tramosDe = (perfil, puesto) => ((S.tramos[perfil] || {})[puesto] || []);
+
+/* Deja la lista de tramos como se debe guardar: tira la basura, los ordena y
+   PEGA los que se tocan y piden lo mismo.
+
+   Lo de pegar no es cosmetico: sin eso, teclear 08–12 y despues 12–16 con el
+   mismo numero deja dos filas que dicen lo que una sola diria mejor, y al dia
+   siguiente nadie entiende por que estan partidas.
+
+   Va de nivel superior y con nombre a proposito, para poder probarla en node
+   sin navegador — la misma razon por la que `proponer()` entra y sale por
+   parametro. */
+function normalizarTramos(lista) {
+  const ok = (lista || [])
+    .filter(t => t.desde != null && t.hasta != null
+                 && Number(t.hasta) > Number(t.desde) && Number(t.cantidad) > 0)
+    .map(t => ({ desde: Number(t.desde), hasta: Number(t.hasta), cantidad: Number(t.cantidad) }))
+    .sort((a, b) => a.desde - b.desde);
+  const out = [];
+  ok.forEach(t => {
+    const u = out[out.length - 1];
+    if (u && u.cantidad === t.cantidad && Math.abs(u.hasta - t.desde) < 0.01) u.hasta = t.hasta;
+    else out.push(t);
+  });
+  return out;
+}
+
+/* El dibujo de barras por hora. Es la misma informacion de la tabla vista de un
+   golpe: la hora punta se ve sin leer. */
+function barrasNecesidad(perfil, puesto) {
+  const base = franja();
+  const horas = [];
+  for (let h = base.h0; h < base.h1; h++) horas.push(necesitaHora(perfil, puesto, h));
+  const tope = Math.max(1, ...horas);
+  return `<div class="grn">` + horas.map((n, i) =>
+    `<div class="grb" title="${hhmm(base.h0 + i)}: ${n}">`
+    + `<i style="height:${Math.round(n / tope * 46)}px"></i>`
+    + `<span>${String((base.h0 + i) % 24).padStart(2,'0')}</span></div>`).join('') + '</div>';
+}
+
+function pintarNecesidad(box) {
+  const ps = puestos();
+  box.innerHTML = '';
+  if (!ps.length) { box.innerHTML = '<p class="vacio">Primero agrega tu equipo.</p>'; return; }
+
+  ps.forEach(puesto => {
+    const lista = tramosDe(S.cobDia, puesto);
+    const filas = lista.map((t, i) => `<tr data-i="${i}">
+        <td><input class="hora trh" value="${hhmm(t.desde)}" inputmode="numeric" maxlength="5" aria-label="desde"></td>
+        <td class="gui">–</td>
+        <td><input class="hora trh" value="${hhmm(t.hasta)}" inputmode="numeric" maxlength="5" aria-label="hasta"></td>
+        <td><input class="n trn" type="number" min="0" max="99" value="${Number(t.cantidad)}" aria-label="cuántos"></td>
+        <td><button type="button" class="act trx" title="Quitar este tramo">quitar</button></td>
+      </tr>`).join('');
+    const caja = el('div', 'trpuesto', `
+      <div class="trtit"><b>${esc(puesto)}</b>
+        <button type="button" class="act trmas">+ tramo</button></div>
+      ${lista.length ? `<table class="tramos"><tbody>${filas}</tbody></table>`
+                     : '<p class="hint">Sin tramos: a esta hora no se pide a nadie de este puesto.</p>'}
+      ${lista.length ? barrasNecesidad(S.cobDia, puesto) : ''}`);
+    box.appendChild(caja);
+
+    const leer = () => [...caja.querySelectorAll('tbody tr')].map(tr => ({
+      desde: deHora(tr.querySelector('.trh').value),
+      hasta: deHora(tr.querySelectorAll('.trh')[1].value),
+      cantidad: Number(tr.querySelector('.trn').value) || 0,
+    }));
+
+    const guardar = async (que) => {
+      const m = $('#msgDot');
+      try {
+        recordarTr(que);
+        await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(leer()));
+        await refrescar();
+        $('#detNecesita').open = true;
+      } catch (e) {
+        S.histDot.pop(); pintarDeshacerDot();
+        if (m) { m.textContent = e.message; m.className = 'msg bad'; }
+      }
+    };
+
+    caja.querySelector('.trmas').addEventListener('click', () => {
+      const l = leer();
+      const ultimo = l[l.length - 1];
+      // El tramo nuevo empieza donde termino el anterior: encadenar es lo que
+      // uno quiere el 90 % de las veces, y si no, se corrige.
+      const desde = ultimo && ultimo.hasta != null ? ultimo.hasta : franja().h0;
+      l.push({ desde, hasta: Math.min(desde + 4, franja().h1), cantidad: 1 });
+      DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(l))
+        .then(() => { recordarTr('agregar un tramo'); return refrescar(); })
+        .then(() => { $('#detNecesita').open = true; })
+        .catch(error);
+    });
+    caja.querySelectorAll('.trx').forEach((b, i) => b.addEventListener('click', () => {
+      const l = leer(); l.splice(i, 1);
+      recordarTr('quitar un tramo');
+      DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(l))
+        .then(refrescar).then(() => { $('#detNecesita').open = true; }).catch(error);
+    }));
+    caja.querySelectorAll('.trh, .trn').forEach(inp => {
+      inp.addEventListener('change', () => guardar('cambiar un tramo'));
+      if (inp.classList.contains('hora'))
+        inp.addEventListener('blur', () => { const v = normalizarHora(inp.value); if (v) inp.value = v; });
+    });
+  });
+}
+
 /* ================= COBERTURA Y COSTO ================= */
 function pintarCobertura() {
   const f = fechas();
@@ -2580,23 +2774,42 @@ function pintarCobertura() {
 
   diasVista.forEach(fe => {
     const d = (new Date(fe + 'T00:00:00').getDay() + 6) % 7;
+    /* Las casillas de turno dicen un HECHO —cuánta gente hay— y ya no un
+       veredicto. El veredicto bajó a la línea de abajo y se calcula POR HORA.
+
+       Por qué: con turnos que se pisan, juzgar turno por turno miente. Lo
+       encontró Pedro (msg 3772): quien trabaja 08:00–16:30 contaba como
+       cobertura de la Tarde 13:00–21:30, así que con UNA persona los dos
+       turnos salían cubiertos y a las 17:00 no había nadie. */
     const celdas = ts.map(t => {
-      const faltas = [], sobras = [];
-      ps.forEach(puesto => {
-        const req = necesita(String(d), puesto, t.id);
-        if (req) hayDotacion = true;
-        const hay = asignados(fe, t.id, puesto);
-        if (req && hay < req) { faltas.push(`${req - hay} ${puesto.toLowerCase()}`); faltanTot += req - hay; }
-        else if (req && hay > req) { sobras.push(`${hay - req} ${puesto.toLowerCase()}`); sobranTot += hay - req; }
-      });
       const total = ps.reduce((n,x) => n + asignados(fe, t.id, x), 0);
-      let cls = 'ok', txt = total ? total + (total === 1 ? ' persona' : ' personas') : '—';
-      if (faltas.length) { cls = 'falta'; txt = 'falta ' + faltas.join(', '); }
-      else if (sobras.length) { cls = 'sobra'; txt = 'sobra ' + sobras.join(', '); }
-      return `<div class="cobcel ${cls}"><b>${esc(t.nombre)}</b><span>${esc(txt)}</span></div>`;
+      return `<div class="cobcel dato"><b>${esc(t.nombre)}</b>`
+        + `<span>${total ? total + (total === 1 ? ' persona' : ' personas') : '—'}</span></div>`;
     }).join('');
+
+    // Los huecos del día, por hora y por puesto, dichos en palabras.
+    const base = franja();
+    const trozos = [];
+    ps.forEach(pu => {
+      let act = null;
+      for (let h = base.h0; h < base.h1; h++) {
+        const req = necesitaHora(String(d), pu, h);
+        if (req) hayDotacion = true;
+        const falta = req - asignadosHora(fe, pu, h);
+        if (falta > 0) {
+          faltanTot += falta;
+          if (act && act.falta === falta && act.hasta === h) act.hasta = h + 1;
+          else { act = { pu, falta, desde: h, hasta: h + 1 }; trozos.push(act); }
+        } else { act = null; if (req) sobranTot += Math.max(0, -falta); }
+      }
+    });
+    const dice = trozos.length
+      ? trozos.map(x => `falta${x.falta === 1 ? '' : 'n'} <b>${x.falta} ${esc(x.pu.toLowerCase())}</b>`
+          + ` de ${hhmm(x.desde)} a ${hhmm(x.hasta)}`).join(' · ')
+      : '';
     cont.appendChild(el('div','cobfila', `<div class="covday">${DIAS[d]} <span class="num">${ddmm(fe)}</span></div>
-      <div class="cobcels" style="grid-template-columns:repeat(${ts.length},1fr)">${celdas}</div>`));
+      <div class="cobcels" style="grid-template-columns:repeat(${ts.length},1fr)">${celdas}</div>`
+      + (dice ? `<p class="cobfalta">${dice}</p>` : '')));
   });
 
   /* ---- abajo: cuánta necesito, un día a la vez, por puesto y por turno ---- */
@@ -2608,7 +2821,10 @@ function pintarCobertura() {
   });
 
   const box = $('#needDia'); box.innerHTML = '';
-  if (!ps.length || !ts.length) {
+  // Mientras no se pegue `arreglo-tramos.sql` se sigue mostrando la tabla
+  // vieja: la app no puede quedar inservible por un SQL pendiente.
+  if (!S.sinTablaTramos) { pintarNecesidad(box); }
+  else if (!ps.length || !ts.length) {
     box.innerHTML = '<p class="vacio">Primero agrega tu equipo y tus turnos.</p>';
   } else {
     const tabla = el('table','neces');
@@ -2688,8 +2904,11 @@ function pintarCobertura() {
     { k:'Costo de personal', v:clp(costoT), n:'la semana completa' },
     { k:'Sobre la venta', v:pfmt(pctT), n:`tu objetivo es ${obj} %`,
       c: isFinite(pctT) ? (pctT > obj ? 'alert' : 'good') : '' },
-    { k:'Gente que falta', v: hayDotacion ? faltanTot : '—', n:'turnos con menos de la que pediste', c: faltanTot ? 'alert' : '' },
-    { k:'Gente de sobra', v: hayDotacion ? sobranTot : '—', n:'turnos con más de la necesaria' },
+    // La unidad cambió con la cuenta: ya no son «turnos», son horas-persona.
+    // Decir «turnos» sobre un número que se calcula por hora sería mentir en la
+    // etiqueta, que es la peor forma de mentir en una pantalla.
+    { k:'Horas-persona que faltan', v: hayDotacion ? faltanTot : '—', n:'sumando cada hora en que falta alguien', c: faltanTot ? 'alert' : '' },
+    { k:'Horas-persona de sobra', v: hayDotacion ? sobranTot : '—', n:'sumando cada hora con más gente de la pedida' },
   ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
 }
 
@@ -3657,6 +3876,23 @@ function opcionesModelo() {
   // copiar la dotación de un día a los demás, para no teclear siete veces
   on('#btnCopiarDotacion', 'click', async () => {
     const dia = DIAS[Number(S.cobDia)];
+    // Con tramos es otra cosa que copiar: se copian las FILAS del día, no las
+    // casillas. La rama vieja se queda para mientras falte el SQL.
+    if (!S.sinTablaTramos) {
+      const mios = Object.values(S.tramos[S.cobDia] || {}).reduce((n, l) => n + l.length, 0);
+      if (!mios) return alert(`${dia} no tiene ningún tramo todavía.\n\nDefínelo primero y después cópialo.`);
+      const destinos = [...Array(7).keys()].map(String).filter(d => d !== S.cobDia);
+      if (!confirm(`Copiar los tramos de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
+      const bt = $('#btnCopiarDotacion'); bt.disabled = true;
+      recordarTr('copiar ' + dia + ' a los demás');
+      try {
+        await DATOS.copiarTramosDia(S.local.id, S.cobDia, destinos);
+        await refrescar();
+        $('#detNecesita').open = true;
+      } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
+      bt.disabled = false;
+      return;
+    }
     const origen = S.dotacion[S.cobDia] || {};
     const filas = [];
     for (let d = 0; d < 7; d++) {
@@ -3779,6 +4015,22 @@ function opcionesModelo() {
   // siete, limpia uno y lo copia a los demas: ya existe ese boton.
   on('#btnLimpiarDot', 'click', async () => {
     const dia = DIAS[Number(S.cobDia)];
+    if (!S.sinTablaTramos) {
+      const n = Object.values(S.tramos[S.cobDia] || {}).reduce((k, l) => k + l.length, 0);
+      if (!n) return alert(`${dia} ya está en blanco.`);
+      if (!confirm(`Borrar los ${n} ${n === 1 ? 'tramo' : 'tramos'} de ${dia}.\n\n`
+        + 'Los otros días no se tocan, y lo puedes deshacer.')) return;
+      const msg = $('#msgDot');
+      recordarTr('limpiar ' + dia);
+      try {
+        await DATOS.borrarTramos(S.local.id, S.cobDia);
+        await refrescar();
+        $('#detNecesita').open = true;
+        msg.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; msg.className = 'msg ok';
+      } catch (e) { S.histDot.pop(); pintarDeshacerDot(); msg.textContent = e.message; msg.className = 'msg bad'; }
+      setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
+      return;
+    }
     const hoy = S.dotacion[S.cobDia] || {};
     let cuantas = 0;
     for (const puesto of Object.keys(hoy)) cuantas += Object.keys(hoy[puesto]).length;
