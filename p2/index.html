@@ -1,0 +1,445 @@
+<!doctype html>
+<html lang="es">
+<head>
+<meta charset="utf-8">
+<meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
+<title>Malla de Turnos</title>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
+<link rel="stylesheet" href="estilo.css?v=62">
+<style>
+#rotuloProto { position:fixed; left:0; right:0; bottom:0; z-index:999;
+  background:#5b5f63; color:#fff; font:700 12px/1.5 system-ui,sans-serif;
+  text-align:center; padding:6px 10px; letter-spacing:.04em; }
+#rotuloProto a { color:#cfe3ff; }
+body { padding-bottom:34px; }
+</style></head>
+<body>
+<div id="rotuloProto">PROTOTIPO 2 · congelado el 05-10-2026 — no se le hacen más cambios.
+  La versión en la que se sigue trabajando está en <a href="https://mallaturnos.github.io/">mallaturnos.github.io</a></div>
+
+<!-- ====================== VISTA DEL TRABAJADOR (con #token) ====================== -->
+<div class="wrap" id="vistaTrab" hidden>
+  <p class="eyebrow">Mi semana</p>
+  <h1 id="tNombre">—</h1>
+  <p class="sub" id="tSub"></p>
+  <div id="tAviso"></div>
+  <div id="tPropina"></div>
+  <div id="tConfTodo" hidden></div>
+  <h2 class="secc">Mis turnos</h2>
+  <div id="tDias"></div>
+  <p class="sub" id="tTotal"></p>
+  <h2 class="secc">Turnos disponibles</h2>
+  <p class="sub" style="margin:0 0 10px">Turnos que quedaron sin nadie. <b>El primero que lo toma se lo queda.</b></p>
+  <div id="tAbiertos"></div>
+  <footer>Malla de Turnos</footer>
+</div>
+
+<!-- ====================== VISTA DEL DUEÑO ====================== -->
+<div class="wrap" id="vistaJefe" hidden>
+
+  <header>
+    <div>
+      <p class="eyebrow" id="hLocal">—</p>
+      <h1>Malla de Turnos</h1>
+    </div>
+    <div class="acciones" id="hLocales"></div>
+    <div class="acciones" id="hAcciones"></div>
+  </header>
+
+  <!-- diagnóstico: solo aparece si algo falla -->
+  <div class="card" id="diag" hidden>
+    <h2>Estado</h2>
+    <ul class="checks">
+      <li id="c-web"><span class="pt">…</span> La página se publicó y cargó</li>
+      <li id="c-lib"><span class="pt">…</span> La librería de la base cargó</li>
+      <li id="c-cfg"><span class="pt">…</span> Hay datos de conexión configurados</li>
+      <li id="c-db"><span class="pt">…</span> La base responde</li>
+    </ul>
+    <p class="hint" id="diagNota"></p>
+  </div>
+
+  <!-- entrar -->
+  <div class="card" id="cardLogin" hidden>
+    <h2>Entrar</h2>
+    <p class="hint">Solo para el dueño o el encargado. El equipo entra con su propio link, sin clave.</p>
+    <form id="formLogin" class="form">
+      <div class="fld"><label for="email">Correo</label>
+        <input type="email" id="email" autocomplete="username" required></div>
+      <div class="fld"><label for="clave">Contraseña</label>
+        <input type="password" id="clave" autocomplete="current-password" required minlength="8"></div>
+      <div class="acciones">
+        <button class="act primary" type="submit">Entrar</button>
+        <button class="act" type="button" id="btnCrear">Crear mi cuenta</button>
+      </div>
+      <p class="msg" id="msgLogin" role="status"></p>
+    </form>
+  </div>
+
+  <!-- primer uso: crear el local -->
+  <div class="card" id="cardLocal" hidden>
+    <h2>¿Cómo se llama tu local?</h2>
+    <p class="hint">Es lo único que te pido para empezar. Lo demás lo agregas cuando lo necesites.</p>
+    <form id="formLocal" class="form">
+      <div class="fld"><label for="nombreLocal">Nombre</label>
+        <input type="text" id="nombreLocal" placeholder="Café Las Rosas" required></div>
+      <div class="acciones"><button class="act primary" type="submit">Crear</button>
+        <button class="act" type="button" id="cancelarLocal" hidden>Cancelar</button></div>
+      <p class="msg" id="msgLocal" role="status"></p>
+    </form>
+  </div>
+
+  <!-- la app -->
+  <div id="app" hidden>
+    <nav role="tablist" aria-label="Secciones">
+      <button role="tab" id="tab-sem"  aria-selected="true"  aria-controls="p-sem">Planificación</button>
+      <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
+      <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
+      <button role="tab" id="tab-conf" aria-selected="false" aria-controls="p-conf">Control horario</button>
+      <button role="tab" id="tab-link" aria-selected="false" aria-controls="p-link">Links</button>
+    </nav>
+
+    <div class="panel" id="p-sem" role="tabpanel" aria-labelledby="tab-sem">
+      <div class="card">
+        <div class="semnav">
+          <div class="modos" role="group" aria-label="Vista">
+            <button class="act" id="modoDia">Día</button>
+            <button class="act" id="modoSemana" aria-pressed="true">Semana</button>
+            <button class="act" id="modoMes">Mes</button>
+          </div>
+          <!-- Agrupar es un CAMBIO DE VISTA, asi que vive con los otros cambios de
+               vista y no entre las flechas y los filtros. Pedro: «creo que no queda
+               muy intuitivo el boton en ese lado». -->
+          <span class="segm" role="group" aria-label="Agrupar por">
+            <button class="act primary" id="agrPersonas">Personas</button><button class="act" id="agrPuestos">Puestos</button>
+          </span>
+          <button class="act" id="semAnt" aria-label="Anterior">←</button>
+          <b id="semTitulo">—</b>
+          <button class="act" id="semSig" aria-label="Siguiente">→</button>
+          <button class="act" id="semHoy">Hoy</button>
+          <select id="filtroPuesto" aria-label="Filtrar por puesto"></select>
+          <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
+          <span class="sep"></span>
+          <button class="act" id="btnModelos">Modelos de semana</button>
+          <button class="act" id="btnCopiar">Copiar…</button>
+          <button class="act" id="btnLimpiarSem">Limpiar</button>
+          <button class="act" id="btnDeshacer" disabled>Deshacer</button>
+          <button class="act" id="btnImprimir">Imprimir</button>
+          <button class="act primary" id="btnIrPublicar">Publicar</button>
+        </div>
+        <p class="msg" id="msgSem"></p>
+        <div class="scroll" id="cajaSemana"><table id="tablaSem"><thead><tr id="semCab"></tr></thead><tbody id="semCuerpo"></tbody><tfoot id="semPie"></tfoot></table></div>
+        <div id="cajaDia" hidden></div>
+        <div class="scroll" id="cajaMes" hidden><table class="mes"><thead><tr id="mesCab"></tr></thead><tbody id="mesCuerpo"></tbody></table></div>
+        <p class="hint" style="margin-top:12px">Aprieta cualquier turno para abrirlo, o una casilla vacía para agregar uno. Las alertas aparecen al lado de cada persona.</p>
+      </div>
+
+      <div class="card" id="cardCobertura">
+        <h2>¿Te alcanza la gente?</h2>
+        <p class="hint">Turno por turno, si te alcanza la gente. <b>Rojo</b> = falta, <b>ámbar</b> = sobra, <b>verde</b> = justo.</p>
+        <div class="scroll" style="border:0;background:transparent">
+          <div class="cov" id="cobertura"></div>
+        </div>
+        <details id="detNecesita">
+          <summary>Definir cuánta gente necesito</summary>
+          <p class="hint" style="margin-top:10px">Cuánta gente de cada puesto necesitas <b>en cada turno</b>. Llena un día y cópialo a los demás.</p>
+          <div class="acciones diatabs" id="cobTabs" style="margin-bottom:10px"></div>
+          <div class="scroll" style="border:0;background:transparent"><div id="needDia"></div></div>
+          <div class="acciones" style="margin-top:12px">
+            <button class="act" id="btnCopiarDotacion">Copiar este día a los demás</button>
+            <button class="act" id="btnLimpiarDot">Limpiar</button>
+            <button class="act" id="btnDeshacerDot" disabled>Deshacer</button>
+          </div>
+          <p class="msg" id="msgDot"></p>
+        </details>
+      </div>
+      <div class="card">
+        <h2>Por persona</h2>
+        <ul class="people" id="semPersonas"></ul>
+      </div>
+    </div>
+
+    <div class="panel" id="p-eq" role="tabpanel" aria-labelledby="tab-eq" hidden>
+      <div class="card">
+        <h2>Equipo</h2>
+        <p class="hint">Sin RUT, sin dirección, sin teléfono: solo lo que hace falta para armar turnos y repartir propinas.<br>
+          El <b>puesto habitual</b> es solo el que se propone al asignar un turno: en la malla puedes cambiarlo turno por turno.</p>
+        <div id="eqLista"></div>
+        <div class="acciones" style="margin-top:14px">
+          <button class="act" id="btnPersona">Agregar persona</button>
+          <button class="act" id="btnCerrarSemana">Cerrar la semana al saldo</button>
+          <button class="act" id="btnLimpiarEq">Limpiar</button>
+          <button class="act" id="btnDeshacerEq" disabled>Deshacer</button>
+        </div>
+        <div class="acciones" style="margin-top:10px">
+          <button class="act" id="btnPlantilla">Descargar plantilla</button>
+          <button class="act" id="btnCargar">Cargar desde una planilla</button>
+          <input type="file" id="archivoEq" accept=".csv,text/csv,text/plain" hidden>
+        </div>
+        <p class="hint" style="margin-top:6px">Baja la plantilla, llénala en Excel y guárdala
+          como <b>CSV</b>. Si tu planilla trae RUT, teléfono o correo, <b>esas columnas se ignoran</b>:
+          la app no guarda esos datos.</p>
+        <div id="previaEq"></div>
+        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+        <h3 style="font-size:.9375rem;margin:0 0 6px">Para probar y mostrar</h3>
+        <p class="hint">Crea un local aparte llamado <b>«Ejemplo»</b>, con su propia gente y una
+          semana completa: turnos, marcas, alguien que llegó tarde, alguien que no marcó, una
+          ausencia, un turno sin asignar y las propinas repartidas.
+          <b>No toca ninguno de tus locales</b> — para volver al tuyo, lo eliges arriba.</p>
+        <div class="acciones">
+          <button class="act" id="btnEjemplo">Llenar con datos de ejemplo</button>
+        </div>
+        <p class="msg" id="msgEjemplo"></p>
+        <hr style="border:0;border-top:1px solid var(--line);margin:18px 0">
+        <h3 style="font-size:.9375rem;margin:0 0 6px">Borrar este local</h3>
+        <p class="hint">Se borra el local <b>con todo lo suyo</b>: su gente, sus turnos, su malla,
+          sus marcas y sus propinas. <b>No se puede deshacer.</b> Sirve para limpiar locales de
+          prueba que quedaron dando vueltas.</p>
+        <div class="acciones"><button class="act" id="btnBorrarLocal">Borrar este local</button></div>
+        <p class="msg" id="msgBorrarLocal"></p>
+        <p class="msg" id="msgEq"></p>
+        <p class="hint" style="margin-top:8px">«Cerrar la semana al saldo» suma a cada persona la diferencia entre las horas que le planificaste y las de su contrato. Hazlo <b>una vez por semana</b>.</p>
+      </div>
+      <div class="card">
+        <h2>Turnos del local</h2>
+        <p class="hint">Si el fin es menor que el inicio, se entiende que cruza la medianoche.</p>
+        <div id="eqTurnos"></div>
+        <div class="acciones" style="margin-top:14px"><button class="act" id="btnTurno">Agregar turno</button></div>
+        <label class="ctrl" style="margin-top:14px;display:flex;gap:8px;align-items:flex-start;max-width:60ch">
+          <input type="checkbox" id="bloqTope" style="width:auto;margin-top:3px">
+          <span>No dejar que alguien tome un turno sin asignar si <b>se pasa de sus horas contratadas</b>.
+          <i>Si lo dejas apagado, lo puede tomar igual.</i></span>
+        </label>
+      </div>
+      <div class="card">
+        <h2>Puestos del local</h2>
+        <p class="hint">Barra, Cocina, Garzón… Al cambiarle el nombre a uno,
+          <b>se cambia también en toda la gente y en todos los turnos</b> que lo tengan.</p>
+        <div id="eqPuestos"></div>
+        <div class="acciones" style="margin-top:14px"><button class="act" id="btnPuesto">Agregar puesto</button></div>
+        <p class="msg" id="msgPuestos"></p>
+      </div>
+    </div>
+
+    <div class="panel" id="p-prop" role="tabpanel" aria-labelledby="tab-prop" hidden>
+      <p class="note"><b>Esto no lo decide el jefe.</b> Por el <b>art. 64</b> del Código del Trabajo, cómo se reparte la propina lo acuerdan los trabajadores. Esta pantalla solo aplica el acuerdo: horas × factor, día por día.</p>
+      <div class="card">
+        <h2>Lo que se juntó</h2>
+        <p class="hint">Separado en efectivo y tarjeta: la de tarjeta sale del cierre de la máquina y el equipo la puede contrastar.</p>
+        <div id="propDias"></div>
+        <div class="kpis" id="propKpis" style="margin-top:16px"></div>
+      </div>
+
+      <div class="card">
+        <h2>Costo de personal sobre la venta</h2>
+        <p class="hint">El indicador que de verdad mira un dueño.</p>
+        <div class="kpis" id="cobKpis" style="margin-bottom:14px"></div>
+        <div class="grid2" style="max-width:220px">
+          <div class="fld"><label for="objetivoPct">Objetivo %</label>
+            <input class="n" type="number" id="objetivoPct" min="1" max="100" step="1"></div>
+        </div>
+        <ul class="people" id="cobDias" style="margin-top:14px"></ul>
+      </div>
+      <div class="card">
+        <h2>El reparto</h2>
+        <div class="scroll"><table class="prop" id="tablaProp"><thead><tr id="propCab"></tr></thead><tbody id="propCuerpo"></tbody><tfoot id="propPie"></tfoot></table></div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-conf" role="tabpanel" aria-labelledby="tab-conf" hidden>
+      <div class="card">
+        <h2>Control horario</h2>
+        <p class="hint">Lo que planificaste, lo que marcó cada uno y <b>lo que se le paga</b>.
+          La hora de las marcas la pone el servidor, no el teléfono de la persona.</p>
+        <div class="acciones diatabs" id="relojTabs" style="margin-bottom:10px"></div>
+        <div class="scroll"><table class="reloj"><thead id="relojCab"></thead><tbody id="relojCuerpo"></tbody></table></div>
+        <div class="acciones" style="margin-top:12px">
+          <button class="act primary" id="btnCerrarDia">Cerrar el día</button>
+          <button class="act" id="btnMarcarTodos">Marcar el día completo</button>
+          <button class="act" id="btnBorrarMarcas">Borrar las marcas</button>
+          <span class="hint" id="relojEstado"></span>
+        </div>
+        <p class="msg" id="msgReloj"></p>
+      </div>
+
+      <div class="card">
+        <h2>Qué contestó cada uno</h2>
+        <p class="hint">Se actualiza solo cuando alguien marca desde su teléfono.
+          Aprieta cualquier casilla para marcar tú por esa persona.</p>
+        <div class="leyenda" id="confLeyenda"></div>
+        <div id="confAlertas"></div>
+        <div class="kpis" id="pcrKpis" style="margin:14px 0"></div>
+        <p class="hint" style="margin:0 0 10px"><b>Planificado contra real.</b> Esto <b>no</b> son horas para liquidar sueldos — eso sería el registro legal de asistencia y necesita certificación de la DT. Es cobertura y puntualidad: cuánto de lo que planificaste tiene a alguien que dijo que llegó.</p>
+        <ul class="people" id="pcrDetalle"></ul>
+        <div class="scroll" style="margin-top:12px"><table class="conf"><thead><tr id="confCab"></tr></thead><tbody id="confCuerpo"></tbody></table></div>
+      </div>
+    </div>
+
+    <div class="panel" id="p-link" role="tabpanel" aria-labelledby="tab-link" hidden>
+      <div class="card">
+        <h2>El link de cada persona</h2>
+        <p class="hint">Cada uno abre <b>solo su semana</b>, sin cuenta ni clave. Mándalo por WhatsApp.</p>
+        <div id="linkLista"></div>
+      </div>
+      <div class="card">
+        <h2>Mensaje para WhatsApp</h2>
+        <div class="acciones">
+          <button class="act primary" id="btnCopiarPub">Copiar todos</button>
+          <span class="msg" id="msgPub"></span>
+        </div>
+        <textarea class="out" id="salidaPub" readonly aria-label="Mensajes por persona"></textarea>
+      </div>
+    </div>
+  </div>
+
+  <footer>Malla de Turnos · <span id="pie"></span></footer>
+</div>
+
+<dialog id="dlgModelos" class="dlg">
+  <form method="dialog" id="formModelos">
+    <h3>Modelos de semana</h3>
+    <p class="hint">Un modelo guarda <b>la forma</b> de una semana: qué días, a qué horas y en qué
+      puesto. Se guarda el día de la semana y no la fecha, así que sirve para cualquier semana.
+      <b>Las ausencias no entran</b>, para que no se dupliquen.</p>
+
+    <!-- Aplicar va PRIMERO: es lo que se hace todas las semanas. Guardar se hace
+         una vez y despues casi nunca, asi que va abajo. -->
+    <div class="fld">
+      <label for="pModelo">Aplicar un modelo</label>
+      <select id="pModelo"></select>
+    </div>
+    <div class="fld" id="cajaPPersonas">
+      <label>Quiénes entran <span class="hint" id="pTodos"></span></label>
+      <div class="acciones diapills" id="pPersonas"></div>
+    </div>
+    <div class="fld">
+      <label class="chk"><input type="checkbox" id="pSinAsignar"><span>Pegar
+        <b>solo la forma</b>, como turnos sin asignar</span></label>
+    </div>
+    <div class="fld">
+      <label>En cuántas semanas seguidas, desde la que estás viendo</label>
+      <div class="acciones diapills" id="pSemanas"></div>
+    </div>
+    <p class="hint">Al aplicar se <b>pisan los turnos</b> de esas semanas. Las ausencias que ya
+      estén puestas se respetan.</p>
+    <div class="acciones">
+      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
+      <button type="button" class="act" id="pBorrar" hidden>Eliminar este modelo</button>
+    </div>
+
+    <hr class="sepdlg">
+
+    <div class="fld">
+      <label for="pNombre">Guardar la semana que estás viendo como modelo nuevo</label>
+      <div class="acciones">
+        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
+        <button type="button" class="act" id="pGuardar">Guardar</button>
+      </div>
+    </div>
+
+    <p class="msg" id="pMsg"></p>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="pCerrar">Cerrar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgCopiar" class="dlg">
+  <form method="dialog" id="formCopiar">
+    <h3 id="cTit">Copiar</h3>
+    <p class="hint" id="cSub"></p>
+
+    <!-- vista DIA: a que otros dias de esta semana va -->
+    <div id="cDia" hidden>
+      <div class="fld">
+        <label>¿A qué días?</label>
+        <div class="acciones diapills" id="cDias"></div>
+      </div>
+    </div>
+
+    <!-- vista SEMANA: traer la anterior, o empujar esta hacia adelante -->
+    <div id="cSemana" hidden>
+      <div class="fld">
+        <label>¿Qué quieres hacer?</label>
+        <div class="acciones diapills" id="cQue">
+          <button type="button" class="act dia on" data-que="adelante" aria-pressed="true">Copiar ESTA semana a las siguientes</button>
+          <button type="button" class="act dia" data-que="anterior" aria-pressed="false">Traer la semana ANTERIOR sobre esta</button>
+        </div>
+      </div>
+      <div class="fld" id="cCajaSem">
+        <label>¿A cuántas semanas?</label>
+        <div class="acciones diapills" id="cSemanas"></div>
+      </div>
+    </div>
+
+    <p class="hint">Se <b>pisan los turnos</b> del destino. Las <b>ausencias se respetan</b>:
+      ni se copian ni se borran, y a quien tenga una no se le pega un turno encima.</p>
+    <p class="msg" id="cMsg"></p>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="cCerrar">Cerrar</button>
+      <button type="button" class="act primary" id="cCopiar">Copiar</button>
+    </div>
+  </form>
+</dialog>
+
+<dialog id="dlgTurno" class="dlg">
+  <form method="dialog" id="formTurno">
+    <h3 id="dlgTit">Agregar turno</h3>
+    <p class="hint" id="dlgSub"></p>
+
+    <div class="dlgtabs">
+      <button type="button" class="act primary" id="tabTurno">Turno</button>
+      <button type="button" class="act" id="tabAus">Ausencia</button>
+    </div>
+
+    <div id="paneTurno">
+      <div class="fldrow">
+        <!-- Campo propio en vez de `type="time"`: el control nativo usa el formato
+             del sistema de cada uno, asi que a Pedro le salia «09:00 p.m.» adentro
+             del dialogo y «21:00» en la malla. Probado: `lang` NO lo fuerza. -->
+        <div class="fld"><label for="dEntra">Entra</label>
+          <input type="text" id="dEntra" class="hora" inputmode="numeric" maxlength="5"
+                 placeholder="08:00" autocomplete="off" required></div>
+        <div class="fld"><label for="dSale">Sale</label>
+          <input type="text" id="dSale" class="hora" inputmode="numeric" maxlength="5"
+                 placeholder="16:30" autocomplete="off" required></div>
+        <div class="fld"><label for="dPausa">Colación (min)</label><input type="number" id="dPausa" class="n" min="0" max="240" step="5" value="30"></div>
+        <div class="fld"><label>Duración</label><input type="text" id="dDura" class="n" readonly tabindex="-1"></div>
+      </div>
+      <div class="fldrow">
+        <div class="fld" id="cajaPersona"><label for="dPersona">Quién lo cubre</label><select id="dPersona"></select></div>
+        <div class="fld"><label for="dPlantilla">Plantilla</label><select id="dPlantilla"></select></div>
+        <div class="fld"><label for="dPuesto">Puesto</label><select id="dPuesto"></select></div>
+      </div>
+      <div class="fld"><label for="dNota">Nota</label><input type="text" id="dNota" maxlength="120" placeholder="opcional"></div>
+      <div class="fld" id="cajaPersonas">
+        <label>Quiénes lo cubren</label>
+        <div class="acciones diapills" id="dPersonas"></div>
+      </div>
+      <div class="fld" id="cajaRepetir">
+        <label>Repetir también en</label>
+        <div class="acciones diapills" id="dRepetir"></div>
+      </div>
+    </div>
+
+    <div id="paneAus" hidden>
+      <div class="fld"><label for="dAusencia">Motivo</label><select id="dAusencia"></select></div>
+      <p class="hint">La ausencia es una por día y reemplaza a los turnos que tenga ese día.</p>
+    </div>
+
+    <p class="msg" id="dlgMsg"></p>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="dCancelar">Cerrar</button>
+      <button type="button" class="act" id="dBorrar" hidden>Eliminar</button>
+      <button type="button" class="act primary" id="dGuardar">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
+<script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
+<script src="config.js?v=30"></script>
+<script src="datos.js?v=69"></script>
+<script src="app.js?v=87"></script>
+
+
+</body>
+</html>

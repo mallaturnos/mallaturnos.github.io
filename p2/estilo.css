@@ -1,0 +1,696 @@
+/* Mismos colores y tipografías del prototipo: la web no se ve "otra cosa". */
+:root{
+  --bg:#f3f5f6; --surface:#fff; --surface-2:#e9edee; --surface-3:#dfe4e6;
+  --fg:#181f21; --fg-dim:#5a686c; --fg-faint:#8a979b; --line:#d3dadc;
+  --accent:#175d63; --accent-soft:#e3eff0; --accent-fg:#fff;
+  --ok:#2c6a44; --ok-soft:#dfeee4;
+  --warn:#8a5600; --warn-soft:#f7ebd5;
+  --bad:#97242a; --bad-soft:#f8e2e2;
+  --font-display:'Archivo','Helvetica Neue',Arial,sans-serif;
+  --font-body:'IBM Plex Sans','Segoe UI',system-ui,sans-serif;
+  --font-mono:'IBM Plex Mono','SF Mono',Consolas,monospace;
+  color-scheme:light;
+}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]){
+  --bg:#13171a; --surface:#1b2024; --surface-2:#22282d; --surface-3:#2b3238;
+  --fg:#e7ebed; --fg-dim:#9aa6ad; --fg-faint:#77848b; --line:#2e353b;
+  --accent:#58bfc6; --accent-soft:#123437; --accent-fg:#0b1113;
+  --ok:#74c189; --ok-soft:#16301f;
+  --warn:#d9a441; --warn-soft:#332711;
+  --bad:#e87c82; --bad-soft:#3a1c1e;
+  color-scheme:dark;
+}}
+:root[data-theme="dark"]{
+  --bg:#13171a; --surface:#1b2024; --surface-2:#22282d; --surface-3:#2b3238;
+  --fg:#e7ebed; --fg-dim:#9aa6ad; --fg-faint:#77848b; --line:#2e353b;
+  --accent:#58bfc6; --accent-soft:#123437; --accent-fg:#0b1113;
+  --ok:#74c189; --ok-soft:#16301f;
+  --warn:#d9a441; --warn-soft:#332711;
+  --bad:#e87c82; --bad-soft:#3a1c1e;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{margin:0;background:var(--bg);color:var(--fg);font-family:var(--font-body);line-height:1.5}
+/* 860px servían cuando esto era un formulario. Con la malla de 7 días por 8
+   personas, en un monitor ancho se desperdiciaba media pantalla y la tabla se
+   cortaba igual. Los textos no se estiran: .sub y .hint ya tienen su propio
+   límite en ch para que la línea se siga leyendo. */
+.wrap{max-width:1600px;margin:0 auto;padding:24px 20px 56px}
+h1,h2{font-family:var(--font-display);margin:0;letter-spacing:-.01em;text-wrap:balance}
+h1{font-size:clamp(1.5rem,4vw,2rem);font-weight:700}
+h2{font-size:1.0625rem;font-weight:600}
+.eyebrow{font-size:.6875rem;font-weight:600;letter-spacing:.09em;text-transform:uppercase;color:var(--fg-faint);margin:0}
+.sub{color:var(--fg-dim);font-size:.875rem;margin-top:4px;max-width:60ch}
+.card{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:16px;margin-top:20px}
+.card>h2{margin-bottom:2px}
+.hint{margin:0 0 14px;font-size:.75rem;color:var(--fg-faint);max-width:70ch}
+
+ul.checks{list-style:none;margin:10px 0 0;padding:0;display:flex;flex-direction:column;gap:9px}
+ul.checks li{display:flex;gap:9px;align-items:flex-start;font-size:.875rem}
+.pt{flex:0 0 auto;width:1.35em;height:1.35em;border-radius:50%;display:inline-flex;
+  align-items:center;justify-content:center;font-size:.75rem;font-weight:700;
+  background:var(--surface-3);color:var(--fg-faint)}
+li.ok   .pt{background:var(--ok-soft);  color:var(--ok)}
+li.bad  .pt{background:var(--bad-soft); color:var(--bad)}
+li.warn .pt{background:var(--warn-soft);color:var(--warn)}
+
+.form{display:flex;flex-direction:column;gap:12px;max-width:380px}
+/* Cualquier regla nuestra con `display:` le gana al `hidden` del navegador, y
+   entonces algo que se mandó a esconder se sigue viendo. Paso justo con
+   «Repetir también en», que es solo para turnos nuevos y aparecia tambien al
+   editar, porque .fld trae display:flex. Se corta de raiz para toda la app. */
+[hidden]{display:none !important}
+
+.fld{display:flex;flex-direction:column;gap:3px}
+.fld label{font-size:.6875rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint)}
+.fld input{font-family:var(--font-body);font-size:.9375rem;padding:9px 10px;border:1px solid var(--line);
+  border-radius:4px;background:var(--bg);color:var(--fg);width:100%}
+.fld input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.acciones{display:flex;flex-wrap:wrap;gap:8px;align-items:center}
+button.act{font-family:var(--font-body);font-size:.875rem;font-weight:500;padding:10px 16px;border-radius:4px;
+  border:1px solid var(--line);background:var(--surface);color:var(--fg);cursor:pointer}
+button.act.primary{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+button.act:hover{border-color:var(--accent)}
+button.act:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+button.act:disabled{opacity:.55;cursor:not-allowed}
+.msg{font-size:.8125rem;margin:0;min-height:1.2em}
+.msg.bad{color:var(--bad)} .msg.ok{color:var(--ok)}
+footer{margin-top:40px;padding-top:16px;border-top:1px solid var(--line);
+  font-size:.75rem;color:var(--fg-faint);font-family:var(--font-mono)}
+@media (prefers-reduced-motion:reduce){*{transition:none!important;animation:none!important}}
+
+/* ===== cabecera y pestañas ===== */
+header{display:flex;flex-wrap:wrap;gap:16px;align-items:flex-end;justify-content:space-between;margin-bottom:4px}
+nav{display:flex;gap:2px;flex-wrap:wrap;margin:22px 0 0;border-bottom:1px solid var(--line)}
+nav button{font-family:var(--font-body);font-size:.8125rem;font-weight:500;padding:9px 14px;
+  border:1px solid transparent;border-bottom:none;border-radius:4px 4px 0 0;background:transparent;
+  color:var(--fg-dim);cursor:pointer;margin-bottom:-1px}
+nav button[aria-selected="true"]{background:var(--surface);border-color:var(--line);color:var(--fg);font-weight:600}
+nav button:focus-visible{outline:2px solid var(--accent);outline-offset:-2px}
+.panel{padding-top:4px}
+.note{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--warn);
+  border-radius:4px;padding:12px 14px;margin-top:20px;font-size:.8125rem;color:var(--fg-dim)}
+.note b{color:var(--fg)}
+h2.secc{font-size:.9375rem;margin:22px 0 10px}
+.vacio{font-size:.8125rem;color:var(--fg-faint);padding:10px 0;text-align:center}
+.num{font-family:var(--font-mono);font-weight:400;opacity:.65;margin-left:4px}
+
+/* ===== tabla de la semana ===== */
+.scroll{overflow-x:auto;border:1px solid var(--line);border-radius:6px;background:var(--surface)}
+table{border-collapse:collapse;width:100%;min-width:760px}
+th,td{border-bottom:1px solid var(--line);padding:0;text-align:left}
+thead th{background:var(--surface-2);font-size:.6875rem;font-weight:600;letter-spacing:.07em;
+  text-transform:uppercase;color:var(--fg-dim);padding:9px 10px;white-space:nowrap}
+thead th.fin{color:var(--accent)}
+tbody th{padding:8px 10px;font-weight:500;font-size:.8125rem;vertical-align:middle;min-width:140px;background:var(--surface)}
+tbody th .rol{display:block;font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
+td.cell{padding:4px;min-width:92px}
+td.tot{padding:8px 10px;white-space:nowrap;background:var(--surface-2)}
+tr.sumrow th,tr.sumrow td{background:var(--surface-2);font-size:.75rem;padding:7px 10px;
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums;border-bottom:none}
+select.turno{width:100%;appearance:none;border:1px solid transparent;border-radius:3px;
+  font-family:var(--font-mono);font-size:.75rem;font-weight:500;padding:7px 4px;text-align:center;
+  background:var(--surface-3);color:var(--fg-dim);cursor:pointer}
+select.turno:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+select.turno[data-c="1"]{background:#cde3e5;color:#0f4247}
+select.turno[data-c="2"]{background:#ecdcc0;color:#57411a}
+select.turno[data-c="3"]{background:#d7d1e6;color:#37305a}
+select.turno[data-c="4"]{background:#dde5cf;color:#3a4a26}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) select.turno[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) select.turno[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) select.turno[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) select.turno[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+.hcell{font-family:var(--font-mono);font-size:.8125rem;font-variant-numeric:tabular-nums}
+.hcell.over{color:var(--bad);font-weight:600}
+.semnav{display:flex;gap:8px;align-items:center;flex-wrap:wrap;margin-bottom:14px}
+.semnav b{font-family:var(--font-mono);font-size:.9375rem}
+
+/* ===== lista por persona ===== */
+ul.people{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:10px}
+ul.people li{display:flex;flex-direction:column;gap:5px;padding-bottom:10px;border-bottom:1px solid var(--line)}
+ul.people li:last-child{border-bottom:0;padding-bottom:0}
+.prow{display:flex;justify-content:space-between;gap:10px;align-items:baseline}
+.pname{font-weight:500;font-size:.875rem}
+.pstat{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-dim);white-space:nowrap}
+.bar{height:5px;background:var(--surface-3);border-radius:3px;overflow:hidden}
+.bar i{display:block;height:100%;background:var(--accent);border-radius:3px}
+.bar i.over{background:var(--bad)}
+.flags{display:flex;flex-wrap:wrap;gap:4px}
+.flag{font-size:.6875rem;font-weight:500;padding:2px 7px;border-radius:3px;line-height:1.5}
+.flag.bad{background:var(--bad-soft);color:var(--bad)}
+.flag.warn{background:var(--warn-soft);color:var(--warn)}
+.flag.info{background:var(--accent-soft);color:var(--accent)}
+.flag.ok{background:var(--ok-soft);color:var(--ok)}
+
+/* ===== filas de edición ===== */
+.rowline{display:grid;grid-template-columns:minmax(0,1.4fr) minmax(0,1fr) minmax(0,.8fr) minmax(0,.8fr) minmax(0,.8fr) auto;
+  gap:8px;align-items:end;max-width:1100px;
+  padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+@media (max-width:760px){.rowline{grid-template-columns:1fr 1fr}}
+.rowline:last-of-type{border-bottom:0;margin-bottom:0}
+/* la persona recien agregada: la lista va ordenada por puesto, asi que no cae
+   debajo del boton sino donde le toca — se marca para que se vea cual es */
+.rowline.recien{outline:2px solid var(--accent);outline-offset:6px;border-radius:3px;
+  animation:aparece 1.6s ease-out}
+@keyframes aparece{0%{background:var(--accent-soft)}100%{background:transparent}}
+button.act[disabled]{opacity:.45;cursor:not-allowed}
+.grid2{display:grid;grid-template-columns:repeat(auto-fit,minmax(150px,260px));gap:10px;
+  justify-content:start}
+.fld input.n{font-family:var(--font-mono);text-align:right}
+button.mini{font-size:.75rem;padding:7px 10px;border:1px solid var(--line);border-radius:3px;
+  background:var(--surface);color:var(--fg-dim);cursor:pointer;white-space:nowrap;align-self:end}
+button.mini:hover{border-color:var(--bad);color:var(--bad)}
+
+/* ===== propinas ===== */
+.diaplata{display:grid;grid-template-columns:90px repeat(3,minmax(0,200px));gap:10px;align-items:end;
+  justify-content:start;
+  padding-bottom:12px;margin-bottom:12px;border-bottom:1px solid var(--line)}
+@media (max-width:700px){.diaplata{grid-template-columns:1fr 1fr}}
+.diaplata:last-child{border-bottom:0;margin-bottom:0}
+.diaplata-h{font-weight:600;font-size:.8125rem;padding-bottom:9px}
+table.prop{min-width:720px}
+table.prop td,table.prop th.r{padding:7px 10px;font-family:var(--font-mono);font-size:.75rem;font-variant-numeric:tabular-nums}
+table.prop th.r{font-family:var(--font-body);font-weight:500;min-width:140px}
+table.prop td.fin{background:var(--accent-soft)}
+.kpis{display:grid;grid-template-columns:repeat(auto-fit,minmax(140px,1fr));gap:12px}
+.kpi{background:var(--surface-2);border-radius:5px;padding:11px 12px}
+.kpi .k{font-size:.625rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--fg-faint)}
+.kpi .v{font-family:var(--font-mono);font-size:1.0625rem;font-weight:600;margin-top:2px}
+.kpi .v.good{color:var(--ok)} .kpi .v.alert{color:var(--bad)}
+.kpi .n{font-size:.6875rem;color:var(--fg-dim);margin-top:1px}
+
+/* ===== turnos abiertos ===== */
+.abi{display:flex;flex-direction:column;gap:10px}
+.abicard{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--warn);
+  border-radius:5px;padding:12px 13px;display:flex;flex-wrap:wrap;gap:10px;justify-content:space-between;align-items:center}
+.abicard.tomado{border-left-color:var(--ok)}
+.abicard .qué{min-width:0}
+.abicard .qué b{font-size:.875rem;display:block}
+.abicard .qué span{font-size:.75rem;color:var(--fg-dim);font-family:var(--font-mono)}
+.abicard .qué em{display:block;font-size:.75rem;color:var(--fg-faint);font-style:normal;margin-top:2px}
+.abiest{display:flex;gap:8px;align-items:center;flex-wrap:wrap}
+
+/* ===== links ===== */
+.linkrow{display:grid;grid-template-columns:1fr auto;gap:8px;align-items:center;padding:9px 0;border-bottom:1px solid var(--line)}
+.linkrow:last-child{border-bottom:0}
+.linkrow code{font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-dim);word-break:break-all}
+.linkrow b{font-size:.8125rem;display:block}
+textarea.out{width:100%;font-family:var(--font-mono);font-size:.6875rem;padding:10px;line-height:1.6;
+  border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg-dim);min-height:200px}
+
+/* ===== vista del trabajador ===== */
+#vistaTrab{max-width:560px}
+.diacard{background:var(--surface);border:1px solid var(--line);border-radius:6px;padding:13px 14px;
+  display:flex;flex-direction:column;gap:10px;margin-bottom:10px}
+.diacard.libre{background:transparent;border-style:dashed}
+.diahead{display:flex;justify-content:space-between;align-items:baseline;gap:10px}
+.diafecha{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-faint);text-transform:uppercase}
+.diaturno{font-weight:600;font-size:.9375rem}
+.diahoras{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-dim)}
+.btns{display:flex;gap:8px;flex-wrap:wrap}
+.btns button{flex:1 1 auto;min-width:104px;font-family:var(--font-body);font-size:.8125rem;font-weight:500;
+  padding:11px 12px;border-radius:4px;border:1px solid var(--line);background:var(--bg);color:var(--fg);cursor:pointer}
+.btns button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);border-color:var(--accent);font-weight:600}
+.btns button.no[aria-pressed="true"]{background:var(--bad);border-color:var(--bad);color:#fff}
+.btns button:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+.avisoro{background:var(--warn-soft);color:var(--warn);border-radius:4px;padding:11px 13px;font-size:.8125rem;margin-bottom:16px}
+.platita{background:var(--accent-soft);border-radius:6px;padding:14px;margin-bottom:16px}
+.platita .k{font-size:.625rem;font-weight:600;letter-spacing:.07em;text-transform:uppercase;color:var(--accent)}
+.platita .v{font-family:var(--font-mono);font-size:1.5rem;font-weight:600;color:var(--accent);line-height:1.2}
+.platita .n{font-size:.75rem;color:var(--fg-dim);margin-top:4px}
+
+/* fila que separa los puestos dentro de la malla */
+tr.grupo th{background:var(--surface-3);font-size:.6875rem;font-weight:700;letter-spacing:.09em;
+  text-transform:uppercase;color:var(--fg-dim);padding:7px 10px;min-width:0}
+tr.grupo th span{font-family:var(--font-mono);font-weight:500;opacity:.6;margin-left:6px;letter-spacing:0}
+.diahoras .prop{display:block;color:var(--accent);font-weight:600;margin-top:3px}
+table.conf{min-width:660px}
+table.conf td{padding:6px;text-align:center}
+table.conf th.r{padding:8px 10px;font-size:.8125rem;font-weight:500;min-width:140px}
+.mk{display:inline-flex;flex-direction:column;gap:1px;align-items:center;line-height:1.2}
+.mk b{font-size:.9375rem;font-weight:700;letter-spacing:-.04em}
+.mk em{font-style:normal;font-size:.625rem;letter-spacing:.02em}
+.mk.llego  b,.mk.llego  em{color:var(--ok)}
+.mk.conf   b,.mk.conf   em{color:var(--accent)}
+.mk.nopuede b,.mk.nopuede em{color:var(--bad)}
+.mk.nada   b,.mk.nada   em{color:var(--fg-faint)}
+.mk.alerta b,.mk.alerta em{color:var(--warn)}
+.mk.alerta{background:var(--warn-soft);border-radius:4px}
+.leyenda{display:flex;flex-wrap:wrap;gap:16px;padding:10px 12px;background:var(--surface-2);border-radius:5px;margin-bottom:4px}
+.soloHoy{margin:0;font-size:.75rem;color:var(--fg-faint)}
+.mk[data-p]{cursor:pointer;border-radius:4px;padding:3px 5px}
+.mk[data-p]:hover{background:var(--surface-2)}
+.mk[data-p]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.porjefe{font-size:.5625rem;font-style:normal;color:var(--fg-faint);letter-spacing:.06em;text-transform:uppercase}
+
+/* ===== modos de vista ===== */
+.modos{display:inline-flex;gap:0;border:1px solid var(--line);border-radius:4px;overflow:hidden}
+.modos button{border:0;border-radius:0;padding:8px 13px;font-size:.8125rem;background:var(--surface);color:var(--fg-dim)}
+.modos button + button{border-left:1px solid var(--line)}
+.modos button[aria-pressed="true"]{background:var(--accent);color:var(--accent-fg);font-weight:600}
+.semnav .sep{flex:1}
+
+/* ===== vista del día ===== */
+.turnodia{background:var(--surface);border:1px solid var(--line);border-left:3px solid var(--accent);
+  border-radius:5px;padding:12px 14px;margin-bottom:10px}
+.turnodia-h{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;margin-bottom:8px}
+.turnodia-h b{font-size:.9375rem}
+.turnodia-h span{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-dim)}
+.turnodia ul{list-style:none;margin:0;padding:0;display:flex;flex-direction:column;gap:6px}
+.turnodia li{display:flex;gap:8px;align-items:center;flex-wrap:wrap;font-size:.875rem}
+.turnodia li .rol{font-family:var(--font-mono);font-size:.75rem;color:var(--fg-faint)}
+
+/* ===== vista del mes ===== */
+table.mes{min-width:900px}
+table.mes thead th{padding:6px 2px;text-align:center;min-width:46px}  /* cabe «08:00» */
+table.mes thead th .dsem{display:block;font-weight:400;opacity:.5}
+table.mes th.r{padding:6px 10px;font-size:.8125rem;font-weight:500;min-width:150px}
+table.mes th.r .rol{display:block;font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
+td.mcel{text-align:center;font-family:var(--font-mono);font-size:.6875rem;font-weight:600;
+  padding:5px 2px;color:var(--fg-dim)}
+td.mcel[data-c="1"]{background:#cde3e5;color:#0f4247}
+td.mcel[data-c="2"]{background:#ecdcc0;color:#57411a}
+td.mcel[data-c="3"]{background:#d7d1e6;color:#37305a}
+td.mcel[data-c="4"]{background:#dde5cf;color:#3a4a26}
+td.mcel.aus{background:var(--surface-3);font-style:italic}
+@media (prefers-color-scheme:dark){:root:not([data-theme="light"]) td.mcel[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) td.mcel[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) td.mcel[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) td.mcel[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+
+/* ===== imprimir: solo la malla, con espacio para firmar ===== */
+@media print{
+  nav, .semnav, .note, .hint, #hAcciones, footer, #semPersonas, .panel[hidden],
+  #p-eq, #p-prop, #p-abi, #p-conf, #p-link, #diag, #cardLogin, #cardLocal { display:none !important }
+  body{background:#fff}
+  .wrap{max-width:none;padding:0}
+  .card{border:0;padding:0;margin:0}
+  .scroll{overflow:visible;border:0}
+  table{min-width:0;width:100%;font-size:10pt}
+  thead th{background:#eee !important;-webkit-print-color-adjust:exact;print-color-adjust:exact}
+  select.turno{appearance:none;border:0;background:transparent !important;color:#000 !important;
+    text-align:left;font-size:9pt;padding:2px}
+  td.cell{min-width:0}
+  tr{break-inside:avoid}
+  h1{font-size:14pt;margin-bottom:2pt}
+  /* columna para que cada persona firme su horario */
+  tbody th::after{content:"";display:block;border-bottom:1px solid #999;width:70%;margin-top:14pt}
+  tbody th{padding-bottom:4pt}
+}
+#tConfTodo{margin-bottom:4px}
+#tConfTodo button{width:100%;padding:13px;font-size:.9375rem}
+#tConfTodo button span{display:block;font-size:.75rem;font-weight:400;opacity:.85;margin-top:2px}
+#filtroPuesto,#filtroEquipo{font-family:var(--font-body);font-size:.8125rem;padding:9px 10px;border:1px solid var(--line);
+  border-radius:4px;background:var(--surface);color:var(--fg);max-width:190px}
+#filtroPuesto.activo,#filtroEquipo.activo{border-color:var(--accent);color:var(--accent);font-weight:600;background:var(--accent-soft)}
+#filtroPuesto:focus-visible,#filtroEquipo:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ===== cobertura hora por hora ===== */
+.cov{display:flex;flex-direction:column;gap:6px;min-width:540px}
+.covrow{display:grid;grid-template-columns:38px 1fr;gap:8px;align-items:center}
+.covday{font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-dim);text-transform:uppercase}
+.covbars{display:grid;gap:1px}
+.covbars span{height:24px;border-radius:2px;background:var(--surface-3);display:flex;align-items:center;
+  justify-content:center;font-family:var(--font-mono);font-size:.625rem;color:var(--fg-faint)}
+.covbars span.over{background:var(--accent);color:var(--accent-fg)}
+.covbars span.justo{background:var(--warn-soft);color:var(--warn);font-weight:600}
+.covbars span.falta{background:var(--bad-soft);color:var(--bad);font-weight:700}
+.covscale{display:grid;grid-template-columns:38px 1fr;gap:8px;margin-top:3px;min-width:540px}
+.covscale div:last-child{display:grid;gap:1px;font-family:var(--font-mono);font-size:.5625rem;
+  color:var(--fg-faint);text-align:center}
+.needrow{display:grid;grid-template-columns:38px 1fr;gap:8px;align-items:center;min-width:540px;margin-bottom:6px}
+.needrow>div:last-child{display:grid;gap:1px}
+.needrow input{width:100%;font-family:var(--font-mono);font-size:.6875rem;padding:5px 0;text-align:center;
+  border:1px solid var(--line);border-radius:2px;background:var(--bg);color:var(--fg);-moz-appearance:textfield}
+.needrow input::-webkit-outer-spin-button,.needrow input::-webkit-inner-spin-button{-webkit-appearance:none;margin:0}
+.needrow input:focus-visible{outline:2px solid var(--accent);outline-offset:0}
+
+/* ===== disponibilidad en el equipo ===== */
+.dispo{grid-column:1/-1;display:flex;flex-wrap:wrap;gap:5px;align-items:center;margin-top:4px}
+.dispo span{font-size:.6875rem;font-weight:600;letter-spacing:.05em;text-transform:uppercase;color:var(--fg-faint)}
+.dispo .dia{font-family:var(--font-mono);font-size:.6875rem;padding:4px 8px;border:1px solid var(--line);
+  border-radius:3px;background:var(--surface);color:var(--fg-faint);cursor:pointer}
+.dispo .dia.no{background:var(--bad-soft);border-color:var(--bad);color:var(--bad);font-weight:700}
+.dispo .dia:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* ===== ofrecer turno ===== */
+button.ofrecer{width:100%;font-family:var(--font-body);font-size:.8125rem;padding:9px;border-radius:4px;
+  border:1px dashed var(--line);background:transparent;color:var(--fg-dim);cursor:pointer}
+button.ofrecer:hover{border-color:var(--accent);color:var(--accent)}
+.ofrecido{margin:0;font-size:.75rem;color:var(--warn);background:var(--warn-soft);
+  padding:8px 10px;border-radius:4px}
+#hLocales{gap:6px}
+#selLocal{font-family:var(--font-body);font-size:.875rem;font-weight:600;padding:9px 10px;
+  border:1px solid var(--line);border-radius:4px;background:var(--surface);color:var(--fg);max-width:220px}
+#selLocal:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.diatabs button{min-width:52px;padding:8px 10px}
+#detNecesita{margin-top:16px;border-top:1px solid var(--line);padding-top:12px}
+#detNecesita summary{cursor:pointer;font-size:.8125rem;font-weight:600;color:var(--accent);
+  list-style:none;display:flex;align-items:center;gap:6px}
+#detNecesita summary::-webkit-details-marker{display:none}
+#detNecesita summary::before{content:"▸";transition:transform .15s}
+#detNecesita[open] summary::before{transform:rotate(90deg)}
+#detNecesita summary:focus-visible{outline:2px solid var(--accent);outline-offset:2px}
+
+/* fila de turnos sin dueño, arriba de la malla */
+tr.noasig th{background:var(--warn-soft);color:var(--warn);font-weight:600}
+tr.noasig th .rol{color:var(--warn);opacity:.75}
+tr.noasig td{background:var(--warn-soft);cursor:pointer}
+tr.noasig:hover td{filter:brightness(.98)}
+.chip{display:inline-block;font-family:var(--font-mono);font-size:.625rem;font-weight:600;
+  padding:3px 6px;border-radius:3px;background:var(--surface);color:var(--warn);
+  border:1px solid currentColor;margin:1px}
+.chip.tomado{background:var(--ok-soft);color:var(--ok)}
+/* diferencia contra el contrato, bajo las horas */
+.hcell .dif{display:block;font-size:.625rem;font-weight:600;margin-top:1px}
+.hcell .dif.mas{color:var(--warn)}
+.hcell .dif.menos{color:var(--fg-faint)}
+.hcell .dif.justo{color:var(--ok);font-weight:500}
+
+/* ===== cobertura por turno: una línea por día, una celda por turno ===== */
+.cobfila{display:grid;grid-template-columns:92px 1fr;gap:8px;align-items:center;margin-bottom:6px;min-width:420px}
+.cobcels{display:grid;gap:6px}
+.cobcel{border-radius:5px;padding:8px 10px;border:1px solid var(--line);background:var(--surface)}
+.cobcel b{display:block;font-size:.75rem}
+.cobcel span{font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-dim)}
+.cobcel.falta{background:var(--bad-soft);border-color:var(--bad)}
+.cobcel.falta span{color:var(--bad);font-weight:700}
+.cobcel.sobra{background:var(--warn-soft);border-color:var(--warn)}
+.cobcel.sobra span{color:var(--warn);font-weight:600}
+.cobcel.ok{background:var(--ok-soft);border-color:var(--ok-soft)}
+.cobcel.ok span{color:var(--ok)}
+/* tabla de "cuánta necesito": puestos en filas, turnos en columnas */
+table.neces{min-width:0;width:auto}
+table.neces th{padding:6px 10px;font-size:.75rem;text-align:left}
+table.neces thead th{background:transparent;text-transform:none;letter-spacing:0;color:var(--fg)}
+table.neces thead th .num{display:block;font-weight:400;opacity:.6}
+table.neces td{padding:4px}
+table.neces input{width:62px;font-family:var(--font-mono);font-size:.875rem;padding:7px;text-align:center;
+  border:1px solid var(--line);border-radius:4px;background:var(--bg);color:var(--fg)}
+table.neces input:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+
+/* Puesto sin llenar. Antes el ejemplo gris «Garzón» parecia un valor puesto y la
+   persona quedaba sin puesto sin que nadie lo notara; ahora el campo lo dice, y
+   en la malla el grupo «Sin puesto» avisa que esa gente no entra en la cobertura. */
+.fld input.falta{border-color:var(--bad);background:var(--bad-soft)}
+tr.grupo.sinpuesto th{background:var(--bad-soft);color:var(--bad)}
+tr.grupo.sinpuesto th .ojo{font-family:var(--font-body);font-weight:500;text-transform:none;
+  letter-spacing:0;margin-left:10px;opacity:.85}
+
+/* El puesto de cada turno, debajo del horario en la misma casilla, como Skello.
+   Va chico y sin borde para que no compita con el turno: se lee, y solo se
+   nota que es editable al pasar por encima. */
+.cell select.puestoCell{display:block;width:100%;margin-top:3px;border:1px solid transparent;
+  background:transparent;color:var(--fg-faint);font-family:var(--font-body);font-size:.6875rem;
+  padding:1px 3px;border-radius:3px;cursor:pointer;text-overflow:ellipsis}
+.cell select.puestoCell:hover{border-color:var(--line);color:var(--fg)}
+.cell select.puestoCell:focus-visible{outline:2px solid var(--accent);outline-offset:1px;color:var(--fg)}
+
+/* La casilla deja de ser un desplegable y pasa a ser una PILA de bloques, como
+   en Skello: un bloque por turno, apilados, y abajo el botón de agregar. Es lo
+   que permite ver de un vistazo quién dobla el mismo día. */
+.cell .bloque{display:block;width:100%;margin-bottom:3px;padding:4px 6px;border-radius:5px;
+  cursor:pointer;text-align:left;border:1px solid transparent;position:relative;
+  background:var(--surface-2);color:var(--fg)}
+.cell .bloque b{display:inline-block;font-family:var(--font-mono);font-size:.6875rem;font-weight:600}
+.cell .bloque i{float:right;font-family:var(--font-mono);font-size:.625rem;font-style:normal;opacity:.7}
+.cell .bloque em{display:block;font-style:normal;font-size:.6875rem;opacity:.85;
+  white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.cell .bloque:hover{border-color:var(--accent)}
+.cell .bloque:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.cell .bloque[data-c="1"]{background:#cde3e5;color:#0f4247}
+.cell .bloque[data-c="2"]{background:#ecdcc0;color:#57411a}
+.cell .bloque[data-c="3"]{background:#d7d1e6;color:#37305a}
+.cell .bloque[data-c="4"]{background:#dde5cf;color:#3a4a26}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]) .cell .bloque[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) .cell .bloque[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) .cell .bloque[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) .cell .bloque[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+:root[data-theme="dark"] .cell .bloque[data-c="1"]{background:#1e4348;color:#bfe2e5}
+:root[data-theme="dark"] .cell .bloque[data-c="2"]{background:#453b26;color:#e9d6b0}
+:root[data-theme="dark"] .cell .bloque[data-c="3"]{background:#353050;color:#cec8e6}
+:root[data-theme="dark"] .cell .bloque[data-c="4"]{background:#2f3a24;color:#cfdcbb}
+.cell .bloque.aus{background:var(--surface-3);color:var(--fg-dim);font-size:.6875rem}
+.cell .anadir{width:100%;border:1px dashed var(--line);background:transparent;color:var(--fg-faint);
+  border-radius:5px;padding:3px;font-size:.6875rem;cursor:pointer;font-family:var(--font-body)}
+.cell .anadir:hover{border-color:var(--accent);color:var(--accent)}
+
+/* El diálogo del turno */
+.dlg{border:0;border-radius:10px;padding:0;max-width:540px;width:calc(100% - 32px);
+  background:var(--surface);color:var(--fg);box-shadow:0 10px 40px rgba(0,0,0,.25)}
+.dlg::backdrop{background:rgba(0,0,0,.45)}
+.dlg form{padding:20px}
+.dlg h3{margin:0 0 2px;font-size:1.0625rem}
+.dlg .hint{margin:0 0 14px}
+.dlgtabs{display:flex;gap:6px;margin-bottom:14px}
+.fldrow{display:grid;grid-template-columns:repeat(auto-fit,minmax(132px,1fr));gap:10px;margin-bottom:12px}
+/* En 12 h el campo muestra «08:00 a. m.» y con poco ancho el navegador lo
+   recorta a «08:00 a.r». Hay que darle aire. */
+.fldrow .fld input[type="time"]{min-width:118px}
+.diapills{flex-wrap:wrap;gap:4px}
+.diapills .dia.on{background:var(--accent);color:#fff;border-color:var(--accent)}
+.dlgpie{margin-top:16px;justify-content:flex-end}
+@media (max-width:560px){ .dlg form{padding:16px} }
+/* El día del propio turno va marcado y bloqueado: se ve que está incluido. */
+.diapills .dia:disabled{opacity:1;cursor:default}
+
+/* Basurero por bloque: borrar sin abrir el diálogo. Va SIEMPRE visible y no
+   solo al pasar el mouse, porque en el teléfono no existe el «pasar por
+   encima» y Pedro trabaja desde el teléfono. */
+.cell .bloque{padding-right:18px}
+.cell .bloque b{white-space:nowrap}
+.cell .borrarbl{position:absolute;top:1px;right:1px;width:16px;height:16px;line-height:14px;
+  padding:0;border:0;border-radius:4px;background:transparent;color:inherit;opacity:.45;
+  cursor:pointer;font-size:.8125rem;font-family:var(--font-body)}
+.cell .borrarbl:hover{opacity:1;background:var(--bad-soft);color:var(--bad)}
+.cell .borrarbl:focus-visible{opacity:1;outline:2px solid var(--accent);outline-offset:1px}
+
+/* Vista del mes: la casilla muestra el HORARIO y no una inicial. Del video de
+   Skello — el mes sirve para ver el patrón («tres garzones todos los sábados,
+   acá falta alguien»), y con una letra por día no se ve ningún patrón. */
+td.mcel{padding:2px}
+.mcel .mbl{display:block;font-family:var(--font-mono);font-size:.5625rem;line-height:1.25;
+  padding:2px 3px;border-radius:4px;margin-bottom:2px;white-space:nowrap;
+  background:var(--surface-2);color:var(--fg)}
+.mcel .mbl:last-child{margin-bottom:0}
+.mcel .mbl[data-c="1"]{background:#cde3e5;color:#0f4247}
+.mcel .mbl[data-c="2"]{background:#ecdcc0;color:#57411a}
+.mcel .mbl[data-c="3"]{background:#d7d1e6;color:#37305a}
+.mcel .mbl[data-c="4"]{background:#dde5cf;color:#3a4a26}
+.mcel .mbl.aus{background:var(--surface-3);color:var(--fg-faint);font-family:var(--font-body);
+  overflow:hidden;text-overflow:ellipsis;max-width:46px}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) .mcel .mbl[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+:root[data-theme="dark"] .mcel .mbl[data-c="1"]{background:#1e4348;color:#bfe2e5}
+:root[data-theme="dark"] .mcel .mbl[data-c="2"]{background:#453b26;color:#e9d6b0}
+:root[data-theme="dark"] .mcel .mbl[data-c="3"]{background:#353050;color:#cec8e6}
+:root[data-theme="dark"] .mcel .mbl[data-c="4"]{background:#2f3a24;color:#cfdcbb}
+
+/* Columna fina entre domingo y lunes: parte el mes en semanas legibles.
+   Va con el mismo peso que `table.mes thead th`, que fija 46px de ancho
+   mínimo para que quepa «08:00»: sin esta especificidad, el separador se
+   comía 46px por semana. Medido en el navegador, no supuesto. */
+table.mes thead th.corte,
+table.mes td.corte{width:8px;min-width:8px;max-width:8px;padding:0;
+  background:var(--surface-3);border:0}
+
+/* Fila al pie con las horas de cada día y el total del mes. */
+tr.piemes th,tr.piemes td{background:var(--surface-2);font-weight:600;position:sticky;bottom:0}
+td.mpie{font-family:var(--font-mono);font-size:.625rem;text-align:center;color:var(--fg-dim)}
+
+/* El reloj control del trabajador: una tarjeta por turno, porque con turno
+   partido «llegué» una vez al día no significa nada. */
+.turnocard{border:1px solid var(--line);border-radius:8px;padding:10px 12px;margin-top:8px}
+.turnocard.dentro{border-color:var(--ok);background:var(--ok-soft)}
+.turnocard-h{display:flex;align-items:baseline;gap:8px;margin-bottom:6px}
+.turnocard-h b{font-family:var(--font-mono);font-size:.9375rem}
+.turnocard .marcado{margin:0 0 8px;font-size:.8125rem;color:var(--fg-dim)}
+.turnocard .btns{margin:0}
+.turnocard button.reloj{background:var(--accent);color:#fff;border-color:var(--accent);font-weight:600}
+.turnocard button.reloj.sale{background:var(--warn);border-color:var(--warn);color:#fff}
+
+/* Control horario: tres columnas en paralelo — previsto, marcado y lo que se
+   paga. La tercera es editable a propósito: el jefe decide, pero decide
+   VIENDO contra qué. */
+table.reloj{width:100%}
+table.reloj th,table.reloj td{padding:7px 8px;border-bottom:1px solid var(--line);text-align:left}
+table.reloj thead th{font-size:.6875rem;text-transform:uppercase;letter-spacing:.06em;
+  color:var(--fg-faint);background:var(--surface-2)}
+table.reloj td.n{font-family:var(--font-mono);font-size:.8125rem}
+table.reloj td.n .num{display:block;font-size:.6875rem;opacity:.6}
+table.reloj th.r .rol{display:block;font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
+table.reloj input.paga{width:80px;font-family:var(--font-mono);text-align:right;
+  padding:5px 7px;border:1px solid var(--line);border-radius:5px;background:var(--surface)}
+table.reloj .sinmarca{color:var(--fg-faint);font-style:italic}
+/* Fila marcada cuando lo real se aparta de lo planificado: es justo lo que hay
+   que mirar antes de decidir qué se paga. */
+table.reloj tr.difiere td.n{background:var(--warn-soft)}
+/* En el mes también se edita: la casilla vacía se ofrece al pasar por encima. */
+td.mcel[data-p]{cursor:pointer}
+td.mcel.vacia:hover{background:var(--surface-2);box-shadow:inset 0 0 0 1px var(--accent)}
+.mcel .mbl[data-asig]:hover{box-shadow:inset 0 0 0 1px var(--accent)}
+/* En el día también se edita: la línea de cada persona abre su turno. */
+.turnodia li[data-asig]{cursor:pointer;border-radius:5px;padding:3px 5px;margin:0 -5px}
+.turnodia li[data-asig]:hover{background:var(--surface-2)}
+.turnodia li[data-asig]:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+/* Los títulos de las columnas de dotación son los turnos y se pueden abrir. */
+table.neces .turnoEd{background:transparent;border:0;padding:4px 6px;border-radius:5px;
+  cursor:pointer;color:inherit;font:inherit;font-weight:600;text-align:center}
+table.neces .turnoEd .num{display:block;font-family:var(--font-mono);font-weight:400;
+  font-size:.6875rem;opacity:.6}
+table.neces .turnoEd:hover{background:var(--surface-2);color:var(--accent)}
+table.neces .turnoEd.nuevo{font-weight:500;color:var(--fg-faint);border:1px dashed var(--line)}
+/* Muestra del color del puesto, para elegirlo viéndolo y no por número. */
+.rowline .muestra{align-self:end;padding:5px 9px;border-radius:5px;font-size:.75rem;
+  font-weight:600;text-align:center;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.rowline .muestra[data-c="1"]{background:#cde3e5;color:#0f4247}
+.rowline .muestra[data-c="2"]{background:#ecdcc0;color:#57411a}
+.rowline .muestra[data-c="3"]{background:#d7d1e6;color:#37305a}
+.rowline .muestra[data-c="4"]{background:#dde5cf;color:#3a4a26}
+table.neces th .turnoEd{font-weight:500}
+/* Turno sin dueño en la malla: se distingue del asignado con un borde cortado. */
+.cell .bloque.libre{border:1px dashed var(--fg-faint);background:var(--surface-2)}
+.cell .bloque.libre em{font-style:italic}
+
+/* Vista del día como LÍNEA DE TIEMPO. Las horas corren de izquierda a derecha
+   y cada turno es una barra que ocupa su tramo, así los huecos se ven en vez
+   de calcularse. Antes era una lista de tarjetas por horario y Pedro dijo
+   «sigo sin entender Día»: el problema era el formato, no la explicación. */
+.linea{border:1px solid var(--line);border-radius:8px;background:var(--surface);overflow:hidden}
+.linea-cab,.linea-fila{display:grid;grid-template-columns:160px 1fr;align-items:stretch}
+.linea-fila{border-top:1px solid var(--line)}
+.linea-quien{padding:8px 10px;border-right:1px solid var(--line);background:var(--surface-2);
+  display:flex;flex-direction:column;justify-content:center;min-width:0}
+.linea-quien b{font-size:.8125rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.linea-quien .rol{font-size:.6875rem;color:var(--fg-faint);font-family:var(--font-mono)}
+.linea-cab .linea-quien{background:transparent;border-right-color:transparent}
+/* La pista crece con los CARRILES: dos turnos que se pisan no pueden quedar uno
+   encima del otro, porque se veria solo uno. --carriles lo pone el JS por fila. */
+.linea-pista{position:relative;min-height:calc(var(--carriles, 1) * 46px);cursor:pointer}
+.linea-cab .linea-pista{min-height:24px}
+.hmarca{position:absolute;top:4px;transform:translateX(-50%);font-family:var(--font-mono);
+  font-size:.625rem;color:var(--fg-faint);white-space:nowrap}
+.hlinea{position:absolute;top:0;bottom:0;width:1px;background:var(--line)}
+/* Cada barra en su carril: alto fijo y desplazada hacia abajo por el suyo.
+   Sin `bottom`, que peleaba con la altura por carril. */
+.barra{position:absolute;top:calc(var(--carril, 0) * 46px + 5px);height:36px;border-radius:5px;padding:3px 6px;overflow:hidden;
+  display:flex;flex-direction:column;justify-content:center;min-width:0;
+  background:var(--surface-3);color:var(--fg)}
+.barra b{font-family:var(--font-mono);font-size:.625rem;white-space:nowrap}
+.barra em{font-style:normal;font-size:.6875rem;white-space:nowrap;overflow:hidden;text-overflow:ellipsis}
+.barra:hover{box-shadow:inset 0 0 0 2px var(--accent)}
+.barra:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
+.barra[data-c="1"]{background:#cde3e5;color:#0f4247}
+.barra[data-c="2"]{background:#ecdcc0;color:#57411a}
+.barra[data-c="3"]{background:#d7d1e6;color:#37305a}
+.barra[data-c="4"]{background:#dde5cf;color:#3a4a26}
+.barra.libre{border:1px dashed var(--fg-faint);background:var(--surface-2)}
+.barra .marcado{position:absolute;top:2px;right:4px;font-style:normal;color:var(--ok);font-size:1rem;line-height:1}
+@media (prefers-color-scheme:dark){
+ :root:not([data-theme="light"]) .barra[data-c="1"]{background:#1e4348;color:#bfe2e5}
+ :root:not([data-theme="light"]) .barra[data-c="2"]{background:#453b26;color:#e9d6b0}
+ :root:not([data-theme="light"]) .barra[data-c="3"]{background:#353050;color:#cec8e6}
+ :root:not([data-theme="light"]) .barra[data-c="4"]{background:#2f3a24;color:#cfdcbb}}
+:root[data-theme="dark"] .barra[data-c="1"]{background:#1e4348;color:#bfe2e5}
+:root[data-theme="dark"] .barra[data-c="2"]{background:#453b26;color:#e9d6b0}
+:root[data-theme="dark"] .barra[data-c="3"]{background:#353050;color:#cec8e6}
+:root[data-theme="dark"] .barra[data-c="4"]{background:#2f3a24;color:#cfdcbb}
+@media (max-width:640px){ .linea-cab,.linea-fila{grid-template-columns:110px 1fr} }
+/* Botones para marcar por la persona, en la tabla del control horario. */
+table.reloj td.marcar{white-space:nowrap}
+table.reloj td.marcar .mini{margin-right:4px}
+
+/* Cambio entre agrupar por Personas o por Puestos, pegados como un solo control. */
+.segm{display:inline-flex}
+.segm .act{border-radius:0}
+.segm .act:first-child{border-radius:6px 0 0 6px}
+.segm .act:last-child{border-radius:0 6px 6px 0;margin-left:-1px}
+
+/* Vista por puestos: debajo de cada día, cuánta gente y cuántas horas. Es la
+   cobertura metida en la misma pantalla, como lo hace Skello. */
+.cell .cuenta{display:block;margin-top:3px;font-family:var(--font-mono);font-size:.625rem;
+  color:var(--fg-faint);text-align:center}
+
+/* Diálogo de modelos de semana: un separador y la fila de la casilla. */
+.sepdlg{border:0;border-top:1px solid var(--line);margin:16px 0 4px}
+/* Casilla con su frase al lado. Tiene DOS trampas, las dos vistas en pantalla el
+   04-10 y no en el codigo:
+
+   1. ESPECIFICIDAD. `.fld label` (0,1,1) le gana a `.chk` (0,1,0), asi que la
+      frase salia en versalitas, chica y tenue —estilo de rotulo de campo— en vez
+      de como texto. Por eso el selector va como `.fld label.chk`.
+   2. `.fld input` esta pensado para campos de texto y estiraba la casilla a 485px
+      de ancho, que es lo que la dejaba flotando sola y centrada sobre la frase.
+      Hay que devolverle su tamaño con `width:auto` y sacarle relleno y borde.
+
+   Nada de flex aca: con `display:block` el texto fluye y envuelve solo. */
+.fld label.chk{display:block;font-size:.8125rem;font-weight:400;letter-spacing:0;
+  text-transform:none;color:var(--fg);line-height:1.45}
+.fld label.chk input[type="checkbox"]{width:auto;min-width:0;padding:0;border:0;
+  margin:0 8px 0 0;vertical-align:-2px;accent-color:var(--accent)}
+
+/* Arrastrar un turno a otro día o persona. El bloque que viaja se atenúa y la
+   casilla de destino se marca: sin las dos señales uno suelta a ciegas. */
+.bloque[draggable="true"]{cursor:grab}
+.bloque.llevando{opacity:.4;cursor:grabbing}
+td.cell.encima,td.mcel.encima{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accent-soft)}
+.mbl[draggable="true"]{cursor:grab}
+.mbl.llevando{opacity:.4;cursor:grabbing}
+
+/* La necesidad por hora, arriba de la línea de tiempo del día. Cada celda dice
+   cuánta gente HAY y cuánta se NECESITA; el color acompaña, pero el resumen de
+   abajo lo dice en palabras, que es lo que se lee sin interpretar nada. */
+.necdia{border:1px solid var(--line);border-radius:6px;padding:12px 13px;margin-bottom:14px;background:var(--surface)}
+.nectit{font-weight:600;margin-bottom:9px}
+.nectit .hint{font-weight:400;margin-left:8px}
+.hnfila{display:grid;gap:2px}
+.hncel{border-radius:4px;padding:5px 2px;text-align:center;font-family:var(--font-mono);font-size:.6875rem;line-height:1.25}
+.hncel .hnh{display:block;color:var(--fg-faint);font-size:.625rem}
+.hncel b{font-size:.8125rem}
+.hncel i{font-style:normal;color:var(--fg-faint)}
+.hncel.justo{background:var(--ok-soft);color:var(--ok)}
+.hncel.falta{background:var(--bad-soft);color:var(--bad)}
+.hncel.sobra{background:var(--warn-soft);color:var(--warn)}
+.necres{margin:9px 0 0;font-size:.875rem}
+.necres.bad{color:var(--bad)}
+.necres.ok{color:var(--ok)}
+
+/* Destino del arrastre en la línea de tiempo del día. */
+.linea-pista.encima{background:var(--accent-soft);box-shadow:inset 0 0 0 2px var(--accent)}
+.barra[draggable="true"]{cursor:grab}
+.barra.llevando{opacity:.4;cursor:grabbing}
+
+/* Tiras para estirar y acortar un turno en la línea de tiempo del día. Anchas
+   para el dedo (10px) pero discretas: solo se ven al pasar por encima.
+   OJO: NO poner aqui `.barra{position:relative}` — la barra ya es `absolute`
+   mas arriba y una regla posterior con la misma especificidad se la pisa,
+   dejando todos los turnos amontonados al principio del dia. `absolute` ya
+   sirve de contenedor para las tiras. */
+.tira{position:absolute;top:0;bottom:0;width:10px;cursor:ew-resize;opacity:0;
+  background:var(--accent);border-radius:4px;transition:opacity .12s}
+.tira.izq{left:0}
+.tira.der{right:0}
+.barra:hover .tira,.barra:focus-within .tira{opacity:.45}
+.tira:hover{opacity:.8 !important}
+.barra.estirando{box-shadow:inset 0 0 0 2px var(--accent)}
+.barra.estirando .tira{opacity:.8}
+
+/* Rótulo que separa, en «quiénes lo cubren», la gente del puesto del resto.
+   Ocupa la fila completa para que las pastillas que siguen queden debajo. */
+.pillcap{flex:0 0 100%;font-size:.625rem;font-weight:600;letter-spacing:.05em;
+  text-transform:uppercase;color:var(--fg-faint);margin:4px 0 -2px}
+.pillcap:first-child{margin-top:0}
+
+/* En «quiénes lo cubren», quien ya tiene turno ese día lo muestra debajo del
+   nombre. No se bloquea: el turno partido es legítimo; se avisa antes de elegir. */
+.act.dia.ocupada{flex-direction:column;align-items:flex-start;gap:0;line-height:1.2}
+.act.dia .yatiene{display:block;font-family:var(--font-mono);font-size:.5625rem;
+  opacity:.7;font-weight:400}
+
+/* Campos de hora propios, en 24 h: monoespaciados y angostos para que se lean
+   como hora y no como texto libre. */
+.fld input.hora{font-family:var(--font-mono);letter-spacing:.04em;max-width:130px}

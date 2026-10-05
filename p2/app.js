@@ -1,0 +1,4057 @@
+/* Malla de Turnos — aplicación.
+   Dos vistas en un mismo archivo:
+   - El DUEÑO entra con sesión y ve todo lo de su local.
+   - El TRABAJADOR abre la página con #sutoken y ve SOLO su semana.
+   La separación no es de pantalla: es de permisos, y vive en la base. */
+'use strict';
+
+const $ = s => document.querySelector(s);
+const SIN_CONECTAR = [];
+const on = (sel, ev, fn) => {
+  const n = document.querySelector(sel);
+  if (n) n.addEventListener(ev, fn);
+  else { SIN_CONECTAR.push(sel); console.warn('falta el elemento', sel, '— sigo igual'); }
+};
+const el = (t, c, h) => { const n = document.createElement(t); if (c) n.className = c; if (h != null) n.innerHTML = h; return n; };
+const esc = s => String(s == null ? '' : s).replace(/[&<>"]/g, c => ({ '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;' }[c]));
+
+const DIAS = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
+const AUSENCIAS = { L:'Libre', V:'Vacaciones', E:'Licencia', F:'Falta' };
+
+const clp  = n => '$' + Math.round(n || 0).toLocaleString('es-CL');
+const hfmt = n => (n || 0).toLocaleString('es-CL', { minimumFractionDigits:1, maximumFractionDigits:1 });
+const pfmt = n => isFinite(n) ? n.toLocaleString('es-CL',{minimumFractionDigits:1,maximumFractionDigits:1}) + ' %' : '—';
+// Un atraso en minutos se lee hasta la hora; «307 min» no se lee. Pedro:
+// «no es mejor en horas? tipo 1 hora 30 tarde».
+const minFmt = n => {
+  n = Math.round(Math.abs(n));
+  if (n < 60) return n + ' min';
+  const h = Math.floor(n / 60), m = n % 60;
+  return h + ' h' + (m ? ' ' + m + ' min' : '');
+};
+const hhmm = h => { const t = ((h % 24) + 24) % 24, m = Math.round((t - Math.floor(t)) * 60);
+  return String(Math.floor(t)).padStart(2,'0') + ':' + String(m).padStart(2,'0'); };
+// Campos de plata: se escriben y se leen como $20.000, no como 20000.
+const soloDigitos = v => String(v == null ? '' : v).replace(/[^\d]/g, '');
+const aPlata = n => '$' + Number(n || 0).toLocaleString('es-CL');
+const dePlata = v => Number(soloDigitos(v) || 0);
+
+const aDec = s => { const [h,m] = String(s||'0:00').split(':').map(Number); return h + (m||0)/60; };
+
+/* ---------- fechas: la semana empieza el lunes ---------- */
+const iso = d => d.getFullYear() + '-' + String(d.getMonth()+1).padStart(2,'0') + '-' + String(d.getDate()).padStart(2,'0');
+function lunesDe(d) { const x = new Date(d); const n = (x.getDay() + 6) % 7; x.setDate(x.getDate() - n); x.setHours(0,0,0,0); return x; }
+const masDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); return x; };
+const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
+
+let sb = null;
+const S = { local:null, personas:[], turnos:[], puestos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
+            lunes:lunesDe(new Date()), mes:new Date(), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
+            hist:[], histDot:[], histEq:[], recien:null, relojDia:null, agrupar:'personas', modelos:[] };
+
+/* ---------- deshacer ----------
+   Antes de cualquier cambio en la malla se guarda una foto de como estaba el
+   rango que se ve en pantalla. Deshacer repone esa foto tal cual. Se guardan
+   las ultimas 20: es un paso atras de verdad, no un historial eterno. */
+const MAX_HIST = 20;
+function recordar(que) {
+  const r = rango();
+  // S.asign guarda una LISTA por casilla desde que existe el turno partido, y
+  // la foto tiene que llevarse las horas: sin ellas, deshacer repondria turnos
+  // vacios que el CHECK de la base rechaza.
+  // Los turnos SIN DUEÑO van tambien en la foto. `reponerAsignaciones` borra el
+  // rango entero y repone lo fotografiado: si no estuvieran aca, deshacer
+  // CUALQUIER cambio los borraria en silencio. Se nota poco hasta que existen
+  // en cantidad, y desde los modelos de semana con «solo la forma» existen.
+  // Solo los que no tienen persona: `S.abiertos` trae ademas los turnos
+  // OFRECIDOS, que siguen siendo de alguien y ya estan en S.asign.
+  const filas = Object.values(S.asign).flat()
+    .concat(S.abiertos.filter(a => !a.persona_id))
+    .filter(a => a.fecha >= r.desde && a.fecha <= r.hasta)
+    .map(a => ({ persona_id:a.persona_id, fecha:a.fecha, turno_id:a.turno_id,
+                 ausencia:a.ausencia, inicio:a.inicio, fin:a.fin,
+                 colacion:a.colacion, puesto:a.puesto, nota:a.nota }));
+  S.hist.push({ desde:r.desde, hasta:r.hasta, filas, que: que || 'el ultimo cambio' });
+  if (S.hist.length > MAX_HIST) S.hist.shift();
+  pintarDeshacer();
+}
+/* Un paso atras sobre un rango que NO es el que se esta viendo.
+
+   `recordar()` fotografia `S.asign`, que solo tiene lo que la vista cargo. Al
+   copiar esta semana a las tres siguientes, esas semanas no estan cargadas: la
+   foto saldria vacia y Deshacer, en vez de reponerlas, BORRARIA lo que hubiera
+   ahi. Por eso esta lee el rango de la base antes de tocarlo.
+
+   Vale lo mismo en la vista de Dia, donde `rango()` es un solo dia y copiar a
+   otros seis se saldria de la foto. */
+async function recordarDeLaBase(que, desde, hasta) {
+  const filas = (await DATOS.asignaciones(S.local.id, desde, hasta) || []).map(a => ({
+    persona_id: a.persona_id, fecha: a.fecha, turno_id: a.turno_id,
+    ausencia: a.ausencia, inicio: a.inicio, fin: a.fin,
+    colacion: a.colacion, puesto: a.puesto, nota: a.nota,
+  }));
+  S.hist.push({ desde, hasta, filas, que: que || 'el ultimo cambio' });
+  if (S.hist.length > MAX_HIST) S.hist.shift();
+  pintarDeshacer();
+}
+
+function pintarDeshacer() {
+  const b = $('#btnDeshacer'); if (!b) return;
+  const h = S.hist[S.hist.length - 1];
+  b.disabled = !h;
+  b.title = h ? 'Deshacer ' + h.que : 'No hay nada que deshacer';
+}
+async function deshacer() {
+  const h = S.hist.pop(); if (!h) return;
+  const m = $('#msgSem');
+  try {
+    await DATOS.reponerAsignaciones(S.local.id, h.desde, h.hasta, h.filas);
+    await refrescar();
+    if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
+  } catch (e) {
+    S.hist.push(h);                      // no se pudo: el paso atras sigue ahi
+    if (m) { m.textContent = e.message; m.className = 'msg bad'; }
+  }
+  pintarDeshacer();
+  setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 5000);
+}
+
+/* ---------- deshacer de la DOTACION ----------
+   Se guarda la dotacion COMPLETA, no el dia que se ve: 'copiar este dia a los
+   demas' toca seis dias de una, y un paso atras que repusiera solo uno dejaria
+   la mitad del cambio puesto. Son unas decenas de numeros: cabe de sobra. */
+function fotoDotacion() {
+  const filas = [];
+  for (const perfil of Object.keys(S.dotacion))
+    for (const puesto of Object.keys(S.dotacion[perfil]))
+      for (const turnoId of Object.keys(S.dotacion[perfil][puesto]))
+        filas.push({ perfil, puesto, turno_id:turnoId, cantidad:S.dotacion[perfil][puesto][turnoId] });
+  return filas;
+}
+function recordarDot(que) {
+  S.histDot.push({ filas: fotoDotacion(), que: que || 'el ultimo cambio' });
+  if (S.histDot.length > MAX_HIST) S.histDot.shift();
+  pintarDeshacerDot();
+}
+function pintarDeshacerDot() {
+  const b = $('#btnDeshacerDot'); if (!b) return;
+  const h = S.histDot[S.histDot.length - 1];
+  b.disabled = !h;
+  b.title = h ? 'Deshacer ' + h.que : 'No hay nada que deshacer';
+}
+async function deshacerDot() {
+  const h = S.histDot.pop(); if (!h) return;
+  const m = $('#msgDot');
+  try {
+    await DATOS.reponerDotacion(S.local.id, h.filas);
+    await refrescar();
+    $('#detNecesita').open = true;
+    if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
+  } catch (e) {
+    S.histDot.push(h);                   // no se pudo: el paso atras sigue ahi
+    if (m) { m.textContent = e.message; m.className = 'msg bad'; }
+  }
+  pintarDeshacerDot();
+  setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 5000);
+}
+
+/* ---------- deshacer del EQUIPO ----------
+   Quitar a alguien es baja logica (activo = false), nunca un borrado: sus
+   turnos y sus marcas siguen ahi. Por eso aca basta con guardar los ids y el
+   paso atras repone exactamente lo que habia, sin perder historial. */
+function recordarEq(ids, que) {
+  if (!ids.length) return;
+  S.histEq.push({ ids, que: que || 'el ultimo cambio' });
+  if (S.histEq.length > MAX_HIST) S.histEq.shift();
+  pintarDeshacerEq();
+}
+function pintarDeshacerEq() {
+  const b = $('#btnDeshacerEq'); if (!b) return;
+  const h = S.histEq[S.histEq.length - 1];
+  b.disabled = !h;
+  b.title = h ? 'Deshacer ' + h.que : 'No hay nada que deshacer';
+}
+async function deshacerEq() {
+  const h = S.histEq.pop(); if (!h) return;
+  const m = $('#msgEq');
+  try {
+    await DATOS.activarPersonas(h.ids, true);
+    await refrescar();
+    if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
+  } catch (e) {
+    S.histEq.push(h);
+    if (m) { m.textContent = e.message; m.className = 'msg bad'; }
+  }
+  pintarDeshacerEq();
+  setTimeout(() => { const x = $('#msgEq'); if (x) x.textContent = ''; }, 5000);
+}
+
+// La franja horaria no se fija a mano: sale de los turnos que tenga el local.
+// Un café que cierra a las 19 no tiene por qué mirar columnas hasta la 1 AM.
+function franja() {
+  if (!S.turnos.length) return { h0: 8, h1: 24 };
+  const ini = Math.floor(Math.min(...S.turnos.map(t => Number(t.inicio))));
+  const fin = Math.ceil(Math.max(...S.turnos.map(t => Number(t.fin))));
+  return { h0: Math.max(0, ini), h1: Math.min(ini + 24, Math.max(fin, ini + 1)) };
+}
+// Un perfil por día de la semana: 0 = lunes … 6 = domingo. Viernes, sábado y
+// domingo no se parecen en nada, y meterlos en un mismo "fin de semana"
+// obliga a poner un número que no sirve para ninguno de los tres.
+const perfilDe = fecha => String((new Date(fecha + 'T00:00:00').getDay() + 6) % 7);
+// La dotación va por DÍA DE LA SEMANA, PUESTO y TURNO.
+// Por hora eran 350+ casillas que nadie llena; por turno son 63 y además es
+// como piensa un dueño: "el sábado en la tarde necesito tres garzones".
+const necesita = (perfil, puesto, turnoId) => ((S.dotacion[perfil] || {})[puesto] || {})[turnoId] || 0;
+
+// El puesto que se trabaja ESE turno. Si la asignacion no lo trae (una vieja,
+// de antes del cambio), vale el habitual de la persona.
+const puestoDe = (a, p) => ((a && a.puesto) || '').trim() || ((p && p.rol) || '').trim();
+const puestoRot = (a, p) => puestoDe(a, p) || 'Sin puesto';
+
+// cuánta gente de ese puesto tiene ese turno asignado ese día. Cuenta el puesto
+// DE LA ASIGNACION: si Camila hace barra el lunes, cuenta en barra ese lunes
+// aunque su puesto habitual sea garzón.
+const asignados = (fecha, turnoId, puesto) => {
+  const t = turnoDe(turnoId); if (!t) return 0;
+  return S.personas.reduce((n, p) => n + (turnosDe(p.id, fecha).some(a =>
+    (puesto ? puestoRot(a, p) === puesto : true) && solapan(a, t)) ? 1 : 0), 0);
+};
+// Dos bloques se pisan si comparten aunque sea un minuto. Se compara por horas
+// y no por turno_id porque un turno asignado puede no venir de ninguna
+// plantilla: se le escribieron las horas y ya.
+const solapan = (a, t) => Number(a.inicio) < Number(t.fin) && Number(t.inicio) < Number(a.fin);
+
+// Todos los puestos que existen: los habituales del equipo MAS los que se usan
+// en alguna asignacion. Sin esto, un puesto que solo se trabaja de vez en
+// cuando no aparece para elegirlo ni para pedir dotacion.
+// Del catálogo si lo hay. Si todavía no se aplicó `arreglo-puestos.sql`, se
+// siguen deduciendo de la gente y de los turnos, como antes: la app no puede
+// quedar inservible por un SQL pendiente.
+const puestosConocidos = () => {
+  if (S.puestos.length) return S.puestos.map(x => x.nombre);
+  return [...new Set([
+    ...S.personas.map(p => (p.rol || '').trim()),
+    ...Object.values(S.asign).flat().map(a => (a.puesto || '').trim()),
+  ].filter(Boolean))].sort();
+};
+const puestoCat = nombre => S.puestos.find(x =>
+  normal(x.nombre) === normal(nombre)) || null;
+
+// El filtro por puesto aplica a las tres vistas del plan. No toca las propinas
+// ni las confirmaciones: el reparto tiene que considerar SIEMPRE a todo el
+// equipo, aunque en pantalla estés mirando solo la cocina.
+/* ---------- el color de un turno ----------
+   Sale de LAS HORAS, no de la plantilla. Antes salia del `turno_id`, y eso se
+   rompia solo: un turno creado desde «Apertura 08:00–16:30» al que despues le
+   cambiaban las horas a 13:30–22:00 se quedaba apuntando a Apertura, asi que
+   salia del color de la apertura. Pedro lo vio dos veces —«por que Ana y Carla
+   quedaron en el mismo color?»— y la segunda insistio con razon: arreglar que
+   los NUEVOS se suelten de la plantilla no corrige los que ya estaban mal.
+
+   Sacandolo de las horas, el color dice lo que el bloque muestra y los turnos
+   viejos se acomodan solos, sin tocarle los datos a nadie.
+
+   Se ordenan por hora de entrada para que la apertura, la tarde y el cierre
+   caigan siempre en ese orden. El mapa se arma una vez por carga: `cargar()`
+   lo borra. */
+let MAPA_COLOR = null;
+
+function mapaDeColores() {
+  if (MAPA_COLOR) return MAPA_COLOR;
+  const clave = (i, f) => Number(i).toFixed(2) + '|' + Number(f).toFixed(2);
+  const vistos = new Set();
+  // las plantillas primero, para que su orden mande cuando existan
+  S.turnos.slice().sort((a, b) => Number(a.inicio) - Number(b.inicio))
+    .forEach(t => vistos.add(clave(t.inicio, t.fin)));
+  const sueltos = [];
+  Object.values(S.asign).flat().concat(S.abiertos).forEach(a => {
+    if (a.inicio == null || a.fin == null) return;
+    const k = clave(a.inicio, a.fin);
+    if (!vistos.has(k)) { vistos.add(k); sueltos.push({ k, i: Number(a.inicio) }); }
+  });
+  sueltos.sort((a, b) => a.i - b.i);
+  MAPA_COLOR = new Map();
+  [...vistos].forEach((k, n) => MAPA_COLOR.set(k, (n % 4) + 1));
+  return MAPA_COLOR;
+}
+
+function colorDe(a) {
+  if (!a || a.inicio == null || a.fin == null) return 5;
+  const k = Number(a.inicio).toFixed(2) + '|' + Number(a.fin).toFixed(2);
+  return mapaDeColores().get(k) || 5;
+}
+
+const puestos = () => {
+  const hay = puestosConocidos();
+  // «Sin puesto» solo si de verdad hay alguien sin el, para no ensuciar la lista
+  if (S.personas.some(p => !(p.rol||'').trim())) hay.push('Sin puesto');
+  return hay;
+};
+// "equipo" es una segunda dimensión, aparte del puesto: un garzón part-time
+// sigue siendo garzón. Mezclar las dos cosas en un campo pierde información.
+const equipos = () => [...new Set(S.personas.map(p => (p.equipo||'').trim()).filter(Boolean))].sort();
+const personasVisibles = () => S.personas.filter(p =>
+  (!S.filtro  || ((p.rol||'').trim() || 'Sin puesto') === S.filtro) &&
+  (!S.filtroE || (p.equipo||'').trim() === S.filtroE));
+const fechas = () => Array.from({length:7}, (_,i) => iso(masDias(S.lunes, i)));
+
+// El rango que hay que traer de la base depende de la vista: un dia, una
+// semana o un mes entero. Todo lo demas se calcula sobre lo que ya esta cargado.
+function rango() {
+  if (S.modo === 'dia')  return { desde: iso(S.dia), hasta: iso(S.dia) };
+  if (S.modo === 'mes') {
+    // Del ancla del MES, no del lunes de la semana: el lunes de la semana en
+    // curso puede caer en el mes anterior.
+    const a = new Date(S.mes.getFullYear(), S.mes.getMonth(), 1);
+    const b = new Date(S.mes.getFullYear(), S.mes.getMonth() + 1, 0);
+    return { desde: iso(a), hasta: iso(b) };
+  }
+  const f = fechas(); return { desde: f[0], hasta: f[6] };
+}
+const diasDelMes = () => {
+  const r = rango(), a = new Date(r.desde + 'T00:00:00'), b = new Date(r.hasta + 'T00:00:00'), out = [];
+  for (let d = new Date(a); d <= b; d = masDias(d, 1)) out.push(iso(d));
+  return out;
+};
+const turnoDe = id => S.turnos.find(t => t.id === id) || null;
+const horasDe = t => t ? Number(t.fin) - Number(t.inicio) - Number(t.colacion) : 0;
+const filasDe  = (pid, f) => S.asign[pid + '|' + f] || [];
+// Los turnos de trabajo de ese dia, en orden de entrada. Pueden ser varios.
+const turnosDe = (pid, f) => filasDe(pid, f).filter(a => a.inicio != null);
+// La ausencia, que es UNA por dia y manda sobre los turnos.
+const ausenciaDe = (pid, f) => filasDe(pid, f).find(a => a.ausencia) || null;
+// Las horas las manda la propia fila, no la plantilla de la que salio.
+const horasAsig = a => (a && a.inicio != null) ? Number(a.fin) - Number(a.inicio) - Number(a.colacion || 0) : 0;
+const horasDia  = (pid, f) => turnosDe(pid, f).reduce((n, a) => n + horasAsig(a), 0);
+// Las horas que SE PAGAN ese día. Es lo que manda para la propina: la base de
+// datos reparte con estas, así que la pantalla del jefe tiene que usar las
+// mismas o el trabajador y el jefe verían números distintos.
+const horasPagadasDia = (pid, f) => turnosDe(pid, f).reduce((n, a) => n + horasPagadasDe(a), 0);
+
+/* ---------- diagnóstico: solo se muestra si algo falla ---------- */
+const marca = (id, estado, texto) => { const li = $(id); if (!li) return;
+  li.className = estado; li.querySelector('.pt').textContent = estado === 'ok' ? '✓' : estado === 'bad' ? '✕' : '!';
+  if (texto) li.lastChild.textContent = ' ' + texto; };
+
+function revisar() {
+  marca('#c-web','ok');
+  if (!window.supabase || !window.supabase.createClient) {
+    $('#diag').hidden = false; marca('#c-lib','bad','La librería de la base no cargó');
+    $('#diagNota').textContent = 'Puede ser la conexión o que el CDN esté bloqueado.'; return false; }
+  marca('#c-lib','ok');
+  const c = window.CONFIG || {};
+  if (!c.SUPABASE_URL || c.SUPABASE_URL === 'PENDIENTE') {
+    $('#diag').hidden = false; marca('#c-cfg','warn','Falta configurar la conexión');
+    $('#diagNota').textContent = 'Faltan los datos del proyecto de Supabase en config.js.'; return false; }
+  marca('#c-cfg','ok');
+  sb = window.supabase.createClient(c.SUPABASE_URL, c.SUPABASE_ANON);
+  DATOS.init(sb);
+  return true;
+}
+
+function error(e) {
+  const m = (e && e.message) ? e.message : String(e);
+  alert(m);
+  console.error(e);
+}
+
+/* ================= ENTRAR ================= */
+function avisoLogin(t, c) { const m = $('#msgLogin'); m.textContent = t; m.className = 'msg ' + (c||''); }
+
+function conectarLogin() {
+  on('#formLogin', 'submit', async ev => {
+    ev.preventDefault(); avisoLogin('Entrando…');
+    const { error: e } = await sb.auth.signInWithPassword({ email: $('#email').value.trim(), password: $('#clave').value });
+    avisoLogin(e ? traducir(e.message) : '', e ? 'bad' : '');
+  });
+  on('#btnCrear', 'click', async () => {
+    const email = $('#email').value.trim(), password = $('#clave').value;
+    if (!email || password.length < 8) return avisoLogin('Pon tu correo y una clave de al menos 8 caracteres.','bad');
+    avisoLogin('Creando la cuenta…');
+    const { error: e } = await sb.auth.signUp({ email, password });
+    avisoLogin(e ? traducir(e.message) : 'Listo. Si pide confirmación, revisa tu correo.', e ? 'bad' : 'ok');
+  });
+}
+
+function traducir(m) {
+  const t = (m||'').toLowerCase();
+  if (t.includes('invalid login')) return 'Correo o contraseña incorrectos.';
+  if (t.includes('already registered')) return 'Ese correo ya tiene cuenta. Entra en vez de crearla.';
+  if (t.includes('email not confirmed')) return 'Falta confirmar el correo: revisa tu bandeja.';
+  if (t.includes('rate limit') || t.includes('too many')) return 'Demasiados intentos seguidos. Espera unos minutos.';
+  if (t.includes('password')) return 'La contraseña debe tener al menos 8 caracteres.';
+  return m;
+}
+
+// Lleva a la vista la persona recien agregada y deja el cursor en su nombre,
+// con el texto seleccionado: se escribe encima y listo.
+function mostrarRecien() {
+  if (!S.recien) return;
+  const row = document.querySelector(`#eqLista [data-persona="${S.recien}"]`);
+  if (!row) return;
+  row.scrollIntoView({ behavior:'smooth', block:'center' });
+  const inp = row.querySelector('input[data-k="nombre"]');
+  if (inp) { inp.focus(); inp.select(); }
+}
+
+/* ---------- varios locales: un selector, cada uno con su gente ---------- */
+function pintarLocales() {
+  const caja = $('#hLocales'); if (!caja) return;
+  caja.innerHTML = '';
+  if (!S.locales || !S.locales.length) return;
+
+  if (S.locales.length > 1) {
+    const sel = el('select'); sel.id = 'selLocal'; sel.setAttribute('aria-label','Local');
+    sel.innerHTML = S.locales.map(l => `<option value="${l.id}">${esc(l.nombre)}</option>`).join('');
+    sel.value = S.local.id;
+    sel.addEventListener('change', async () => {
+      try { localStorage.setItem('malla-local', sel.value); } catch (e) {}
+      S.local = S.locales.find(l => l.id === sel.value);
+      DATOS.dejarDeEscuchar(S.canal); S.canal = null;
+      try {
+        await cargar(); pintarTodo();
+        S.canal = DATOS.escuchar(S.local.id, () => { cargar().then(pintarTodo).catch(()=>{}); });
+      } catch (e) { error(e); }
+    });
+    caja.appendChild(sel);
+  }
+
+  const mas = el('button','act','+ Local');
+  mas.title = 'Agregar otro local';
+  mas.addEventListener('click', () => {
+    $('#cardLocal').hidden = false;
+    $('#app').hidden = true;
+    $('#nombreLocal').value = '';
+    $('#nombreLocal').focus();
+    $('#cancelarLocal').hidden = S.locales.length === 0;
+  });
+  caja.appendChild(mas);
+}
+
+/* ================= CARGAR TODO ================= */
+async function cargar() {
+  const r = rango(), desde = r.desde, hasta = r.hasta;
+  const [personas, turnos, puestosCat, asign, marcas, dias, abiertos, dot, modelos] = await Promise.all([
+    DATOS.personas(S.local.id), DATOS.turnos(S.local.id), DATOS.puestos(S.local.id),
+    DATOS.asignaciones(S.local.id, desde, hasta), DATOS.marcas(S.local.id, desde, hasta),
+    DATOS.dias(S.local.id, desde, hasta), DATOS.abiertos(S.local.id, desde, hasta),
+    DATOS.dotacion(S.local.id), DATOS.modelos(S.local.id),
+  ]);
+  S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
+  S.puestos = puestosCat || [];
+  MAPA_COLOR = null;          // los horarios pueden haber cambiado
+  S.modelos = modelos || [];
+  // Un dia puede traer VARIOS turnos de la misma persona (turno partido), asi
+  // que cada casilla guarda una LISTA, no una fila.
+  S.asign = {};
+  (asign||[]).forEach(a => {
+    if (!a.persona_id) return;        // sin dueño: va a la fila «Sin asignar»
+    const k = a.persona_id + '|' + a.fecha;
+    (S.asign[k] = S.asign[k] || []).push(a);
+  });
+  Object.values(S.asign).forEach(l => l.sort((x,y) => (x.inicio||0) - (y.inicio||0)));
+  // Las marcas van por TURNO: una persona puede tener dos el mismo día.
+  S.marcas = {};
+  (marcas||[]).forEach(m => {
+    if (m.asignacion_id) S.marcas['a:' + m.asignacion_id] = m;
+    // también por persona+fecha, para lo que todavía razona por día
+    const k = m.persona_id + '|' + m.fecha;
+    if (!S.marcas[k] || (m.entrada && !S.marcas[k].entrada)) S.marcas[k] = m;
+  });
+  S.dias = {};   (dias||[]).forEach(d => { S.dias[d.fecha] = d; });
+  S.dotacion = {};
+  (dot||[]).forEach(x => {
+    const perfil = S.dotacion[x.perfil] = S.dotacion[x.perfil] || {};
+    (perfil[x.puesto || ''] = perfil[x.puesto || ''] || {})[x.turno_id] = x.cantidad;
+  });
+}
+
+async function refrescar() { await cargar(); pintarTodo(); }
+
+/* ================= SEMANA ================= */
+function pintarPlan() {
+  ['semana','dia','mes'].forEach(m => {
+    const b = $('#modo' + m[0].toUpperCase() + m.slice(1));
+    if (b) b.setAttribute('aria-pressed', String(S.modo === m));
+  });
+  // selector de puesto, con aviso cuando hay uno puesto
+  const sel = $('#filtroPuesto');
+  if (sel) {
+    const ps = puestos();
+    sel.innerHTML = '<option value="">Todos los puestos</option>' +
+      ps.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    if (S.filtro && !ps.includes(S.filtro)) S.filtro = '';
+    sel.value = S.filtro;
+    sel.classList.toggle('activo', !!S.filtro);
+  }
+  const selE = $('#filtroEquipo');
+  if (selE) {
+    const es = equipos();
+    selE.hidden = !es.length;                 // si nadie tiene equipo, no estorba
+    selE.innerHTML = '<option value="">Todos los equipos</option>' +
+      es.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
+    if (S.filtroE && !es.includes(S.filtroE)) S.filtroE = '';
+    selE.value = S.filtroE;
+    selE.classList.toggle('activo', !!S.filtroE);
+  }
+  $('#cajaSemana').hidden = S.modo !== 'semana';
+  $('#cajaDia').hidden    = S.modo !== 'dia';
+  $('#cajaMes').hidden    = S.modo !== 'mes';
+  $('#btnModelos').hidden   = S.modo !== 'semana';
+  // Copiar sirve en Dia y en Semana; en Mes no hay nada que copiar.
+  $('#btnCopiar').hidden    = S.modo === 'mes';
+  // Agrupar por puesto vale en la semana Y en el dia (Pedro, 04-10: «ok, agregar
+  // a dia»). En el MES no: quedaria un conteo por dia y poco mas, asi que ahi se
+  // esconde — es una decision, no un olvido.
+  const seg = document.querySelector('.segm');
+  if (seg) seg.hidden = S.modo === 'mes';
+  // la franja de cobertura vive junto a la malla, no en otra pestaña:
+  // sirve MIENTRAS planificas, no después
+  const caja = $('#cardCobertura');
+  if (caja) caja.hidden = (S.modo === 'mes');
+  if (S.modo !== 'mes') pintarCobertura();
+  if (S.modo === 'dia')  return pintarDia();
+  if (S.modo === 'mes')  return pintarMes();
+  return pintarSemana();
+}
+
+/* ---------- el diálogo del turno ----------
+   Es el «Ajouter un shift» de Skello: se escriben LAS HORAS DE ESTE TURNO, no
+   se elige de una lista. La plantilla solo rellena los campos de un saque.
+   Trae además lo que ellos tienen y nos faltaba: repetir el mismo turno en
+   varios días de la semana de una vez. */
+let DLG = null;      // { p, fecha, asig }   asig null = turno nuevo
+
+const aHora = h => { const t = ((Number(h) % 24) + 24) % 24;
+  return String(Math.floor(t)).padStart(2,'0') + ':' + String(Math.round((t - Math.floor(t)) * 60)).padStart(2,'0'); };
+/* Lee una hora tecleada y la vuelve numero. Pasa SIEMPRE por el normalizador:
+   si alguien escribe «830» y aprieta Guardar sin salir del campo, partir por
+   «:» a secas daria 830 HORAS y eso llegaria a la base. El normalizador vive
+   mas abajo, pero esto corre dentro de una funcion, no al cargar. */
+const deHora = v => {
+  const t = normalizarHora(v);
+  if (!t) return null;
+  const [h, m] = t.split(':').map(Number);
+  return h + (m || 0) / 60;
+};
+
+/* Normaliza lo que se teclea en los campos de hora, SIEMPRE en 24 horas.
+   Acepta «8», «800», «8:0», «0800», «8.30» y devuelve «08:00» / «08:30».
+   Existe porque el `input type="time"` del navegador mostraba la hora en el
+   formato del sistema —a Pedro le salia «09:00 p.m.» junto a un «21:00» en la
+   malla— y el atributo `lang` NO lo fuerza: probado con en-GB, es-ES y es-CL,
+   los tres siguieron en 12 horas. */
+function normalizarHora(txt) {
+  const d = String(txt || '').replace(/[^\d]/g, '');
+  if (!d) return '';
+  let h, m;
+  if (d.length <= 2)      { h = Number(d);               m = 0; }
+  else if (d.length === 3){ h = Number(d.slice(0,1));    m = Number(d.slice(1)); }
+  else                    { h = Number(d.slice(0,2));    m = Number(d.slice(2,4)); }
+  if (!isFinite(h) || !isFinite(m)) return '';
+  h = Math.min(23, Math.max(0, h));
+  m = Math.min(59, Math.max(0, m));
+  return String(h).padStart(2,'0') + ':' + String(m).padStart(2,'0');
+}
+
+function duraDlg() {
+  const i = deHora($('#dEntra').value), fRaw = deHora($('#dSale').value);
+  if (i == null || fRaw == null) { $('#dDura').value = ''; return null; }
+  const f = fRaw <= i ? fRaw + 24 : fRaw;                 // cruza la medianoche
+  const h = f - i - (Number($('#dPausa').value) || 0) / 60;
+  $('#dDura').value = h > 0 ? hfmt(h) + ' h' : '—';
+  return { inicio: i, fin: f, colacion: (Number($('#dPausa').value) || 0) / 60, horas: h };
+}
+
+/* Las pastillas de «quiénes lo cubren», con LA GENTE DEL PUESTO ADELANTE.
+   Pedro (04-10): «está bien tener a todo el equipo como opción pero debería ser
+   claro en destacar a la gente [que] es del cargo».
+
+   Tiene razon: con catorce personas en una lista plana, elegir al que
+   corresponde es buscarlo. Siguen estando todos —un garzon puede cubrir barra
+   un dia— pero los del puesto van primero y rotulados, y el resto despues.
+
+   Se vuelve a pintar cuando cambia el puesto en el dialogo, porque si no la
+   lista quedaria ordenada por el puesto anterior. */
+/* ¿Este turno se pisa con otro de la MISMA persona ese dia?
+   Pedro: «que no se dejen pisar los turnos». Nadie puede estar en dos lados a
+   la misma hora, y hasta hoy la app lo dejaba guardar: el unico control miraba
+   que la hora de ENTRADA no fuera identica, asi que 08:00–16:30 y 13:30–22:00
+   convivian sin que nadie dijera nada.
+
+   Devuelve el turno con el que choca, o null. `exceptoId` sirve al EDITAR, para
+   que un turno no choque consigo mismo.
+
+   Los turnos sin dueño no chocan con nadie: no son de ninguna persona. */
+function chocaCon(personaId, fecha, inicio, fin, exceptoId) {
+  if (!personaId) return null;
+  return (turnosDe(personaId, fecha) || []).find(x =>
+    x.id !== exceptoId
+    && Number(x.inicio) < Number(fin) && Number(inicio) < Number(x.fin)) || null;
+}
+
+const diceChoque = (nombre, x) =>
+  `${nombre} ya tiene ${hhmm(x.inicio)}–${hhmm(x.fin)} ese día: se pisan.`;
+
+function marcarTodosTextoDlg() { /* sin indicador en este dialogo, por ahora */ }
+
+function pintarPastillasPersonas(quien) {
+  const puesto = ($('#dPuesto') && $('#dPuesto').value || '').trim().toLowerCase();
+  // Quien YA tiene turno ese dia se marca con sus horas. No se esconde ni se
+  // bloquea —el turno partido es legitimo— pero se ve antes de elegir, que es
+  // justo lo que Pedro echaba de menos al verla repetida en la lista.
+  const fe = DLG && DLG.fecha;
+  const yaTiene = x => {
+    const ts = fe ? (turnosDe(x.id, fe) || []) : [];
+    return ts.length ? ts.map(t => hhmm(t.inicio) + '–' + hhmm(t.fin)).join(' · ') : '';
+  };
+  const pastilla = x => {
+    const ya = yaTiene(x);
+    return `<button type="button" class="act dia${x.id === quien ? ' on' : ''}${ya ? ' ocupada' : ''}"
+      data-pid="${x.id}" aria-pressed="${x.id === quien ? 'true' : 'false'}"
+      title="${esc(x.nombre + ((x.rol || '').trim() ? ' · ' + x.rol : '')
+        + (ya ? ' · ya tiene ' + ya + ' ese día' : ''))}">${esc(x.nombre.split(' ')[0])}`
+      + (ya ? `<span class="yatiene">${esc(ya)}</span>` : '') + '</button>';
+  };
+  const suyos = puesto ? S.personas.filter(x => (x.rol || '').trim().toLowerCase() === puesto) : [];
+  const otros = S.personas.filter(x => !suyos.includes(x));
+  const sinAsignar = `<button type="button" class="act dia${quien ? '' : ' on'}" data-pid=""
+      aria-pressed="${quien ? 'false' : 'true'}">sin asignar</button>`;
+
+  // «sin asignar» va SUELTO arriba, no bajo el rotulo del puesto: no es una
+  // persona de ese puesto y ponerlo ahi lo hacia parecer una.
+  $('#dPersonas').innerHTML = suyos.length
+    ? sinAsignar
+      + `<span class="pillcap">${esc($('#dPuesto').value)}</span>${suyos.map(pastilla).join('')}`
+      + (otros.length ? `<span class="pillcap">Otros</span>${otros.map(pastilla).join('')}` : '')
+    : sinAsignar + S.personas.map(pastilla).join('');
+}
+
+/* `puestoFijo` llega cuando el turno se crea desde una fila de PUESTO: la fila
+   ya dice en que puesto va, y lo unico que falta elegir es quien lo cubre. */
+function abrirTurno(p, fecha, asig, puestoFijo) {
+  DLG = { p, fecha, asig };
+  const esNuevo = !asig, esAus = asig && asig.ausencia;
+  $('#dlgTit').textContent = esNuevo ? 'Agregar turno' : (esAus ? 'Editar ausencia' : 'Editar turno');
+  $('#dlgSub').textContent = (p ? p.nombre : 'Sin asignar') + ' · '
+    + DIAS[(new Date(fecha + 'T00:00:00').getDay() + 6) % 7] + ' ' + ddmm(fecha);
+  $('#dlgMsg').textContent = '';
+  $('#dBorrar').hidden = esNuevo;
+
+  $('#dPlantilla').innerHTML = '<option value="">— escribir las horas —</option>' +
+    S.turnos.map(t => `<option value="${t.id}">${esc(t.nombre)} ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
+  // La lista de quién lo cubre, con «sin asignar» como una opción más. Es
+  // exactamente el desplegable de Skello: el turno sin dueño no es otra cosa.
+  const quien = asig ? (asig.persona_id || '') : (p ? p.id : '');
+  $('#dPersona').innerHTML = `<option value=""${quien ? '' : ' selected'}>— sin asignar —</option>`
+    + S.personas.map(x => `<option value="${x.id}"${x.id === quien ? ' selected' : ''}>${esc(x.nombre)}</option>`).join('');
+
+  // Al crear, varias personas de una vez. Un turno nuevo se le pone a quien
+  // haga falta; uno que ya existe es de alguien, y ahí sigue siendo uno solo.
+  $('#cajaPersonas').hidden = !esNuevo;
+  $('#cajaPersona').hidden  = esNuevo;
+  $('#dPuesto').innerHTML = opcionesPuesto(asig ? puestoDe(asig, p)
+    : ((puestoFijo || '').trim() || ((p && p.rol) || '').trim()));
+  // DESPUES de llenar el puesto: las pastillas se ordenan por el, asi que
+  // pintarlas antes las habria ordenado por el puesto del turno anterior.
+  pintarPastillasPersonas(quien);
+  $('#dAusencia').innerHTML = Object.entries(AUSENCIAS)
+    .filter(([k]) => k !== 'L')
+    .map(([k,v]) => `<option value="${k}">${v}</option>`).join('');
+
+  // La semana COMPLETA, con el día que se está creando ya marcado y bloqueado.
+  // Antes se escondía ese día, y Pedro preguntó «¿por qué para Luz no me
+  // aparece el lunes?»: esconderlo hace pensar que falta algo. Skello los
+  // muestra los siete y deja marcado el del turno.
+  // OJO: la semana sale de la FECHA del turno y no de la que se está viendo,
+  // porque desde el mes se edita cualquier día, no solo los de esta semana.
+  const lun = lunesDe(new Date(fecha + 'T00:00:00'));
+  const f = [...Array(7)].map((_, k) => iso(masDias(lun, k)));
+  $('#dRepetir').innerHTML = f.map((fe,i) => fe === fecha
+    ? `<button type="button" class="act dia on" disabled aria-pressed="true"
+         title="Es el día de este turno">${DIAS[i]}</button>`
+    : `<button type="button" class="act dia" data-fe="${fe}" aria-pressed="false">${DIAS[i]}</button>`).join('');
+  $('#cajaRepetir').hidden = !esNuevo;
+
+  if (asig && !esAus) {
+    $('#dEntra').value = aHora(asig.inicio);
+    $('#dSale').value  = aHora(asig.fin);
+    $('#dPausa').value = Math.round(Number(asig.colacion || 0) * 60);
+    $('#dPlantilla').value = asig.turno_id || '';
+    $('#dNota').value = asig.nota || '';
+  } else {
+    const t = S.turnos[0];
+    $('#dEntra').value = t ? aHora(t.inicio) : '09:00';
+    /* turno nuevo */
+    $('#dSale').value  = t ? aHora(t.fin)    : '18:00';
+    $('#dPausa').value = t ? Math.round(Number(t.colacion) * 60) : 30;
+    $('#dPlantilla').value = t ? t.id : '';
+    $('#dNota').value = '';
+  }
+  if (esAus) $('#dAusencia').value = asig.ausencia;
+  pestañaDlg(!esAus);
+  ajustarAusencia();
+  duraDlg();
+  $('#dlgTurno').showModal();
+  setTimeout(() => $('#dEntra').focus(), 30);
+}
+
+function pestañaDlg(turno) {
+  $('#paneTurno').hidden = !turno; $('#paneAus').hidden = turno;
+  $('#tabTurno').classList.toggle('primary', turno);
+  $('#tabAus').classList.toggle('primary', !turno);
+}
+
+// Una ausencia es DE ALGUIEN: en un turno sin asignar no significa nada.
+function ajustarAusencia() {
+  const hayPersona = $('#cajaPersonas').hidden
+    ? !!$('#dPersona').value
+    : [...$('#dPersonas').querySelectorAll('[aria-pressed="true"]')].some(b => b.dataset.pid);
+  $('#tabAus').hidden = !hayPersona;
+  if (!hayPersona) pestañaDlg(true);
+}
+
+async function guardarDlg() {
+  const { p, fecha, asig } = DLG;
+  const m = $('#dlgMsg');
+  const esAus = $('#paneAus').hidden === false;
+
+  if (esAus) {
+    if (!p) { m.textContent = 'Una ausencia es de alguien: elige la persona.'; m.className = 'msg bad'; return; }
+    recordar('la ausencia de ' + p.nombre + ' del ' + ddmm(fecha));
+    try {
+      await DATOS.ponerAusencia(S.local.id, p.id, fecha, $('#dAusencia').value);
+      await refrescar();
+    // Con choques el diálogo se queda abierto: el aviso hay que leerlo, y
+    // cerrarlo lo haría desaparecer junto con la explicación.
+    if (!(m.className || '').includes('bad') && !m.textContent.includes('se pisaban')
+        && !m.textContent.includes('Se pisaban')) $('#dlgTurno').close();
+    } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
+    return;
+  }
+
+  const d = duraDlg();
+  if (!d) { m.textContent = 'Faltan las horas.'; m.className = 'msg bad'; return; }
+  if (d.horas <= 0) { m.textContent = 'La colación se come el turno entero.'; m.className = 'msg bad'; return; }
+
+  const esNuevo = !asig;
+  // al crear, las pastillas; al editar, el desplegable de siempre
+  const quienes = esNuevo
+    ? [...$('#dPersonas').querySelectorAll('[aria-pressed="true"]')].map(b => b.dataset.pid || null)
+    : [$('#dPersona').value || null];
+  if (!quienes.length) {
+    m.textContent = 'Elige al menos a alguien, o «sin asignar».'; m.className = 'msg bad'; return;
+  }
+  const campos = { turno_id: $('#dPlantilla').value || null, inicio: d.inicio, fin: d.fin,
+                   colacion: d.colacion, puesto: $('#dPuesto').value, nota: $('#dNota').value.trim() };
+  // Solo los botones que LLEVAN fecha: el del día del propio turno va marcado
+  // pero sin `data-fe`, y colarlo aquí mandaba a la base una fila con la fecha
+  // vacía. El Set evita además repetir ese mismo día.
+  const marcados = [...$('#dRepetir').querySelectorAll('button[data-fe][aria-pressed="true"]')]
+    .map(b => b.dataset.fe).filter(Boolean);
+  const dias = [...new Set([fecha, ...marcados])];
+
+  let creados = null;
+  recordar(asig ? 'el turno de ' + (p ? p.nombre : 'sin asignar') + ' del ' + ddmm(fecha)
+                : 'agregar turno' + (p ? ' a ' + p.nombre : ' sin asignar'));
+  try {
+    if (asig) {
+      const ch = chocaCon(quienes[0], fecha, d.inicio, d.fin, asig.id);
+      if (ch) {
+        const nom = (S.personas.find(x => x.id === quienes[0]) || {}).nombre || 'Esa persona';
+        S.hist.pop(); pintarDeshacer();
+        m.textContent = diceChoque(nom.split(' ')[0], ch); m.className = 'msg bad';
+        return;
+      }
+      await DATOS.editarAsignacion(asig.id, Object.assign({ persona_id: quienes[0] }, campos));
+    } else {
+      // tantos turnos como personas x días. Con 4 personas y 5 días son 20 de
+      // una, que es justamente la gracia: antes eran 4 veces este diálogo.
+      let hechos = 0;
+      const choques = [];
+      for (const fe of dias) for (const q of quienes) {
+        // si esa persona ya tiene el mismo bloque ese día, no se duplica
+        if (q && turnosDe(q, fe).some(x => Number(x.inicio) === d.inicio)) continue;
+        // y si se PISA con otro suyo, tampoco se crea: nadie está en dos lados
+        // a la misma hora. Se salta esa combinación y se dice cuál fue.
+        const ch = chocaCon(q, fe, d.inicio, d.fin);
+        if (ch) {
+          const nom = (S.personas.find(x => x.id === q) || {}).nombre || '';
+          choques.push(`${nom.split(' ')[0]} el ${ddmm(fe)} (${hhmm(ch.inicio)}–${hhmm(ch.fin)})`);
+          continue;
+        }
+        await DATOS.crearAsignacion(S.local.id, q, fe, campos);
+        hechos++;
+      }
+      if (choques.length) {
+        m.textContent = (hechos ? `Se crearon ${hechos}. ` : 'No se creó ninguno. ')
+          + 'Se pisaban con turnos que ya tenían: ' + choques.join(' · ') + '.';
+        m.className = 'msg ' + (hechos ? '' : 'bad');
+      } else if (!hechos) { m.textContent = 'Eso ya estaba puesto: no se agregó nada.'; m.className = 'msg'; }
+      else creados = { n: hechos, dias, quienes };
+    }
+    await refrescar(); $('#dlgTurno').close();
+    // Decir QUE se creo. Antes se creaban los turnos y el dialogo se cerraba
+    // callado: desde la vista de Dia uno marca tres dias, ve un solo dia y no se
+    // entera de nada. Pedro lo noto («no es mejor que solo en dia se pueda
+    // agregar el del dia?») y el problema no era poder hacerlo, era el silencio.
+    if (creados) {
+      const w = $('#msgSem');
+      if (w) {
+        const gente = creados.quienes.map(q => q ? (S.personas.find(x => x.id === q) || {}).nombre : null)
+          .filter(Boolean).map(x => x.split(' ')[0]);
+        const dd = creados.dias.map(ddmm);
+        const txt = `Listo: ${creados.n} turno${creados.n === 1 ? '' : 's'}`
+          + (gente.length ? ' · ' + gente.join(', ') : ' · sin asignar')
+          + (dd.length > 1 ? ' · ' + dd.join(', ') : '') + '.';
+        w.textContent = txt; w.className = 'msg ok';
+        setTimeout(() => { if (w.textContent === txt) w.textContent = ''; }, 7000);
+      }
+    }
+  } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
+}
+
+async function borrarDlg() {
+  const { p, fecha, asig } = DLG; if (!asig) return;
+  recordar('quitar un turno de ' + (p ? p.nombre : 'sin asignar') + ' del ' + ddmm(fecha));
+  try {
+    await DATOS.borrarAsignacion(asig.id);
+    await refrescar(); $('#dlgTurno').close();
+  } catch (e) { S.hist.pop(); pintarDeshacer(); $('#dlgMsg').textContent = e.message; $('#dlgMsg').className = 'msg bad'; }
+}
+
+async function quitarTurno(p, fecha, id) {
+  const m = $('#msgSem');
+  recordar('quitar el turno de ' + p.nombre + ' del ' + ddmm(fecha));
+  try {
+    await DATOS.borrarAsignacion(id);
+    await refrescar();
+    if (m) { m.textContent = 'Turno quitado. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok'; }
+  } catch (e) { S.hist.pop(); pintarDeshacer(); if (m) { m.textContent = e.message; m.className = 'msg bad'; } }
+  setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 5000);
+}
+
+/* ---------- la casilla: una PILA de bloques ----------
+   Skello no usa un desplegable: la casilla vacia dice «Ajouter un shift» y la
+   llena muestra un bloque por turno, apilados. Es lo que permite el turno
+   partido, y lo que hace que se vea de un vistazo quien dobla. */
+function pintarCasilla(p, fe) {
+  const aus = ausenciaDe(p.id, fe);
+  if (aus && aus.ausencia !== 'L')
+    return `<span class="bloque aus" data-asig="${aus.id}" data-fecha="${fe}" role="button" tabindex="0"
+              title="${esc(AUSENCIAS[aus.ausencia] || aus.ausencia)}">${esc(aus.ausencia)} · ${esc(AUSENCIAS[aus.ausencia]||'')}</span>`;
+
+  const ts = turnosDe(p.id, fe);
+  const bloques = ts.map(a => {
+    const t = a.turno_id ? turnoDe(a.turno_id) : null;
+    const ci = colorDe(a);
+    const pu = puestoDe(a, p);
+    return `<span class="bloque" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
+              draggable="true" role="button" tabindex="0"
+              title="Editar este turno · o arrástralo a otro día o persona">
+              <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b><i>${hfmt(horasAsig(a))} h</i>
+              <em>${esc(pu || 'sin puesto')}</em>
+              <button type="button" class="borrarbl" data-borrar="${a.id}" data-fecha="${fe}"
+                title="Quitar este turno" aria-label="Quitar el turno de ${hhmm(a.inicio)}">×</button></span>`;
+  }).join('');
+
+  return bloques + `<button type="button" class="anadir" data-anadir="${fe}"
+    aria-label="Agregar turno a ${esc(p.nombre)} el ${fe}">${ts.length ? '+' : '+ turno'}</button>`;
+}
+
+// Las opciones del puesto de una casilla: los que ya existen, mas el que tenga
+// puesto esa asignacion aunque no lo use nadie mas, mas la salida «sin puesto».
+function opcionesPuesto(actual) {
+  const hay = puestosConocidos();
+  if (actual && !hay.includes(actual)) hay.push(actual);
+  return `<option value=""${actual ? '' : ' selected'}>— sin puesto —</option>`
+    + hay.sort().map(x =>
+        `<option value="${esc(x)}"${x === actual ? ' selected' : ''}>${esc(x)}</option>`).join('');
+}
+
+function pintarSemanaPorPuesto() {
+  const f = fechas();
+  $('#semCab').innerHTML = '<th>Puesto</th>' +
+    DIAS.map((d,i) => `<th class="${i>=4?'fin':''}">${d}<span class="num">${ddmm(f[i])}</span></th>`).join('') + '<th>Horas</th>';
+
+  const cuerpo = $('#semCuerpo'); cuerpo.innerHTML = '';
+  // todas las asignaciones de la semana, con su persona (o sin ella)
+  const todas = [];
+  S.personas.forEach(p => f.forEach(fe => turnosDe(p.id, fe).forEach(a => todas.push({ p, a }))));
+  S.abiertos.filter(a => f.includes(a.fecha)).forEach(a => todas.push({ p: null, a }));
+
+  /* Las filas salen del CATALOGO de puestos, no solo de los turnos que ya hay.
+     Con la semana en blanco no habia ninguna fila, asi que no habia donde
+     apretar para crear: la vista no se podia arrancar a si misma. Lo encontro
+     Pedro —«¿acá cómo agrego a un puesto o una persona?»— con la semana vacia.
+     Se suman ademas los puestos que aparezcan en turnos y no esten en el
+     catalogo, para no esconder nada. */
+  const lista = [...new Set([...puestos(), ...todas.map(x => puestoRot(x.a, x.p))])].sort();
+  if (!lista.length) {
+    cuerpo.innerHTML = '<tr><td colspan="9" class="vacio">Todavía no hay puestos. '
+      + 'Créalos en la pestaña <b>Equipo</b> y vuelve acá.</td></tr>';
+    pintarResumenSemana(); return;
+  }
+
+  lista.forEach(q => {
+    const horasQ = todas.filter(x => puestoRot(x.a, x.p) === q)
+                        .reduce((n,x) => n + horasAsig(x.a), 0);
+    const tr = el('tr');
+    tr.innerHTML = `<th scope="row">${esc(q)}<span class="rol">${hfmt(horasQ)} h en la semana</span></th>` +
+      f.map(fe => {
+        const aqui = todas.filter(x => x.a.fecha === fe && puestoRot(x.a, x.p) === q)
+                          .sort((u,v) => Number(u.a.inicio) - Number(v.a.inicio));
+        const hs = aqui.reduce((n,x) => n + horasAsig(x.a), 0);
+        const bloques = aqui.map(({ p, a }) => {
+          const t = a.turno_id ? turnoDe(a.turno_id) : null;
+          const ci = colorDe(a);
+          return `<span class="bloque${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
+            data-fecha="${fe}" data-p="${p ? p.id : ''}" draggable="true" role="button" tabindex="0"
+            title="${esc((p ? p.nombre : 'Sin asignar') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
+              + ' · arrástralo a otro puesto o día')}">
+            <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
+            <em>${esc(p ? p.nombre.split(' ')[0] : 'sin asignar')}</em></span>`;
+        }).join('');
+        // debajo de cada día, cuánta gente y cuántas horas: es la cobertura
+        // metida en la misma pantalla, como la de Skello
+        // El boton «+ turno», igual que en la vista por personas. Sin el, una
+        // casilla que YA tiene un turno no ofrecia ninguna forma visible de
+        // agregar otro: se podia apretar el borde, pero eso no lo adivina nadie.
+        return `<td class="cell" data-fecha="${fe}" data-puesto="${esc(q)}">${bloques}
+          <button type="button" class="anadir" data-anadir="${fe}"
+            aria-label="Agregar turno de ${esc(q)} el ${fe}">${aqui.length ? '+' : '+ turno'}</button>
+          <span class="cuenta">${aqui.length} ${aqui.length === 1 ? 'pers.' : 'pers.'} · ${hfmt(hs)} h</span></td>`;
+      }).join('') + `<td class="tot">${hfmt(horasQ)} h</td>`;
+    cuerpo.appendChild(tr);
+  });
+
+  cuerpo.onclick = ev => {
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      const p = bl.dataset.p ? S.personas.find(x => x.id === bl.dataset.p) : null;
+      const lista2 = p ? filasDe(p.id, bl.dataset.fecha) : S.abiertos;
+      const a = lista2.find(x => x.id === bl.dataset.asig);
+      if (a) abrirTurno(p, bl.dataset.fecha, a);
+      return;
+    }
+    // Apretar «+ turno» —o el hueco de la casilla— crea aca tambien. La fila es
+    // un PUESTO, asi que el turno nace con ese puesto puesto y sin dueño: quien
+    // lo cubre se elige en el dialogo. Vale aunque la casilla YA tenga turnos:
+    // un puesto puede necesitar dos personas el mismo dia.
+    const cel = ev.target.closest('td.cell[data-fecha][data-puesto]'); if (!cel) return;
+    abrirTurno(null, cel.dataset.fecha, null, cel.dataset.puesto);
+  };
+  engancharArrastre($('#tablaSem'));
+  pintarResumenSemana();
+}
+
+/* ---------- mover un turno arrastrandolo ----------
+   Cambiar un turno de persona o de dia era: abrir el dialogo, cambiar el campo,
+   guardar. Tres pasos para algo que mentalmente es uno: «este turno pasalo a
+   Carla». Es la operacion mas repetida al cubrir una falla.
+
+   Un solo escuchador en la TABLA, no en cada bloque: las casillas se repintan
+   enteras y los escuchadores por bloque quedarian huerfanos en cada repintado.
+   Es la misma razon por la que el clic ya se escucha a nivel de fila.
+
+   Las AUSENCIAS no se arrastran: son una por dia y reemplazan a los turnos, asi
+   que moverlas abre casos raros que nadie pidio.
+
+   Y va SOLO en la vista por personas. En la de puestos las filas no son gente,
+   asi que «soltar aca» no quiere decir nada claro: sus celdas no llevan persona
+   y el turno quedaria sin dueño sin que nadie lo haya pedido. Si alguna vez se
+   agrega ahi, soltar tendria que cambiar el PUESTO y respetar a la persona. */
+function turnoArrastrable(id) {
+  return Object.values(S.asign).flat().concat(S.abiertos).find(a => a.id === id) || null;
+}
+
+/* Soltar un turno en otra casilla. `destino` trae SOLO lo que cambia:
+     { persona: id|null }  la fila era una persona
+     { puesto: 'Barra'  }  la fila era un puesto
+     { fecha: '2026-10-05' } la columna era otro dia
+   La regla que lo ordena, de Pedro (04-10): LA FILA DICE QUE CAMBIA. Si la fila
+   es una persona, soltar cambia de persona; si es un puesto, cambia de puesto. */
+async function soltarTurno(id, destino) {
+  const a = turnoArrastrable(id);
+  const m = $('#msgSem');
+  const aviso = (texto, clase) => {
+    if (!m) return;
+    m.textContent = texto; m.className = 'msg ' + clase;
+    setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
+  };
+  if (!a) return;
+  const d = destino || {};
+  const cambiaPersona = 'persona' in d && (a.persona_id || null) !== (d.persona || null);
+  const cambiaPuesto  = 'puesto'  in d && (a.puesto || '').trim() !== (d.puesto || '').trim();
+  const cambiaFecha   = 'fecha'   in d && a.fecha !== d.fecha;
+  if (!cambiaPersona && !cambiaPuesto && !cambiaFecha) return;   // lo soltó donde ya estaba
+
+  const nom = x => { const q = x ? S.personas.find(y => y.id === x) : null;
+                     return q ? q.nombre.split(' ')[0] : 'Sin asignar'; };
+
+  // Lo que le SACA un turno a alguien se confirma; correr de dia o cambiar de
+  // puesto, no. Pedro lo pidio para el dia («si modifica el turno de otra
+  // persona que arroje una alerta») y vale igual en las demas vistas.
+  if (cambiaPersona) {
+    if (!confirm(`El turno pasa de ${nom(a.persona_id)} a ${nom(d.persona)}.`
+               + (cambiaFecha ? `\n\nY del ${ddmm(a.fecha)} al ${ddmm(d.fecha)}.` : '')
+               + '\n\n¿Lo hago?')) return;
+  }
+
+  const fechaFinal = cambiaFecha ? d.fecha : a.fecha;
+  const personaFinal = 'persona' in d ? (d.persona || null) : (a.persona_id || null);
+
+  // Si la persona de destino tiene AUSENCIA ese dia, la casilla solo dibuja la
+  // ausencia: el turno quedaria guardado pero INVISIBLE. Mejor no dejarlo.
+  if (personaFinal) {
+    const aus = ausenciaDe(personaFinal, fechaFinal);
+    if (aus && aus.ausencia !== 'L')
+      return aviso(`${nom(personaFinal)} tiene `
+        + `${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} ese día. Quita la ausencia primero.`, 'bad');
+  }
+
+  const ch = chocaCon(personaFinal, fechaFinal, Number(a.inicio), Number(a.fin), a.id);
+  if (ch) return aviso(diceChoque(nom(personaFinal), ch), 'bad');
+
+  const campos = {};
+  if (cambiaFecha) campos.fecha = d.fecha;
+  if (cambiaPuesto) campos.puesto = (d.puesto || '').trim();
+  if ('persona' in d) {
+    campos.persona_id = d.persona || null;
+    // `ofrecido_por` se limpia a proposito: la fila «Sin asignar» muestra los
+    // turnos sin persona Y los ofrecidos, asi que mover a alguien un turno
+    // ofrecido lo dejaria visible en los dos lados a la vez.
+    campos.ofrecido_por = null;
+  }
+  try {
+    recordar('mover un turno');
+    await DATOS.editarAsignacion(id, campos);
+    await refrescar();
+    const partes = [];
+    if (cambiaPersona) partes.push('a ' + nom(d.persona));
+    if (cambiaPuesto) partes.push('a ' + (d.puesto || 'sin puesto'));
+    if (cambiaFecha) partes.push('al ' + ddmm(d.fecha));
+    aviso('Turno movido ' + partes.join(' · ') + '.', 'ok');
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();        // no se movio: el paso atras sobra
+    aviso(e.message, 'bad');
+  }
+}
+
+/* Engancha arrastrar/soltar a una tabla de casillas: sirve para la semana —por
+   personas o por puestos— y para el mes. Idempotente: se llama en cada
+   repintado y marca la tabla para no colgar dos veces lo mismo.
+
+   El destino se lee de la CASILLA, que es lo que hace que la regla «la fila dice
+   que cambia» se cumpla sola: una casilla con `data-puesto` cambia el puesto,
+   una con `data-p` cambia la persona. */
+function destinoDeCasilla(cel) {
+  const d = {};
+  if (cel.dataset.fecha) d.fecha = cel.dataset.fecha;
+  if ('puesto' in cel.dataset) d.puesto = cel.dataset.puesto;
+  else if ('p' in cel.dataset || 'noasig' in cel.dataset) d.persona = cel.dataset.p || null;
+  return d;
+}
+
+function engancharArrastre(tabla) {
+  if (!tabla || tabla.dataset.arrastre) return;
+  tabla.dataset.arrastre = '1';
+  const casilla = t => t.closest('td.cell[data-fecha], td.mcel[data-fecha]');
+  tabla.addEventListener('dragstart', ev => {
+    const bl = ev.target.closest('[data-asig]');
+    if (!bl || bl.classList.contains('aus')) return ev.preventDefault();
+    ev.dataTransfer.setData('text/plain', bl.dataset.asig);
+    ev.dataTransfer.effectAllowed = 'move';
+    bl.classList.add('llevando');
+  });
+  tabla.addEventListener('dragend', ev => {
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) bl.classList.remove('llevando');
+    tabla.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+  });
+  tabla.addEventListener('dragover', ev => {
+    const cel = casilla(ev.target); if (!cel) return;
+    ev.preventDefault();                    // sin esto el navegador no deja soltar
+    ev.dataTransfer.dropEffect = 'move';
+    if (!cel.classList.contains('encima')) {
+      tabla.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+      cel.classList.add('encima');
+    }
+  });
+  tabla.addEventListener('drop', ev => {
+    const cel = casilla(ev.target); if (!cel) return;
+    ev.preventDefault();
+    cel.classList.remove('encima');
+    const id = ev.dataTransfer.getData('text/plain');
+    if (id) soltarTurno(id, destinoDeCasilla(cel));
+  });
+}
+
+function pintarSemana() {
+  if (S.agrupar === 'puestos') return pintarSemanaPorPuesto();
+  const f = fechas();
+  $('#semTitulo').textContent = ddmm(f[0]) + ' al ' + ddmm(f[6]);
+  $('#semCab').innerHTML = '<th>Persona</th>' +
+    DIAS.map((d,i) => `<th class="${i>=4?'fin':''}">${d}<span class="num">${ddmm(f[i])}</span></th>`).join('') + '<th>Horas</th>';
+
+  const cuerpo = $('#semCuerpo'); cuerpo.innerHTML = '';
+  const gente = personasVisibles();
+  if (!gente.length) {
+    cuerpo.innerHTML = `<tr><td colspan="9" class="vacio">${(S.filtro || S.filtroE)
+      ? 'Nadie con esos filtros. Cámbialos arriba.'
+      : 'Todavía no tienes a nadie. Anda a <b>Equipo</b> y agrega tu primera persona.'}</td></tr>`;
+    $('#semPie').innerHTML = ''; $('#semPersonas').innerHTML = ''; return;
+  }
+
+  // Fila de turnos sin dueño, arriba de todo: se ven MIENTRAS planificas,
+  // no en otra pestaña. Es como lo hace Skello con su fila "Non assignés".
+  // La fila de los turnos sin dueño, arriba de todo. Ya no es un atajo a otra
+  // pestaña: son turnos de verdad, se editan aquí y se asignan desde el mismo
+  // diálogo, eligiendo a quién. Es como lo hace Skello con «Non assigné».
+  const sinDueno = el('tr','noasig');
+  sinDueno.innerHTML = '<th scope="row">Sin asignar<span class="rol">el primero que lo tome se lo queda</span></th>' +
+    f.map(fe => {
+      const aqui = S.abiertos.filter(a => a.fecha === fe);
+      return `<td class="cell" data-fecha="${fe}" data-p="">` + aqui.map(a => {
+        const t = a.turno_id ? turnoDe(a.turno_id) : null;
+        const ci = colorDe(a);
+        const of = a.ofrecido_por ? S.personas.find(x => x.id === a.ofrecido_por) : null;
+        return `<span class="bloque libre" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
+          draggable="true" role="button" tabindex="0"
+          title="${of ? 'Lo ofreció ' + esc(of.nombre) : 'Nadie lo ha tomado'} · arrástralo a alguien para asignárselo">
+          <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b><i>${hfmt(horasAsig(a))} h</i>
+          <em>${esc(a.puesto || 'sin puesto')}${of ? ' · ofrece ' + esc(of.nombre.split(' ')[0]) : ''}</em></span>`;
+      }).join('') + `<button type="button" class="anadir" data-anadir="${fe}"
+        aria-label="Publicar un turno sin asignar el ${fe}">${aqui.length ? '+' : '+ turno'}</button></td>`;
+    }).join('') + '<td class="tot"></td>';
+  sinDueno.addEventListener('click', ev => {
+    const cel = ev.target.closest('td[data-fecha]'); if (!cel) return;
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      const a = S.abiertos.find(x => x.id === bl.dataset.asig);
+      if (a) return abrirTurno(null, cel.dataset.fecha, a);
+    }
+    if (ev.target.closest('[data-anadir]')) abrirTurno(null, cel.dataset.fecha, null);
+  });
+  cuerpo.appendChild(sinDueno);
+
+  let grupoActual = null;
+  gente.forEach(p => {
+    // una fila de titulo cada vez que cambia el puesto: cocina, mesas, barra…
+    const g = (p.rol || '').trim() || 'Sin puesto';
+    if (g !== grupoActual) {
+      grupoActual = g;
+      const n = gente.filter(x => ((x.rol||'').trim() || 'Sin puesto') === g).length;
+      const huerfano = g === 'Sin puesto';
+      cuerpo.appendChild(el('tr','grupo' + (huerfano ? ' sinpuesto' : ''),
+        `<th colspan="9">${esc(g)} <span>${n}</span>${huerfano
+          ? '<span class="ojo">no se cuentan en la cobertura</span>' : ''}</th>`));
+    }
+    const tr = el('tr');
+    tr.innerHTML = `<th scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')} · ${clp(p.valor_hora)}/h · ${hfmt(p.horas_contrato)} h</span></th>` +
+      f.map(fe => `<td class="cell" data-fecha="${fe}" data-p="${p.id}">${pintarCasilla(p, fe)}</td>`).join('')
+      + `<td class="tot"><span class="hcell" id="h-${p.id}"></span></td>`;
+    cuerpo.appendChild(tr);
+
+    // Un solo escuchador por fila: las casillas se repintan enteras y colgarle
+    // un escuchador a cada bloque los dejaria huerfanos en cada repintado.
+    tr.addEventListener('click', ev => {
+      const papelera = ev.target.closest('[data-borrar]');
+      if (papelera) { ev.stopPropagation(); return quitarTurno(p, papelera.dataset.fecha, papelera.dataset.borrar); }
+      const añadir = ev.target.closest('[data-anadir]');
+      if (añadir) return abrirTurno(p, añadir.dataset.anadir, null);
+      const bloque = ev.target.closest('[data-asig]');
+      if (bloque) {
+        const a = filasDe(p.id, bloque.dataset.fecha).find(x => x.id === bloque.dataset.asig);
+        if (a) return abrirTurno(p, bloque.dataset.fecha, a);
+      }
+    });
+  });
+  engancharArrastre($('#tablaSem'));
+  pintarResumenSemana();
+}
+
+function analizar(p) {
+  const f = fechas();
+  let horas = 0, trabajados = 0, aus = 0;
+  const alertas = [];
+  f.forEach((fe, i) => {
+    const ts = turnosDe(p.id, fe), a = ausenciaDe(p.id, fe);
+    if (!ts.length && !a) return;
+    if (ts.length) {
+      const hd = horasDia(p.id, fe);
+      horas += hd; trabajados++;
+      if (hd > 10) alertas.push({n:'bad', t:`${DIAS[i]} sobre 10 h`});
+    }
+    else if (a.ausencia && a.ausencia !== 'L') aus++;
+  });
+  const tope = Number(p.horas_contrato) || Number(S.local.tope_semanal) || 42;
+  if (horas > tope) alertas.push({ n:'bad', t:`${hfmt(horas)} h · ${hfmt(horas-tope)} sobre su contrato de ${hfmt(tope)}` });
+  if (trabajados === 7) alertas.push({ n:'bad', t:'7 días seguidos' });
+  // disponibilidad: avisa, no bloquea. El encargado decide igual, pero viéndolo.
+  const nd = p.no_disponible || [];
+  f.forEach((fe, i) => {
+    if (turnosDe(p.id, fe).length && nd.includes(i))
+      alertas.push({ n:'warn', t:`${DIAS[i]}: dijo que no puede` });
+  });
+  if (aus) alertas.push({ n:'info', t:`${aus} ${aus===1?'día':'días'} de ausencia` });
+  if (!alertas.some(a => a.n==='bad' || a.n==='warn')) alertas.unshift({ n:'ok', t:'conforme' });
+  const dif = horas - (Number(p.horas_contrato) || 0);
+  return { horas, trabajados, aus, costo: horas * (p.valor_hora||0), alertas, tope, dif };
+}
+
+function pintarResumenSemana() {
+  const lista = $('#semPersonas'); lista.innerHTML = '';
+  let horasT = 0, costoT = 0;
+  personasVisibles().forEach(p => {
+    const a = analizar(p); horasT += a.horas; costoT += a.costo;
+    const h = $('#h-' + p.id);
+    if (h) {
+      // horas y, debajo, cuánto le falta o le sobra contra su contrato
+      const dif = a.dif;
+      h.innerHTML = hfmt(a.horas) + ' h' + (Math.abs(dif) >= 0.25
+        ? `<span class="dif ${dif > 0 ? 'mas' : 'menos'}">${dif > 0 ? '+' : '−'} ${hfmt(Math.abs(dif))} h</span>`
+        : '<span class="dif justo">al día</span>');
+      h.classList.toggle('over', a.horas > a.tope);
+    }
+    lista.appendChild(el('li', '', `
+      <div class="prow"><span class="pname">${esc(p.nombre)}</span>
+        <span class="pstat">${hfmt(a.horas)} h · ${a.trabajados} d · ${clp(a.costo)}${
+          Math.abs(a.dif) >= 0.5 ? ` · <b style="color:${a.dif>0?'var(--warn)':'var(--fg-dim)'}">${a.dif>0?'+':''}${hfmt(a.dif)} h</b>` : ''}${
+          Number(p.saldo_horas) ? ` · saldo ${Number(p.saldo_horas)>0?'+':''}${hfmt(Number(p.saldo_horas))} h` : ''}</span></div>
+      <div class="bar"><i class="${a.horas>a.tope?'over':''}" style="width:${Math.min(100,(a.horas/a.tope)*100)}%"></i></div>
+      <div class="flags">${a.alertas.map(x => `<span class="flag ${x.n}">${esc(x.t)}</span>`).join('')}</div>`));
+  });
+  const f = fechas();
+  const ventaT = f.reduce((s,fe) => s + ((S.dias[fe]||{}).venta || 0), 0);
+  const pct = ventaT ? (costoT/ventaT)*100 : NaN;
+  $('#semPie').innerHTML = '<tr class="sumrow"><th>Costo del día</th>' +
+    f.map(fe => {
+      const c = S.personas.reduce((s,p) => s + horasDia(p.id, fe) * (p.valor_hora||0), 0);
+      const v = (S.dias[fe]||{}).venta || 0, pd = v ? (c/v)*100 : NaN;
+      const col = !isFinite(pd) ? 'var(--fg-faint)' : (pd > Number(S.local.objetivo_pct) ? 'var(--bad)' : 'var(--fg-dim)');
+      return `<td style="color:${col}">${clp(c)}<br><span style="font-size:.6875rem">${pfmt(pd)}</span></td>`;
+    }).join('') + `<td>${clp(costoT)}<br><span style="font-size:.6875rem">${pfmt(pct)}</span></td></tr>`;
+}
+
+/* ---------- vista del día: una LÍNEA DE TIEMPO ----------
+   Pedro: «sigo sin entender Día». Tenía razón, y el problema no era la
+   explicación: era el formato. Estaba como una lista de tarjetas, una por
+   horario, y un día no es una lista. Así no se ve lo único que de verdad
+   importa mirar en un día — dónde quedan huecos —: había que calcularlo.
+
+   Skello lo hace como línea de tiempo: las horas corren de izquierda a
+   derecha y cada turno es una barra que ocupa su tramo. Los huecos se VEN. */
+/* ---------- la necesidad por hora, en la vista de dia ----------
+   La linea de tiempo ya estaba; lo que faltaba es lo de arriba: cuanta gente
+   SE NECESITA a cada hora contra cuanta HAY puesta. Convierte «mirar la malla y
+   contar cabezas» en «ver el hueco».
+
+   Lo puesto NO se teclea: sale solo de los turnos que ya estan asignados. Lo
+   unico que hay que definir es la necesidad, y eso ya existe en la dotacion.
+
+   Dos turnos que se pisan SUMAN su necesidad en las horas compartidas: si de
+   13 a 16:30 corren la mañana y la tarde, a esa hora se necesita la gente de
+   las dos. No es doble conteo, es lo que pide el local. */
+function necesidadPorHora(fe) {
+  const d = String((new Date(fe + 'T00:00:00').getDay() + 6) % 7);
+  const base = franja();
+  const ps = puestos();
+  const horas = [];
+  for (let h = base.h0; h < base.h1; h++) {
+    let req = 0;
+    S.turnos.forEach(t => {
+      if (Number(t.inicio) <= h && h < Number(t.fin))
+        ps.forEach(pu => { req += necesita(d, pu, t.id); });
+    });
+    // Cuenta PERSONAS. Un turno sin dueño esta planificado pero no hay nadie,
+    // que es justamente el hueco que esta pantalla tiene que mostrar.
+    const hay = S.personas.reduce((n, p) => n + (turnosDe(p.id, fe).some(a =>
+      Number(a.inicio) <= h && h < Number(a.fin)) ? 1 : 0), 0);
+    horas.push({ h, req, hay });
+  }
+  return horas;
+}
+
+/* Dicho en palabras, no solo en colores: el tramo que falta, de tal a tal hora.
+   Es la misma regla que ya sigue la cobertura de la semana. */
+function huecosEnPalabras(horas) {
+  const tramos = [];
+  let act = null;
+  horas.forEach(x => {
+    const falta = x.req - x.hay;
+    if (falta > 0) {
+      if (act && act.falta === falta && act.hasta === x.h) act.hasta = x.h + 1;
+      else { act = { desde: x.h, hasta: x.h + 1, falta }; tramos.push(act); }
+    } else act = null;
+  });
+  if (!tramos.length) return null;
+  return tramos.map(t => `falta${t.falta === 1 ? '' : 'n'} <b>${t.falta}</b> `
+    + `de <b>${hhmm(t.desde)}</b> a <b>${hhmm(t.hasta)}</b>`).join(' · ');
+}
+
+function pintarNecesidadDia(fe, caja) {
+  const horas = necesidadPorHora(fe);
+  const hayDotacion = horas.some(x => x.req > 0);
+  if (!hayDotacion) return;              // sin dotacion definida no hay nada que comparar
+
+  const celdas = horas.map(x => {
+    const cls = x.hay < x.req ? 'falta' : (x.req && x.hay > x.req ? 'sobra' : 'justo');
+    return `<div class="hncel ${cls}" title="${hhmm(x.h)}–${hhmm(x.h + 1)}: hay ${x.hay}, se necesita${x.req === 1 ? '' : 'n'} ${x.req}">
+      <span class="hnh">${hhmm(x.h).slice(0,2)}</span>
+      <b>${x.hay}</b><i>/${x.req}</i></div>`;
+  }).join('');
+
+  const faltan = huecosEnPalabras(horas);
+  const box = el('div', 'necdia');
+  box.innerHTML = `<div class="nectit">¿Alcanza la gente, hora por hora?
+      <span class="hint">arriba lo que hay, abajo lo que se necesita</span></div>
+    <div class="hnfila" style="grid-template-columns:repeat(${horas.length},1fr)">${celdas}</div>
+    <p class="necres ${faltan ? 'bad' : 'ok'}">${faltan ? faltan : 'No falta nadie en todo el día.'}</p>`;
+  caja.appendChild(box);
+}
+
+/* Reparte turnos que se pisan en CARRILES dentro de la misma fila.
+   Sin esto, dos personas de 08:00 a 16:30 en el mismo puesto caen una encima de
+   la otra y se ve UNA SOLA — lo pregunto Pedro antes de que pasara.
+   Cada turno va al primer carril donde no choque con el ultimo que hay ahi. */
+function repartirEnCarriles(items) {
+  const orden = items.slice().sort((x, y) => Number(x.a.inicio) - Number(y.a.inicio)
+                                          || Number(x.a.fin) - Number(y.a.fin));
+  const finDe = [];                       // hasta que hora llega cada carril
+  orden.forEach(it => {
+    let c = finDe.findIndex(f => f <= Number(it.a.inicio));
+    if (c === -1) { c = finDe.length; finDe.push(0); }
+    finDe[c] = Number(it.a.fin);
+    it.carril = c;
+  });
+  return { items: orden, carriles: Math.max(1, finDe.length) };
+}
+
+/* ---------- arrastrar en la vista de DIA ----------
+   Pedro eligio la opcion A (04-10, msg 3673): correrlo de lado cambia la HORA,
+   soltarlo en otra fila cambia la PERSONA. Y pidio que cambiar de persona AVISE.
+
+   El salto es de 15 minutos (msg 3677: «no sera mejor el desplazamiento cada 15
+   minutos?»). Mas fino que media hora y alcanza para cualquier horario real.
+
+   Se respeta DONDE se agarro la barra: si uno la toma por la mitad, la barra no
+   salta para que su inicio quede bajo el cursor. */
+const SALTO = 0.25;                        // 15 minutos, en horas
+
+function horaDesdeX(pista, clientX, agarreFrac) {
+  const linea = pista.closest('.linea');
+  const h0 = Number(linea.dataset.h0), h1 = Number(linea.dataset.h1);
+  const r = pista.getBoundingClientRect();
+  if (!r.width) return null;
+  const frac = (clientX - r.left) / r.width - (agarreFrac || 0);
+  const h = h0 + frac * (h1 - h0);
+  return Math.round(h / SALTO) * SALTO;
+}
+
+async function soltarEnDia(id, destino, horaNueva) {
+  const a = turnoArrastrable(id);
+  if (!a) return;
+  const d = destino || {};
+  const dur = Number(a.fin) - Number(a.inicio);
+  let inicio = Number(a.inicio);
+  if (horaNueva != null && Math.abs(horaNueva - inicio) >= SALTO) inicio = horaNueva;
+  if (inicio < 0) inicio = 0;
+  const fin = inicio + dur;
+  const mismaHora = Math.abs(inicio - Number(a.inicio)) < 0.001;
+
+  const cambiaPersona = 'persona' in d && (a.persona_id || null) !== (d.persona || null);
+  const cambiaPuesto  = 'puesto'  in d && (a.puesto || '').trim() !== (d.puesto || '').trim();
+  if (!cambiaPersona && !cambiaPuesto && mismaHora) return;      // no cambió nada
+
+  const m = $('#msgSem');
+  const aviso = (texto, clase) => {
+    if (!m) return;
+    m.textContent = texto; m.className = 'msg ' + clase;
+    setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
+  };
+  const nom = x => { const q = x ? S.personas.find(y => y.id === x) : null;
+                     return q ? q.nombre.split(' ')[0] : 'Sin asignar'; };
+
+  // Pedro: «si modifica el turno de otra persona que arroje una alerta». Cambiar
+  // de dueño le saca el turno a alguien: eso se confirma. Correr la hora o
+  // cambiar de puesto, no — no se lo quita a nadie.
+  if (cambiaPersona &&
+      !confirm(`El turno pasa de ${nom(a.persona_id)} a ${nom(d.persona)}.\n\n`
+             + `${hhmm(inicio)}–${hhmm(fin)}. ¿Lo hago?`)) return;
+
+  const personaFinal = 'persona' in d ? (d.persona || null) : (a.persona_id || null);
+  if (personaFinal) {
+    const aus = ausenciaDe(personaFinal, a.fecha);
+    if (aus && aus.ausencia !== 'L')
+      return aviso(`${nom(personaFinal)} tiene ${(AUSENCIAS[aus.ausencia] || 'una ausencia').toLowerCase()} `
+                 + 'ese día. Quita la ausencia primero.', 'bad');
+  }
+
+  const ch2 = chocaCon(personaFinal, a.fecha, inicio, fin, a.id);
+  if (ch2) return aviso(diceChoque(nom(personaFinal), ch2), 'bad');
+
+  const campos = {};
+  if (!mismaHora) { campos.inicio = inicio; campos.fin = fin; }
+  if (cambiaPuesto) campos.puesto = (d.puesto || '').trim();
+  if ('persona' in d) { campos.persona_id = d.persona || null; campos.ofrecido_por = null; }
+  try {
+    recordar('mover un turno');
+    await DATOS.editarAsignacion(id, campos);
+    await refrescar();
+    const partes = [];
+    if (cambiaPersona) partes.push('a ' + nom(d.persona));
+    if (cambiaPuesto) partes.push('a ' + (d.puesto || 'sin puesto'));
+    if (!mismaHora) partes.push(hhmm(inicio) + '–' + hhmm(fin));
+    aviso('Turno movido ' + partes.join(' · ') + '.', 'ok');
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();
+    aviso(e.message, 'bad');
+  }
+}
+
+/* ---------- estirar y acortar un turno ----------
+   Pedro (04-10): «si tengo un turno de las 9:00 a la 13:00 deberia poder
+   extenderlo a las 13:30 o reducirlo a las 12:00... esto en ambos sentidos».
+
+   Va con eventos de puntero y no con el arrastre del navegador: arrastrar sirve
+   para llevar la barra entera, y estirar es otra cosa. Mientras se estira, la
+   barra deja de ser `draggable` para que los dos gestos no se peleen.
+
+   Mismo salto de 15 minutos y un minimo de 15: un turno de duracion cero no
+   significa nada y la base lo guardaria igual. */
+function engancharEstirar(caja) {
+  if (!caja || caja.dataset.estirar) return;
+  caja.dataset.estirar = '1';
+
+  caja.addEventListener('pointerdown', ev => {
+    const tira = ev.target.closest('.tira[data-borde]'); if (!tira) return;
+    const barra = tira.closest('.barra[data-asig]'); if (!barra) return;
+    const pista = barra.closest('.linea-pista'); if (!pista) return;
+    const a = turnoArrastrable(barra.dataset.asig); if (!a) return;
+
+    ev.preventDefault(); ev.stopPropagation();
+    barra.draggable = false;                 // que no arranque el arrastre
+    barra.classList.add('estirando');
+    const borde = tira.dataset.borde;
+    const linea = pista.closest('.linea');
+    const h0 = Number(linea.dataset.h0), h1 = Number(linea.dataset.h1);
+    const r = pista.getBoundingClientRect();
+    let ini = Number(a.inicio), fin = Number(a.fin);
+
+    const horaEn = x => {
+      const h = h0 + ((x - r.left) / r.width) * (h1 - h0);
+      return Math.min(h1, Math.max(h0, Math.round(h / SALTO) * SALTO));
+    };
+    const pintar = () => {
+      const iz = ((ini - h0) / (h1 - h0)) * 100, an = ((fin - ini) / (h1 - h0)) * 100;
+      barra.style.left = iz + '%'; barra.style.width = an + '%';
+      const t = barra.querySelector('b'); if (t) t.textContent = hhmm(ini) + '–' + hhmm(fin);
+    };
+    const mover = e => {
+      const h = horaEn(e.clientX);
+      if (borde === 'inicio') ini = Math.min(h, fin - SALTO);
+      else                    fin = Math.max(h, ini + SALTO);
+      pintar();
+    };
+    const soltar = async e => {
+      document.removeEventListener('pointermove', mover);
+      document.removeEventListener('pointerup', soltar);
+      barra.classList.remove('estirando');
+      barra.draggable = true;
+      if (Math.abs(ini - Number(a.inicio)) < 0.001 && Math.abs(fin - Number(a.fin)) < 0.001) {
+        pintar(); return;                    // no se movio
+      }
+      const m = $('#msgSem');
+      const aviso = (texto, clase) => {
+        if (!m) return;
+        m.textContent = texto; m.className = 'msg ' + clase;
+        setTimeout(() => { if (m.textContent === texto) m.textContent = ''; }, 5000);
+      };
+      const ch3 = chocaCon(a.persona_id, a.fecha, ini, fin, a.id);
+      if (ch3) {
+        const q = S.personas.find(x => x.id === a.persona_id);
+        aviso(diceChoque(q ? q.nombre.split(' ')[0] : 'Esa persona', ch3), 'bad');
+        await refrescar();                   // devolver la barra a su sitio
+        return;
+      }
+      try {
+        recordar('cambiar la hora de un turno');
+        await DATOS.editarAsignacion(a.id, { inicio: ini, fin });
+        await refrescar();
+        aviso(`Turno de ${hhmm(ini)} a ${hhmm(fin)}.`, 'ok');
+      } catch (err) {
+        S.hist.pop(); pintarDeshacer();
+        aviso(err.message, 'bad');
+        await refrescar();                   // deshacer lo pintado a mano
+      }
+    };
+    document.addEventListener('pointermove', mover);
+    document.addEventListener('pointerup', soltar);
+  });
+}
+
+function engancharArrastreDia(caja) {
+  if (!caja || caja.dataset.arrastre) return;
+  caja.dataset.arrastre = '1';
+  let agarre = 0;                          // donde se tomo la barra, 0..1 de la pista
+  caja.addEventListener('dragstart', ev => {
+    const b = ev.target.closest('.barra[data-asig]');
+    if (!b) return ev.preventDefault();
+    const pista = b.closest('.linea-pista');
+    const r = pista.getBoundingClientRect(), rb = b.getBoundingClientRect();
+    agarre = r.width ? (ev.clientX - rb.left) / r.width : 0;
+    ev.dataTransfer.setData('text/plain', b.dataset.asig);
+    ev.dataTransfer.effectAllowed = 'move';
+    b.classList.add('llevando');
+  });
+  caja.addEventListener('dragend', ev => {
+    const b = ev.target.closest('.barra[data-asig]');
+    if (b) b.classList.remove('llevando');
+    caja.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+  });
+  caja.addEventListener('dragover', ev => {
+    const pista = ev.target.closest('.linea-pista[data-fecha]'); if (!pista) return;
+    ev.preventDefault();
+    ev.dataTransfer.dropEffect = 'move';
+    if (!pista.classList.contains('encima')) {
+      caja.querySelectorAll('.encima').forEach(x => x.classList.remove('encima'));
+      pista.classList.add('encima');
+    }
+  });
+  caja.addEventListener('drop', ev => {
+    const pista = ev.target.closest('.linea-pista[data-fecha]'); if (!pista) return;
+    ev.preventDefault();
+    pista.classList.remove('encima');
+    const id = ev.dataTransfer.getData('text/plain'); if (!id) return;
+    const fila = pista.closest('.linea-fila');
+    // La fila dice que cambia: si es una persona, el dueño; si es un puesto, el
+    // puesto. Y correrlo de lado cambia la hora en los dos casos.
+    const destino = S.agrupar === 'puestos'
+      ? { puesto: fila.dataset.puesto || '' }
+      : { persona: fila.dataset.p || null };
+    soltarEnDia(id, destino, horaDesdeX(pista, ev.clientX, agarre));
+  });
+}
+
+function pintarDia() {
+  const fe = iso(S.dia);
+  const i = (S.dia.getDay() + 6) % 7;
+  $('#semTitulo').textContent = DIAS[i] + ' ' + ddmm(fe);
+
+  const caja = $('#cajaDia'); caja.innerHTML = '';
+  pintarNecesidadDia(fe, caja);
+
+  // La franja se estira a lo que de verdad haya ese día, no solo al catálogo:
+  // un turno escrito a mano puede empezar antes o terminar después.
+  const todos = S.personas.flatMap(p => turnosDe(p.id, fe).map(a => ({ p, a })))
+    .concat(S.abiertos.filter(a => a.fecha === fe).map(a => ({ p: null, a })));
+  const base = franja();
+  const h0 = Math.floor(Math.min(base.h0, ...todos.map(x => Number(x.a.inicio))));
+  const h1 = Math.ceil(Math.max(base.h1, ...todos.map(x => Number(x.a.fin))));
+  const ancho = Math.max(h1 - h0, 1);
+  const pos = h => ((h - h0) / ancho) * 100;
+
+  if (!todos.length) {
+    caja.innerHTML = '<p class="vacio">Nadie tiene turno este día. '
+      + 'Aprieta una fila para agregar uno.</p>';
+  }
+
+  // regla de horas arriba
+  const horas = [];
+  for (let h = Math.ceil(h0); h <= h1; h++) horas.push(h);
+  const regla = horas.map(h => `<span class="hmarca" style="left:${pos(h)}%">${hhmm(h)}</span>`).join('');
+
+  /* Las filas: por PERSONA o por PUESTO, segun el mismo control de la semana.
+     Agrupado por puesto se ve de un golpe QUE PUESTO tiene el hoyo y a que hora,
+     que es lo que la franja de necesidad de arriba no dice: ella avisa que
+     faltan dos a las 20:00, pero no de que. */
+  const libres = S.abiertos.filter(a => a.fecha === fe);
+  const filas = [];
+  if (S.agrupar === 'puestos') {
+    // Cada turno lleva SU puesto, no el de la persona: alguien puede hacer barra
+    // el lunes y cocina el martes. Se agrupa por el del turno.
+    const porPuesto = new Map();
+    personasVisibles().forEach(p => turnosDe(p.id, fe).forEach(a => {
+      const q = puestoRot(a, p);
+      if (!porPuesto.has(q)) porPuesto.set(q, []);
+      porPuesto.get(q).push({ a, p });
+    }));
+    libres.forEach(a => {
+      const q = (a.puesto || '').trim() || 'Sin puesto';
+      if (!porPuesto.has(q)) porPuesto.set(q, []);
+      porPuesto.get(q).push({ a, p: null });
+    });
+    // Igual que en la semana: los puestos del CATALOGO salen aunque no tengan
+    // ningun turno ese dia. Si no, un dia en blanco no deja crear nada.
+    puestos().forEach(q => { if (!porPuesto.has(q)) porPuesto.set(q, []); });
+    [...porPuesto.keys()].sort((x, y) => x.localeCompare(y, 'es'))
+      .forEach(q => filas.push({ puesto: q, items: porPuesto.get(q) }));
+  } else {
+    personasVisibles().forEach(p => {
+      const ts = turnosDe(p.id, fe);
+      if (ts.length) filas.push({ p, items: ts.map(a => ({ a, p })) });
+    });
+    if (libres.length) filas.unshift({ p: null, items: libres.map(a => ({ a, p: null })) });
+  }
+
+  // h0/h1 viajan en el DOM: el manejador de arrastre vive fuera de esta funcion
+  // y necesita convertir una posicion en pantalla a una hora.
+  caja.innerHTML = `
+    <div class="linea" data-h0="${h0}" data-h1="${h1}" data-fecha="${fe}">
+      <div class="linea-cab"><div class="linea-quien"></div><div class="linea-pista">${regla}</div></div>
+      ${filas.map(fila => {
+        const porPuesto = S.agrupar === 'puestos';
+        // En la vista por puestos la fila NO es de nadie: su `data-p` queda vacio
+        // a proposito, para que soltar ahi no le adjudique el turno a nadie.
+        const quien = porPuesto
+          ? `<b>${esc(fila.puesto)}</b><span class="rol">${fila.items.length} turno${fila.items.length === 1 ? '' : 's'}</span>`
+          : (fila.p ? `<b>${esc(fila.p.nombre)}</b><span class="rol">${esc(fila.p.rol || '')}</span>`
+                    : '<b>Sin asignar</b><span class="rol">libre</span>');
+        const rep = repartirEnCarriles(fila.items);
+        return `
+        <div class="linea-fila${porPuesto ? ' porpuesto' : ''}" data-p="${!porPuesto && fila.p ? fila.p.id : ''}"
+             ${porPuesto ? `data-puesto="${esc(fila.puesto)}"` : ''}
+             style="--carriles:${rep.carriles}">
+          <div class="linea-quien">${quien}</div>
+          <div class="linea-pista" data-fecha="${fe}">
+            ${horas.map(h => `<span class="hlinea" style="left:${pos(h)}%"></span>`).join('')}
+            ${rep.items.map(({ a, p, carril }) => {
+              const t = a.turno_id ? turnoDe(a.turno_id) : null;
+              const ci = colorDe(a);
+              const iz = pos(Number(a.inicio)), an = pos(Number(a.fin)) - iz;
+              const m = marcaAsig(a);
+              // Agrupado por puesto, lo util en la barra es QUIEN lo cubre; por
+              // persona, es el puesto. La misma barra dice lo que falta saber.
+              const pie = porPuesto ? (p ? p.nombre.split(' ')[0] : 'sin asignar')
+                                    : (puestoDe(a, p) || 'sin puesto');
+              return `<span class="barra${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
+                draggable="true" role="button" tabindex="0"
+                style="left:${iz}%;width:${an}%;--carril:${carril}"
+                title="${esc((p ? p.nombre + ' · ' : 'Sin asignar · ')
+                  + (puestoDe(a, p) || 'sin puesto') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
+                  + ' · ' + hfmt(horasAsig(a)) + ' h' + (a.nota ? '\n' + a.nota : ''))}">
+                <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
+                <em>${esc(pie)}</em>
+                ${m.entrada ? '<i class="marcado" title="marcó entrada">•</i>' : ''}
+                <i class="tira izq" data-borde="inicio" title="Cambiar la hora de entrada"></i>
+                <i class="tira der" data-borde="fin" title="Cambiar la hora de salida"></i>
+              </span>`;
+            }).join('')}
+          </div>
+        </div>`; }).join('')}
+    </div>`;
+
+  engancharArrastreDia(caja);
+  engancharEstirar(caja);
+
+  // abrir un turno, o agregar uno en la fila de alguien
+  caja.onclick = ev => {
+    const pista = ev.target.closest('.linea-pista[data-fecha]'); if (!pista) return;
+    const fila = pista.closest('.linea-fila');
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      // El dueño sale del TURNO, no de la fila: agrupado por puesto la fila no
+      // es de nadie, y buscar por fila abriria el turno como «sin asignar».
+      const a = turnoArrastrable(bl.dataset.asig);
+      if (a) return abrirTurno(a.persona_id ? (S.personas.find(x => x.id === a.persona_id) || null) : null, fe, a);
+      return;
+    }
+    // Apretar un hueco crea, con lo que la fila ya sabe: en fila de persona viene
+    // con la persona; en fila de puesto, con el puesto, y se elige a quien.
+    if (S.agrupar === 'puestos')
+      return abrirTurno(null, fe, null, fila.dataset.puesto || '');
+    const p = fila.dataset.p ? S.personas.find(x => x.id === fila.dataset.p) : null;
+    abrirTurno(p, fe, null);
+  };
+
+  const ausentes = personasVisibles().map(p => ({ p, a: ausenciaDe(p.id, fe) }))
+    .filter(x => x.a && x.a.ausencia !== 'L');
+  if (ausentes.length) caja.appendChild(el('div','turnodia', `
+    <div class="turnodia-h"><b>Ausencias</b></div>
+    <ul>${ausentes.map(x => `<li><b>${esc(x.p.nombre)}</b> <span class="rol">${AUSENCIAS[x.a.ausencia]}</span></li>`).join('')}</ul>`));
+
+  pintarResumenSemana();
+}
+
+/* ---------- vista del mes: el patrón de la dotación de un vistazo ---------- */
+function pintarMes() {
+  const ds = diasDelMes();
+  const ref = new Date(ds[0] + 'T00:00:00');
+  $('#semTitulo').textContent = ref.toLocaleDateString('es-CL', { month:'long', year:'numeric' });
+
+  $('#mesCab').innerHTML = '<th>Persona</th>' + ds.map((f,n) => {
+    const d = new Date(f + 'T00:00:00'), i = (d.getDay() + 6) % 7;
+    // una columna fina antes de cada lunes: parte el mes en semanas legibles
+    const corte = (i === 0 && n > 0) ? '<th class="corte"></th>' : '';
+    return corte + `<th class="${i>=5?'fin':''}">${d.getDate()}<span class="dsem">${DIAS[i][0]}</span></th>`;
+  }).join('') + '<th>Horas</th>';
+
+  const cuerpo = $('#mesCuerpo'); cuerpo.innerHTML = '';
+
+  /* Los turnos SIN DUEÑO, arriba de todo, igual que en la semana.
+     Hasta el 04-10 el mes solo dibujaba filas de PERSONAS, asi que un turno sin
+     asignar no aparecia en ninguna parte. Pedro aplico un modelo con «solo la
+     forma» —que crea justamente turnos sin dueño—, miro el mes y vio la pantalla
+     vacia. Si la app deja crearlos, el mes tiene que mostrarlos: si no, uno
+     planifica y concluye que no se guardo nada. */
+  const sinDueno = ds.map((f, n) => {
+    const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
+    const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
+    const aqui = S.abiertos.filter(a => a.fecha === f);
+    if (!aqui.length)
+      return corte + `<td class="mcel vacia" data-noasig="1" data-fecha="${f}"></td>`;
+    return corte + `<td class="mcel" data-noasig="1" data-fecha="${f}">` + aqui.map(a => {
+      const t = a.turno_id ? turnoDe(a.turno_id) : null;
+      const ci = colorDe(a);
+      const pu = (a.puesto || '').trim();
+      return `<span class="mbl" data-c="${ci}" data-asig="${a.id}" draggable="true"
+        role="button" tabindex="0"
+        title="${esc('Sin asignar · ' + (pu ? pu + ' · ' : '')
+        + hhmm(a.inicio) + '–' + hhmm(a.fin) + ' · ' + hfmt(horasAsig(a)) + ' h')}"
+        >${hhmm(a.inicio)}<br>${hhmm(a.fin)}</span>`;
+    }).join('') + '</td>';
+  }).join('');
+  const nSin = S.abiertos.length;
+  cuerpo.innerHTML = `<tr class="noasig"><th class="r" scope="row">Sin asignar`
+    + `<span class="rol">el primero que lo tome se lo queda</span></th>${sinDueno}`
+    + `<td class="tot">${nSin || ''}</td></tr>`;
+
+  personasVisibles().forEach(p => {
+    let horas = 0;
+    const celdas = ds.map((f,n) => {
+      const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
+      const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
+      const ts = turnosDe(p.id, f), a = ausenciaDe(p.id, f);
+      if (ts.length) {
+        horas += horasDia(p.id, f);
+        // Un bloque por turno, con las horas en dos líneas. El mes sirve para
+        // ver el patrón —«tres garzones todos los sábados»— y con una inicial
+        // no se ve nada.
+        return corte + `<td class="mcel" data-p="${p.id}" data-fecha="${f}">` + ts.map(x => {
+          const pl = x.turno_id ? turnoDe(x.turno_id) : null;
+          const ci = colorDe(x);
+          const pu = puestoDe(x, p);
+          return `<span class="mbl" data-c="${ci}" data-asig="${x.id}" draggable="true"
+            role="button" tabindex="0"
+            title="${esc((pu ? pu + ' · ' : '')
+            + hhmm(x.inicio) + '–' + hhmm(x.fin) + ' · ' + hfmt(horasAsig(x)) + ' h'
+            + (x.nota ? '\n' + x.nota : ''))}">${hhmm(x.inicio)}<br>${hhmm(x.fin)}</span>`;
+        }).join('') + '</td>';
+      }
+      if (a && a.ausencia && a.ausencia !== 'L')
+        return corte + `<td class="mcel" data-p="${p.id}" data-fecha="${f}"><span class="mbl aus"
+          data-asig="${a.id}" role="button" tabindex="0" title="${AUSENCIAS[a.ausencia]}">${AUSENCIAS[a.ausencia]}</span></td>`;
+      return corte + `<td class="mcel vacia" data-p="${p.id}" data-fecha="${f}" role="button" tabindex="0"
+        title="Agregar turno"></td>`;
+    }).join('');
+    cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')}</span></th>${celdas}<td class="tot">${hfmt(horas)} h</td></tr>`;
+  });
+
+  // Al pie, las horas de cada día y el total del mes: es lo que convierte la
+  // tabla en algo con lo que se decide, y no solo en una grilla de colores.
+  let totMes = 0;
+  const pie = ds.map((f,n) => {
+    const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
+    const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
+    const h = personasVisibles().reduce((x,p) => x + horasDia(p.id, f), 0);
+    totMes += h;
+    return corte + `<td class="mpie">${h ? hfmt(h) : ''}</td>`;
+  }).join('');
+  cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Horas del día</th>${pie}<td class="tot">${hfmt(totMes)} h</td></tr>`;
+
+  engancharArrastre(cuerpo.closest('table') || cuerpo);
+
+  // Un solo escuchador para toda la tabla. En el mes también se edita: Pedro
+  // lo pidió y Skello lo hace («si veo algún desajuste puedo rectificarlo
+  // directamente desde aquí»), que es justamente para lo que sirve el mes.
+  cuerpo.onclick = ev => {
+    // La fila sin dueño va primero: no tiene persona, y su lista es S.abiertos.
+    const sin = ev.target.closest('td.mcel[data-noasig]');
+    if (sin) {
+      const b = ev.target.closest('[data-asig]');
+      const a = b ? S.abiertos.find(x => x.id === b.dataset.asig) : null;
+      return abrirTurno(null, sin.dataset.fecha, a);
+    }
+    const cel = ev.target.closest('td.mcel[data-p]'); if (!cel) return;
+    const p = S.personas.find(x => x.id === cel.dataset.p); if (!p) return;
+    const bl = ev.target.closest('[data-asig]');
+    if (bl) {
+      const a = filasDe(p.id, cel.dataset.fecha).find(x => x.id === bl.dataset.asig);
+      if (a) return abrirTurno(p, cel.dataset.fecha, a);
+    }
+    abrirTurno(p, cel.dataset.fecha, null);
+  };
+
+  $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = '';
+}
+
+async function nuevoTurnoRapido() {
+  const nombre = prompt('¿Cómo se llama el turno nuevo?\n\nPor ejemplo: Apertura, Tarde, Cierre.');
+  if (!nombre || !nombre.trim()) return;
+  try {
+    await DATOS.crearTurno(S.local.id, { nombre: nombre.trim(), inicio: 9, fin: 17, colacion: 0.5,
+                                         orden: S.turnos.length });
+    await refrescar();
+    $('#detNecesita').open = true;
+  } catch (e) { error(e); }
+}
+
+/* ---------- llenar con datos de ejemplo ----------
+   Pedro: «si quiero probar la plataforma tengo que gestionar a todo el
+   personal yo manualmente». La salida no es darle herramientas para hacerlo
+   mas rapido: es que no tenga que hacerlo.
+
+   Esto deja la semana como si el local llevara una semana andando, con los
+   casos que hacen que las pantallas digan algo: alguien que llego tarde,
+   alguien que no marco, un turno sin dueño, una ausencia y la propina
+   repartida de verdad. Con todo en blanco no se entiende para que sirve nada.
+
+   Todo lo que crea se deshace con Limpiar, Borrar las marcas y Deshacer. */
+// La gente del local de ejemplo. Nombres inventados a proposito: esto no se
+// mezcla con nadie real, y por eso tampoco lleva RUT, telefono ni correo.
+const EJEMPLO = [
+  { nombre:'Camila Reyes',    rol:'Barra',  equipo:'Fijos',       valor_hora:3500, horas_contrato:45, factor_propina:1 },
+  { nombre:'Alonso Tapia',    rol:'Garzón', equipo:'Fijos',       valor_hora:3200, horas_contrato:45, factor_propina:1 },
+  { nombre:'Carla Núñez',     rol:'Barra',  equipo:'Fijos',       valor_hora:3500, horas_contrato:45, factor_propina:1 },
+  { nombre:'Bernardita Soto', rol:'Garzón', equipo:'Por llamado', valor_hora:3200, horas_contrato:30, factor_propina:1 },
+  { nombre:'Ignacio Fuentes', rol:'Cocina', equipo:'Fijos',       valor_hora:4200, horas_contrato:45, factor_propina:0.5 },
+  { nombre:'Luz Carrasco',    rol:'Cocina', equipo:'Fijos',       valor_hora:3800, horas_contrato:45, factor_propina:0.5 },
+  { nombre:'Matías Vera',     rol:'Garzón', equipo:'Por llamado', valor_hora:3200, horas_contrato:20, factor_propina:1 },
+  { nombre:'Paula Lagos',     rol:'Barra',  equipo:'Fijos',       valor_hora:3500, horas_contrato:45, factor_propina:1 },
+];
+
+async function llenarEjemplo() {
+  const m = $('#msgEjemplo');
+  const b = $('#btnEjemplo');
+  if (!confirm('Se va a crear un local nuevo llamado «Ejemplo», aparte de los tuyos, '
+    + 'con su propia gente y una semana completa de turnos, marcas y propinas.\n\n'
+    + 'No se toca ninguno de tus locales. Para volver al tuyo, lo eliges arriba.')) return;
+
+  b.disabled = true; b.textContent = 'Revisando…';
+  m.textContent = 'Revisando que la base esté al día…'; m.className = 'msg';
+
+  // Comprobar ANTES. Intentar y fallar deja al usuario reintentando un boton
+  // que no puede funcionar, y cada intento ensucia un poco mas.
+  const falta = await DATOS.baseAlDia(S.local.id).catch(() => []);
+  if (falta.length) {
+    b.disabled = false; b.textContent = 'Llenar con datos de ejemplo';
+    m.innerHTML = 'La base todavía no está al día: le faltan <b>' + falta.map(esc).join('</b>, <b>') + '</b>.<br>'
+      + 'Abre <a href="https://github.com/mallaturnos/mallaturnos.github.io/blob/main/arreglo-todo.sql" target="_blank" rel="noopener"><b>arreglo-todo.sql</b></a>, '
+      + 'copia todo, pégalo en el <b>SQL Editor</b> de Supabase, dale <b>Run</b> y vuelve a recargar esta página.';
+    m.className = 'msg bad'; return;
+  }
+
+  b.textContent = 'Creando…';
+  m.textContent = 'Creando el local, la gente y los turnos…'; m.className = 'msg';
+
+  // Si esto falla a mitad de camino, hay que DESHACER el local recien creado.
+  // Si no, cada intento fallido deja un «Ejemplo» vacio dando vueltas: a Pedro
+  // le pasó tres veces seguidas porque el fallo venia despues de crearlo.
+  let recienCreado = null;
+  try {
+    const yaHay = (S.locales || []).filter(l => l.nombre === 'Ejemplo');
+    if (yaHay.length) {
+      if (!confirm(`Ya tienes ${yaHay.length === 1 ? 'un local' : yaHay.length + ' locales'} «Ejemplo».\n\n`
+        + 'Voy a usar el que ya está en vez de crear otro.')) {
+        b.disabled = false; b.textContent = 'Llenar con datos de ejemplo'; m.textContent = ''; return;
+      }
+      S.local = yaHay[0];
+      try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
+      await refrescar();
+    } else {
+      S.local = await DATOS.crearLocal('Ejemplo');
+      recienCreado = S.local.id;
+    }
+    if (!S.turnos.length) await Promise.all([
+      DATOS.crearTurno(S.local.id, { nombre:'Apertura', inicio:8,  fin:16.5, colacion:0.5, orden:1 }),
+      DATOS.crearTurno(S.local.id, { nombre:'Tarde',    inicio:13, fin:21.5, colacion:0.5, orden:2 }),
+      DATOS.crearTurno(S.local.id, { nombre:'Cierre',   inicio:17, fin:25,   colacion:0.5, orden:3 }),
+    ]);
+    for (const q of ['Barra','Cocina','Garzón'])
+      try { await DATOS.crearPuesto(S.local.id, { nombre:q, color:(['Barra','Cocina','Garzón'].indexOf(q) % 4) + 1,
+                                                  orden:['Barra','Cocina','Garzón'].indexOf(q) + 1 }); }
+      catch (e) { /* si el SQL de puestos no está, se sigue igual */ }
+    // si ya estaban, no se duplican
+    for (const d of EJEMPLO)
+      if (!S.personas.some(x => normal(x.nombre) === normal(d.nombre)))
+        await DATOS.crearPersona(S.local.id, d);
+    try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
+    await refrescar();
+  } catch (e) {
+    // deshacer: que un intento fallido no deje un local vacío
+    if (recienCreado) {
+      try { await DATOS.borrarLocal(recienCreado); } catch (e2) {}
+      try { localStorage.removeItem('malla-local'); } catch (e2) {}
+      await verJefe().catch(() => {});
+    }
+    b.disabled = false; b.textContent = 'Llenar con datos de ejemplo';
+    m.textContent = e.message + ' — no se creó nada.'; m.className = 'msg bad'; return;
+  }
+
+  const f = fechas();
+  m.textContent = 'Armando la semana…'; b.textContent = 'Llenando…';
+  const ts = S.turnos.slice().sort((a,x) => Number(a.inicio) - Number(x.inicio));
+  const gente = S.personas.slice();
+  let creados = 0, marcados = 0;
+
+  try {
+    recordar('llenar con datos de ejemplo');
+
+    // Reparte a la gente entre los turnos, rotando, y deja libre a cada uno un
+    // dia distinto: una malla donde todos trabajan siempre no se parece a nada.
+    for (let d = 0; d < 7; d++) {
+      const fe = f[d];
+      for (let i = 0; i < gente.length; i++) {
+        const p = gente[i];
+        if ((i + d) % 7 === 6) continue;                 // su dia libre
+        if (d === 6 && i % 2 === 0) continue;            // domingo con menos gente
+        const t = ts[(i + d) % ts.length];
+        if (turnosDe(p.id, fe).some(x => Number(x.inicio) === Number(t.inicio))) continue;
+        await DATOS.crearAsignacion(S.local.id, p.id, fe, {
+          turno_id: t.id, inicio: t.inicio, fin: t.fin, colacion: t.colacion,
+          puesto: (p.rol || '').trim(), nota: '',
+        });
+        creados++;
+      }
+    }
+
+    // Una ausencia, para que esa columna no se vea siempre vacia
+    if (gente.length > 2) await DATOS.ponerAusencia(S.local.id, gente[2].id, f[3], 'V');
+
+    // Un turno sin dueño esperando que alguien lo tome
+    await DATOS.crearAsignacion(S.local.id, null, f[5], {
+      turno_id: ts[0].id, inicio: ts[0].inicio, fin: ts[0].fin, colacion: ts[0].colacion,
+      puesto: (gente[0].rol || '').trim(), nota: 'reemplazo por licencia',
+    });
+    creados++;
+
+    await refrescar();
+
+    // Marcas: la gracia esta en que NO cuadren con lo planificado. Si todos
+    // marcan exacto, la pantalla de control horario no muestra nada.
+    for (let d = 0; d < 5; d++) {
+      const fe = f[d];
+      const hoy = new Date(fe + 'T00:00:00');
+      const enHora = h => { const x = new Date(hoy); const hh = ((Number(h) % 24) + 24) % 24;
+        x.setHours(Math.floor(hh), Math.round((hh - Math.floor(hh)) * 60), 0, 0);
+        if (Number(h) >= 24) x.setDate(x.getDate() + 1);
+        return x.toISOString(); };
+      let n = 0;
+      for (const p of gente) {
+        for (const a of turnosDe(p.id, fe)) {
+          n++;
+          if (n % 7 === 0) continue;                       // este no marco nada
+          const tarde = (n % 5 === 0) ? 0.6 : 0;           // este llego 36 min tarde
+          const antes = (n % 4 === 0) ? 0.5 : 0;           // este se fue media hora antes
+          await DATOS.marcarComoJefe(a.id, p.id, fe, {
+            entrada: enHora(Number(a.inicio) + tarde),
+            salida:  enHora(Number(a.fin) - antes),
+            llego: true, hora_llego: enHora(Number(a.inicio) + tarde),
+          });
+          marcados++;
+        }
+      }
+    }
+
+    // Cuanta gente necesita cada puesto en cada turno. SIN ESTO la cobertura
+    // compara contra cero y sale todo verde, que es peor que no mostrarla: dice
+    // «te alcanza» siempre. Lo cacho Pedro mirando el ejemplo.
+    const puestosEj = puestosConocidos();
+    const filasDot = [];
+    for (let d = 0; d < 7; d++) {
+      const finde = d >= 4;                       // viernes, sabado y domingo
+      for (const q of puestosEj) {
+        ts.forEach((t, k) => {
+          // apertura con poca gente, tarde y cierre con mas, y el finde sube
+          const base = k === 0 ? 1 : 2;
+          filasDot.push({ local_id:S.local.id, perfil:String(d), puesto:q,
+                          turno_id:t.id, cantidad: base + (finde && k > 0 ? 1 : 0) });
+        });
+      }
+    }
+    if (filasDot.length) await DATOS.guardarDotacionLote(filasDot);
+
+    // Ventas y propinas, para que el reparto tenga de donde salir
+    const venta = [380000, 420000, 395000, 460000, 610000, 840000, 520000];
+    for (let d = 0; d < 7; d++)
+      await DATOS.guardarDia(S.local.id, f[d], {
+        venta: venta[d],
+        propina_efectivo: Math.round(venta[d] * 0.04 / 1000) * 1000,
+        propina_tarjeta:  Math.round(venta[d] * 0.06 / 1000) * 1000,
+      });
+
+    await refrescar();
+    m.textContent = `Listo. Estás en el local «Ejemplo» con ${creados} turnos y ${marcados} marcas. `
+      + 'Mira la Semana, el Día y Control horario. Arriba puedes volver a tu local.';
+    m.className = 'msg ok';
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();
+    m.textContent = e.message; m.className = 'msg bad';
+  }
+  b.disabled = false; b.textContent = 'Llenar con datos de ejemplo';
+}
+
+/* ---------- cargar el equipo desde una planilla ----------
+   El valor no está en ahorrarle tiempo a Pedro con 8 personas: está en que un
+   local de verdad con 25 YA TIENE su lista en una planilla, y nadie reescribe
+   25 fichas a mano.
+
+   Regla del 17-sep de Pedro: la app no guarda RUT, teléfono ni correo de los
+   trabajadores. El cargador ignora esas columnas Y LO DICE, en vez de
+   tragárselas calladito. Así él puede subir su planilla tal cual, sin
+   limpiarla antes, y entra solo lo que corresponde. */
+
+const COLUMNAS = {
+  nombre:         ['nombre','nombres','nombre completo','trabajador','persona'],
+  rol:            ['puesto','puesto habitual','cargo','rol','funcion','función'],
+  equipo:         ['equipo','grupo','turno fijo'],
+  valor_hora:     ['valor hora','valor por hora','sueldo hora','precio hora','valor_hora'],
+  horas_contrato: ['horas contrato','horas','jornada','horas semanales','horas_contrato'],
+  factor_propina: ['factor propina','factor','propina','factor_propina'],
+};
+// Columnas que NO se cargan aunque vengan. Se avisan aparte, por nombre.
+const VETADAS = ['rut','run','cedula','cédula','dni','telefono','teléfono','fono','celular',
+                 'correo','email','e-mail','mail','direccion','dirección','domicilio',
+                 'fecha nacimiento','nacimiento','edad','cuenta','banco'];
+
+const normal = t => String(t||'').trim().toLowerCase()
+  .normalize('NFD').replace(/[\u0300-\u036f]/g,'');
+
+// Un CSV de Excel en Chile sale con punto y coma. Y con comillas cuando el
+// campo trae el separador adentro. Las dos cosas hay que aguantarlas.
+function leerCSV(texto) {
+  texto = texto.replace(/^\uFEFF/, '');                  // Excel pone una marca al inicio
+  const prim = (texto.split(/\r?\n/)[0] || '');
+  const sep = (prim.split(';').length > prim.split(',').length) ? ';' : ',';
+  const filas = []; let campo = '', fila = [], comillas = false;
+  for (let i = 0; i < texto.length; i++) {
+    const c = texto[i];
+    if (comillas) {
+      if (c === '"' && texto[i+1] === '"') { campo += '"'; i++; }
+      else if (c === '"') comillas = false;
+      else campo += c;
+    } else if (c === '"') comillas = true;
+    else if (c === sep) { fila.push(campo); campo = ''; }
+    else if (c === '\n') { fila.push(campo); filas.push(fila); fila = []; campo = ''; }
+    else if (c !== '\r') campo += c;
+  }
+  if (campo !== '' || fila.length) { fila.push(campo); filas.push(fila); }
+  return filas.filter(f => f.some(x => String(x).trim() !== ''));
+}
+
+function analizarPlanilla(texto) {
+  const filas = leerCSV(texto);
+  if (filas.length < 2) return { error: 'La planilla no tiene filas con datos.' };
+
+  const cab = filas[0].map(normal);
+  const mapa = {};                       // campo -> índice de columna
+  Object.entries(COLUMNAS).forEach(([campo, nombres]) => {
+    const i = cab.findIndex(c => nombres.some(n => normal(n) === c));
+    if (i >= 0) mapa[campo] = i;
+  });
+  if (mapa.nombre == null) return { error: 'No encontré una columna «Nombre». Usa la plantilla.' };
+
+  const usadas = new Set(Object.values(mapa));
+  const ignoradas = [], sensibles = [];
+  cab.forEach((c, i) => {
+    if (usadas.has(i) || !c) return;
+    (VETADAS.some(v => c.includes(normal(v))) ? sensibles : ignoradas).push(filas[0][i].trim());
+  });
+
+  const porNombre = {};
+  S.personas.forEach(p => { porNombre[normal(p.nombre)] = p; });
+
+  const nuevas = [], existentes = [], malas = [];
+  filas.slice(1).forEach((f, n) => {
+    const nombre = String(f[mapa.nombre] || '').trim();
+    if (!nombre) { malas.push('fila ' + (n+2) + ': sin nombre'); return; }
+    const d = { nombre };
+    if (mapa.rol != null)    d.rol    = String(f[mapa.rol] || '').trim();
+    if (mapa.equipo != null) d.equipo = String(f[mapa.equipo] || '').trim();
+    if (mapa.valor_hora != null)     d.valor_hora     = Number(soloDigitos(f[mapa.valor_hora])) || 0;
+    if (mapa.horas_contrato != null) d.horas_contrato = Number(String(f[mapa.horas_contrato]||'').replace(',','.')) || 0;
+    if (mapa.factor_propina != null) d.factor_propina = Number(String(f[mapa.factor_propina]||'').replace(',','.')) || 1;
+    const ya = porNombre[normal(nombre)];
+    if (ya) existentes.push({ d, p: ya }); else nuevas.push(d);
+  });
+  return { nuevas, existentes, malas, ignoradas, sensibles };
+}
+
+function pintarPrevia(r) {
+  const caja = $('#previaEq');
+  if (r.error) { caja.innerHTML = `<p class="msg bad">${esc(r.error)}</p>`; return; }
+  const li = [];
+  if (r.nuevas.length)     li.push(`<b>${r.nuevas.length}</b> ${r.nuevas.length === 1 ? 'persona nueva' : 'personas nuevas'}`);
+  if (r.existentes.length) li.push(`<b>${r.existentes.length}</b> que ya ${r.existentes.length === 1 ? 'existe y se actualiza' : 'existen y se actualizan'}`);
+  caja.innerHTML = `
+    <div class="note">
+      <p><b>Esto es lo que va a pasar:</b> ${li.length ? li.join(' · ') : 'nada, no hay filas con nombre'}.</p>
+      ${r.sensibles.length ? `<p>🔒 <b>No se cargan</b> estas columnas, porque la app no guarda esos datos:
+        <b>${r.sensibles.map(esc).join(', ')}</b>.</p>` : ''}
+      ${r.ignoradas.length ? `<p>Se ignoran además, porque no sé qué son: ${r.ignoradas.map(esc).join(', ')}.</p>` : ''}
+      ${r.malas.length ? `<p class="msg bad">${r.malas.map(esc).join(' · ')}</p>` : ''}
+      <div class="acciones" style="margin-top:10px">
+        <button class="act primary" id="btnAplicar">Aplicar</button>
+        <button class="act" id="btnCancelarCarga">Cancelar</button>
+      </div>
+    </div>`;
+  on('#btnCancelarCarga', 'click', () => { caja.innerHTML = ''; });
+  on('#btnAplicar', 'click', async () => {
+    const b = $('#btnAplicar'); b.disabled = true; b.textContent = 'Cargando…';
+    try {
+      for (const d of r.nuevas) await DATOS.crearPersona(S.local.id, Object.assign({ valor_hora:2900, horas_contrato:45, factor_propina:1 }, d));
+      for (const { d, p } of r.existentes) await DATOS.guardarPersona(p.id, d);
+      await refrescar();
+      caja.innerHTML = `<p class="msg ok">Listo: ${r.nuevas.length} nuevas y ${r.existentes.length} actualizadas.</p>`;
+      setTimeout(() => { caja.innerHTML = ''; }, 6000);
+    } catch (e) { b.disabled = false; b.textContent = 'Aplicar'; caja.innerHTML += `<p class="msg bad">${esc(e.message)}</p>`; }
+  });
+}
+
+/* ================= EQUIPO ================= */
+function filaCampo(label, tipo, valor, attrs) {
+  if (tipo === 'plata')
+    return `<div class="fld"><label>${label}</label><input type="text" inputmode="numeric"
+      value="${esc(aPlata(valor))}" ${attrs||''}></div>`;
+  return `<div class="fld"><label>${label}</label><input type="${tipo}" value="${esc(valor)}" ${attrs||''}></div>`;
+}
+
+function pintarEquipo() {
+  const box = $('#eqLista'); box.innerHTML = '';
+  if (!S.personas.length) box.appendChild(el('p','vacio','Todavía no hay nadie. Agrega tu primera persona abajo.'));
+  S.personas.forEach(p => {
+    const row = el('div','rowline' + (p.id === S.recien ? ' recien' : ''), `
+      ${filaCampo('Nombre','text',p.nombre,'data-k="nombre"')}
+      ${filaCampo('Puesto habitual','text',p.rol||'','data-k="rol" placeholder="ej.: Garzón"'
+        + ((p.rol||'').trim() ? '' : ' class="falta"'))}
+      ${filaCampo('Equipo','text',p.equipo||'','data-k="equipo" placeholder="Fijos / Por llamado"')}
+      ${filaCampo('Valor hora','plata',p.valor_hora,'data-k="valor_hora" class="n"')}
+      ${filaCampo('Horas contrato','number',p.horas_contrato,'data-k="horas_contrato" class="n" min="0" max="60" step="1"')}
+      ${filaCampo('Factor propina','number',p.factor_propina,'data-k="factor_propina" class="n" min="0" max="3" step="0.1"')}
+      ${filaCampo('Saldo horas','number',p.saldo_horas,'data-k="saldo_horas" class="n" step="0.5"')}
+      <button class="mini" data-del="1">Quitar</button>
+      <div class="dispo"><span>No puede:</span>${DIAS.map((d,i) =>
+        `<button type="button" class="dia ${(p.no_disponible||[]).includes(i) ? 'no' : ''}" data-dia="${i}"
+          aria-pressed="${(p.no_disponible||[]).includes(i)}">${d}</button>`).join('')}</div>`);
+    row.dataset.persona = p.id;
+    box.appendChild(row);
+    let t = null;
+    row.querySelectorAll('input[data-k]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          const k = inp.dataset.k;
+          let v;
+          if (k === 'nombre' || k === 'rol' || k === 'equipo') v = inp.value;
+          else if (k === 'valor_hora') { v = dePlata(inp.value); inp.value = aPlata(v); }
+          else v = Number(inp.value) || 0;
+          try {
+            Object.assign(p, await DATOS.guardarPersona(p.id, { [k]: v }));
+            if (p.id === S.recien && k === 'nombre') { S.recien = null; row.classList.remove('recien'); }
+            if (k === 'rol') inp.classList.toggle('falta', !inp.value.trim());
+            pintarSemana(); pintarPropinas(); pintarLinks();
+          }
+          catch (e) { error(e); }
+        }, 600);
+      });
+    });
+    row.querySelectorAll('button.dia').forEach(b => {
+      b.addEventListener('click', async () => {
+        const i = Number(b.dataset.dia);
+        const nd = new Set(p.no_disponible || []);
+        nd.has(i) ? nd.delete(i) : nd.add(i);
+        try { Object.assign(p, await DATOS.guardarPersona(p.id, { no_disponible: [...nd].sort() }));
+              pintarEquipo(); pintarPlan(); }
+        catch (e) { error(e); }
+      });
+    });
+    row.querySelector('[data-del]').addEventListener('click', async () => {
+      if (!confirm('¿Quitar a ' + p.nombre + ' del equipo?\n\nSus turnos y marcas anteriores no se borran.')) return;
+      try {
+        recordarEq([p.id], 'quitar a ' + p.nombre);
+        await DATOS.quitarPersona(p.id); await refrescar();
+      } catch (e) { S.histEq.pop(); pintarDeshacerEq(); error(e); }
+    });
+  });
+}
+
+function pintarPuestos() {
+  const bq = $('#bloqTope');
+  if (bq && document.activeElement !== bq) bq.checked = !!(S.local && S.local.bloquear_sobre_tope);
+  const box = $('#eqPuestos'); if (!box) return;
+  box.innerHTML = '';
+  if (!S.puestos.length) {
+    box.innerHTML = '<p class="vacio">Todavía no hay lista de puestos. '
+      + 'Si acabas de pegar el SQL, recarga; si no, agrega el primero abajo.</p>';
+    return;
+  }
+  S.puestos.forEach(q => {
+    const row = el('div','rowline', `
+      ${filaCampo('Nombre','text',q.nombre,'data-k="nombre"')}
+      <div class="fld"><label>Color</label>
+        <select data-k="color">${[1,2,3,4].map(c =>
+          `<option value="${c}"${Number(q.color) === c ? ' selected' : ''}>Color ${c}</option>`).join('')}</select></div>
+      ${filaCampo('Colación (min)','number',q.colacion == null ? '' : Math.round(q.colacion*60),
+                  'data-k="colacion" class="n" min="0" max="120" step="15" placeholder="la del turno"')}
+      <button class="mini" data-del="1">Quitar</button>
+      <div class="muestra" data-c="${q.color}">${esc(q.nombre)}</div>`);
+    row.dataset.puesto = q.id;
+    box.appendChild(row);
+
+    const m = $('#msgPuestos');
+    row.querySelectorAll('[data-k]').forEach(inp => {
+      let t = null;
+      const guardar = async () => {
+        const k = inp.dataset.k;
+        try {
+          if (k === 'nombre') {
+            const v = inp.value.trim();
+            if (!v || v === q.nombre) return;
+            // Renombrar lo hace la base de una vez, porque tiene que arrastrar
+            // a la gente y a los turnos ya asignados.
+            await DATOS.renombrarPuesto(q.id, v);
+            await refrescar();
+            m.textContent = 'Listo: se renombró también en la gente y en los turnos.'; m.className = 'msg ok';
+            setTimeout(() => { m.textContent = ''; }, 5000);
+          } else {
+            const v = k === 'colacion'
+              ? (inp.value === '' ? null : (Number(inp.value) || 0) / 60)
+              : Number(inp.value);
+            Object.assign(q, await DATOS.guardarPuesto(q.id, { [k]: v }));
+            pintarPuestos(); pintarTodo();
+          }
+        } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+      };
+      inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input',
+        () => { clearTimeout(t); t = setTimeout(guardar, 700); });
+    });
+    row.querySelector('[data-del]').addEventListener('click', async () => {
+      const usan = S.personas.filter(p => normal(p.rol) === normal(q.nombre)).length;
+      if (!confirm(`¿Quitar el puesto «${q.nombre}»?\n\n`
+        + (usan ? `Lo tienen ${usan} ${usan === 1 ? 'persona' : 'personas'}. No se les borra: `
+                + 'siguen con ese puesto escrito, pero deja de ofrecerse en las listas.\n\n' : '')
+        + 'No se borra nada de lo ya planificado.')) return;
+      try { await DATOS.quitarPuesto(q.id); await refrescar(); } catch (e) { error(e); }
+    });
+  });
+}
+
+function pintarTurnos() {
+  const box = $('#eqTurnos'); box.innerHTML = '';
+  S.turnos.forEach(t => {
+    const row = el('div','rowline', `
+      ${filaCampo('Nombre','text',t.nombre,'data-k="nombre"')}
+      ${filaCampo('Entra','time',hhmm(t.inicio),'data-k="inicio"')}
+      ${filaCampo('Sale','time',hhmm(t.fin),'data-k="fin"')}
+      ${filaCampo('Colación (min)','number',Math.round(t.colacion*60),'data-k="colacion" class="n" min="0" max="120" step="15"')}
+      <div class="fld"><label>Horas</label><input type="text" value="${hfmt(horasDe(t))}" readonly tabindex="-1" class="n"></div>
+      <button class="mini" data-del="1">Quitar</button>`);
+    row.dataset.turno = t.id;    // para poder saltar aquí desde la dotación
+    box.appendChild(row);
+    let tm = null;
+    row.querySelectorAll('input[data-k]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        clearTimeout(tm);
+        tm = setTimeout(async () => {
+          const k = inp.dataset.k; let campos = {};
+          if (k === 'nombre') campos.nombre = inp.value;
+          else if (k === 'colacion') campos.colacion = (Number(inp.value)||0)/60;
+          else {
+            const v = aDec(inp.value);
+            if (k === 'inicio') { campos.inicio = v; if (Number(t.fin) <= v) campos.fin = v + 8; }
+            else campos.fin = v <= Number(t.inicio) ? v + 24 : v;   // cruza la medianoche
+          }
+          try { Object.assign(t, await DATOS.guardarTurno(t.id, campos)); pintarTurnos(); pintarSemana(); }
+          catch (e) { error(e); }
+        }, 600);
+      });
+    });
+    row.querySelector('[data-del]').addEventListener('click', async () => {
+      if (S.turnos.length <= 1) return alert('Tiene que quedar al menos un turno.');
+      if (!confirm('¿Quitar el turno "' + t.nombre + '"?')) return;
+      try { await DATOS.quitarTurno(t.id); await refrescar(); } catch (e) { error(e); }
+    });
+  });
+}
+
+/* ================= GENERAR LA PROPUESTA DE TURNOS =================
+   Pedro, 05-10-2026 (msg 3764), y es el encargo entero en dos frases:
+
+     «el administrador no deberia comenzar diciendo "Juan trabaja el lunes a
+      las 12". Primero deberia decir "el lunes necesito 5 garzones entre 12:00
+      y 16:00". Despues el sistema asigna las personas disponibles.»
+
+   Hasta hoy la dotacion era un numero que solo servia para pintar la cobertura
+   de rojo: pedia 84 casillas y no devolvia nada, y por eso esa pantalla se
+   sentia debil. Esto es lo que la consume.
+
+   NO es IA, y no debe serlo. Es un problema de encaje, y lo unico que se le
+   exige a esto es que sea EXPLICABLE: si no puede cubrir algo tiene que decir
+   por que —«dos ya tienen turno ese dia, uno esta de vacaciones»—. Una IA ahi
+   inventaria, y en un producto que promete cumplimiento laboral el invento lo
+   paga Pedro.
+
+   ⚠️ LA CUENTA VA POR HORA, NO POR TURNO, y eso no es un lujo: lo encontro
+   Pedro el mismo dia (msg 3772) agregando «almuerzo 11:00–15:30» y «Cena
+   20:30–01:00» sobre los tres turnos que ya tenia. Contando por turno, quien
+   trabaja 08:00–16:30 cuenta como cobertura de la Tarde 13:00–21:30 porque se
+   pisan — asi que con UNA persona el panel daba por cubiertos los dos turnos y
+   a las 17:00 no habia nadie. Por hora eso no puede pasar.
+
+   `proponer()` entra y sale SOLO por parametro: no toca `S`, no toca la base y
+   no toca el DOM. Es a proposito, para poder probarla en node. */
+
+/* Cuantas horas tiene que descansar alguien entre el fin de un turno y el
+   inicio del siguiente para que el repartidor se lo ofrezca.
+
+   ⚠️ Esto NO es una regla legal chilena: el Codigo del Trabajo no fija un
+   descanso diario minimo general como el de 11 h de la directiva europea. Es
+   una regla de SENTIDO COMUN del local, para que la maquina no le encaje a
+   nadie un cierre 17:00–01:00 y una apertura a las 08:00 del dia siguiente.
+   El encargado puede hacerlo a mano si quiere; el automatico no lo propone. */
+const DESCANSO_MIN = 10;
+
+/* Tope de vueltas del repartidor. Cada vuelta o pone a alguien o descarta un
+   par puesto+turno, asi que termina solo; esto es un cinturon por si un dato
+   raro —un turno de fin menor que su inicio— lo dejara dando vueltas. Que la
+   pantalla se congele es peor que una propuesta incompleta. */
+const MAX_VUELTAS = 400;
+
+/* Las razones por las que alguien no entra. El texto va en plural porque
+   siempre se muestra con un numero delante. */
+const MOTIVOS = {
+  ocupado:      'ya tienen turno ese día',
+  ausencia:     'están de ausencia',
+  noDisponible: 'dijeron que no pueden ese día',
+  contrato:     'se pasarían de su contrato',
+  sieteDias:    'quedarían con 7 días seguidos',
+  descanso:     'no alcanzan a descansar ' + DESCANSO_MIN + ' h',
+  sinGente:     'no hay nadie con ese puesto',
+};
+
+/* proponer(ent) -> { filas, huecos, nadie }
+
+   ent = {
+     fechas:   [iso x7, lunes primero],
+     turnos:   [{ id, nombre, inicio, fin, colacion }],
+     puestos:  [nombre],
+     dotacion: { perfil: { puesto: { turnoId: cantidad } } },   perfil '0'..'6'
+     personas: [{ id, nombre, rol, horas_contrato, no_disponible:[dow] }],
+     asign:    { 'personaId|fecha': [ fila ] },   lo que YA hay
+     sinDueno: [ { fecha, inicio, fin, puesto } ],
+   }
+
+   `filas` son turnos nuevos CON persona. `huecos` es lo que quedo sin cubrir,
+   en TRAMOS de horas y con su explicacion. `nadie` suma las persona-horas que
+   faltan, que es la unidad honesta cuando los turnos se pisan. */
+function proponer(ent) {
+  const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+  const horasT = t => Number(t.fin) - Number(t.inicio) - Number(t.colacion || 0);
+
+  const turnos  = (ent.turnos || []).slice().sort((a, b) => Number(a.inicio) - Number(b.inicio));
+  const puestos = (ent.puestos || []).slice();
+  const dot     = ent.dotacion || {};
+  const filasDe = (pid, fe) => (ent.asign || {})[pid + '|' + fe] || [];
+  if (!turnos.length || !puestos.length || !ent.personas.length)
+    return { filas: [], huecos: [], nadie: 0 };
+
+  // La franja del local sale de los turnos que existen. Un turno que cruza la
+  // medianoche trae `fin` > 24 (01:00 es 25), asi que el techo puede pasar de 24.
+  const h0 = Math.floor(Math.min.apply(null, turnos.map(t => Number(t.inicio))));
+  const h1 = Math.ceil(Math.max.apply(null, turnos.map(t => Number(t.fin))));
+
+  /* El estado de cada persona durante el reparto: lo que YA tenia MAS lo que le
+     vamos proponiendo. Sin esto todos quedan empatados en cero horas y la
+     segunda ranura del mismo turno le vuelve a tocar al mismo de la primera. */
+  const est = {};
+  ent.personas.forEach(p => { est[p.id] = { horas: 0, dias: 0, bloques: {}, ausente: {} }; });
+  ent.fechas.forEach(fe => {
+    ent.personas.forEach(p => {
+      const fs = filasDe(p.id, fe);
+      const ts = fs.filter(a => a.inicio != null);
+      const au = fs.find(a => a.ausencia);
+      // «Libre» no es una ausencia que impida nada: es no tener nada ese dia.
+      if (au && au.ausencia && au.ausencia !== 'L') est[p.id].ausente[fe] = true;
+      if (ts.length) est[p.id].dias++;
+      ts.forEach(a => {
+        est[p.id].horas += Number(a.fin) - Number(a.inicio) - Number(a.colacion || 0);
+        (est[p.id].bloques[fe] = est[p.id].bloques[fe] || []).push({
+          inicio: Number(a.inicio), fin: Number(a.fin),
+          // el puesto DE LA ASIGNACION manda: si Camila hace barra el lunes,
+          // ese lunes cuenta en barra aunque su puesto habitual sea garzon.
+          puesto: (a.puesto || '').trim() || (p.rol || '').trim(),
+        });
+      });
+    });
+  });
+
+  /* Cuanta gente de ese puesto se necesita a esa hora. Dos turnos que se pisan
+     SUMAN su necesidad en las horas compartidas: si de 13:00 a 16:30 corren la
+     mañana y la tarde, a esa hora se necesita la gente de las dos. No es doble
+     conteo — es lo que el local pidio. */
+  const reqHora = (d, puesto, h) => turnos.reduce((n, t) =>
+    n + ((Number(t.inicio) <= h && h < Number(t.fin))
+      ? ((((dot[String(d)] || {})[puesto] || {})[t.id]) || 0) : 0), 0);
+
+  /* Cuanta gente de ese puesto hay puesta a esa hora: lo que ya estaba mas lo
+     que llevamos propuesto en esta corrida.
+
+     Los turnos SIN DUEÑO cuentan aca a proposito, y es la unica concesion del
+     archivo: en la pantalla de cobertura NO cuentan como gente —no hay nadie,
+     y ese es justo el hueco que hay que mostrar— pero para el repartidor son
+     una ranura ya planificada. Si no contaran, apretar el boton dos veces
+     crearia el mismo turno dos veces. Este boton no les pone gente: solo
+     agrega turnos nuevos. */
+  const hayHora = (fe, puesto, h) => {
+    let n = 0;
+    ent.personas.forEach(p => {
+      if ((est[p.id].bloques[fe] || []).some(b =>
+        b.inicio <= h && h < b.fin && norm(b.puesto) === norm(puesto))) n++;
+    });
+    (ent.sinDueno || []).forEach(a => {
+      if (a.fecha === fe && norm(a.puesto) === norm(puesto)
+        && Number(a.inicio) <= h && h < Number(a.fin)) n++;
+    });
+    return n;
+  };
+
+  /* El descanso desde el ultimo turno que la persona tenga ANTES de este. Se
+     mira el dia anterior y el mismo dia: un cierre que termina a las 25.0
+     (01:00 del dia siguiente) se compara contra el inicio de mañana + 24. */
+  const descansoAntes = (p, fe, d, t) => {
+    const antes = [];
+    const prev = ent.fechas[d - 1];
+    if (prev) (est[p.id].bloques[prev] || []).forEach(b => antes.push(b.fin - 24));
+    (est[p.id].bloques[fe] || []).forEach(b => { if (b.fin <= Number(t.inicio)) antes.push(b.fin); });
+    if (!antes.length) return Infinity;
+    return Number(t.inicio) - Math.max.apply(null, antes);
+  };
+
+  /* Quien puede tomar ese turno en ese puesto, ya ordenado. Devuelve tambien el
+     recuento de por que NO pudieron los demas: es lo que despues se lee en
+     palabras debajo del hueco. */
+  const candidatos = (fe, d, t, puesto) => {
+    const motivos = {};
+    const suma = k => { motivos[k] = (motivos[k] || 0) + 1; };
+    // Solo la gente de ESE puesto. Mandar a un cocinero a atender mesas es una
+    // decision del encargado, no de un algoritmo: el que mira la propuesta
+    // puede moverlo, la maquina no lo inventa.
+    const delPuesto = ent.personas.filter(p => norm(p.rol) === norm(puesto));
+    if (!delPuesto.length) { suma('sinGente'); return { pueden: [], motivos }; }
+
+    const pueden = [];
+    delPuesto.forEach(p => {
+      const e = est[p.id];
+      if (e.ausente[fe]) return suma('ausencia');
+      if ((e.bloques[fe] || []).some(b => b.inicio < Number(t.fin) && Number(t.inicio) < b.fin))
+        return suma('ocupado');
+      if ((p.no_disponible || []).indexOf(d) >= 0) return suma('noDisponible');
+      const tope = Number(p.horas_contrato) || 0;
+      if (tope && e.horas + horasT(t) > tope) return suma('contrato');
+      // El 7.º dia seguido solo cuenta si ese dia todavia no trabajaba.
+      if (!(e.bloques[fe] || []).length && e.dias + 1 >= 7) return suma('sieteDias');
+      if (descansoAntes(p, fe, d, t) < DESCANSO_MIN) return suma('descanso');
+      pueden.push(p);
+    });
+
+    /* Reparte parejo: el que menos horas lleva, y a igualdad el que menos dias.
+       El nombre al final no es decoracion — sin un desempate fijo, dos corridas
+       sobre los mismos datos darian mallas distintas y nadie podria revisar
+       nada. */
+    pueden.sort((a, b) => (est[a.id].horas - est[b.id].horas)
+      || (est[a.id].dias - est[b.id].dias)
+      || String(a.nombre).localeCompare(String(b.nombre)));
+    return { pueden, motivos };
+  };
+
+  const filas = [], huecos = [];
+  let nadie = 0;
+
+  ent.fechas.forEach((fe, d) => {
+    const agotado = {};          // 'puesto|turnoId' que ya no tiene a quien mandar
+    const sinSalida = {};        // puesto que ya no tiene ningun turno por donde entrar
+    const motivosPuesto = {};    // puesto -> recuento acumulado del dia
+    let vueltas = 0;
+
+    while (vueltas++ < MAX_VUELTAS) {
+      /* El hueco mas grande del dia. A igual tamaño gana la hora mas temprana:
+         tapar primero la mañana deja la tarde entera disponible para el resto,
+         y ademas hace la propuesta reproducible. */
+      let peor = null;
+      puestos.forEach(pu => {
+        if (sinSalida[pu]) return;
+        for (let h = h0; h < h1; h++) {
+          const f = reqHora(d, pu, h) - hayHora(fe, pu, h);
+          if (f > 0 && (!peor || f > peor.falta || (f === peor.falta && h < peor.h)))
+            peor = { puesto: pu, h, falta: f };
+        }
+      });
+      if (!peor) break;
+
+      /* Por que turno se tapa. Entre los que pasan por esa hora y que el local
+         pidio para ese puesto, gana el que cubre MAS horas con falta: poner a
+         alguien en el turno que tapa tres horas deficitarias vale mas que en el
+         que tapa una. */
+      const sirven = turnos.filter(t =>
+        Number(t.inicio) <= peor.h && peor.h < Number(t.fin)
+        && ((((dot[String(d)] || {})[peor.puesto] || {})[t.id]) || 0) > 0
+        && !agotado[peor.puesto + '|' + t.id]);
+      if (!sirven.length) { sinSalida[peor.puesto] = true; continue; }
+
+      const tapa = t => {
+        let n = 0;
+        for (let h = Math.floor(Number(t.inicio)); h < Number(t.fin); h++)
+          if (reqHora(d, peor.puesto, h) - hayHora(fe, peor.puesto, h) > 0) n++;
+        return n;
+      };
+      sirven.sort((a, b) => (tapa(b) - tapa(a)) || (Number(a.inicio) - Number(b.inicio)));
+      const t = sirven[0];
+
+      const { pueden, motivos } = candidatos(fe, d, t, peor.puesto);
+      const acum = motivosPuesto[peor.puesto] = motivosPuesto[peor.puesto] || {};
+      Object.keys(motivos).forEach(k => { acum[k] = Math.max(acum[k] || 0, motivos[k]); });
+
+      if (!pueden.length) { agotado[peor.puesto + '|' + t.id] = true; continue; }
+
+      const q = pueden[0], e = est[q.id];
+      if (!(e.bloques[fe] || []).length) e.dias++;
+      e.horas += horasT(t);
+      (e.bloques[fe] = e.bloques[fe] || []).push({
+        inicio: Number(t.inicio), fin: Number(t.fin), puesto: peor.puesto });
+
+      filas.push({
+        persona_id: q.id, nombre: q.nombre, fecha: fe, dia: d,
+        turno_id: t.id, turno: t.nombre, puesto: peor.puesto,
+        inicio: Number(t.inicio), fin: Number(t.fin), colacion: Number(t.colacion || 0),
+      });
+    }
+
+    /* Lo que quedo sin cubrir, dicho en TRAMOS de horas y no hora por hora:
+       «falta 1 garzón de 17:00 a 21:00» se lee; cuatro lineas de una hora, no.
+       Horas seguidas con el MISMO faltante se juntan; faltantes distintos no,
+       porque son dos problemas distintos. Es la misma regla que ya sigue la
+       vista de dia. */
+    puestos.forEach(pu => {
+      let act = null;
+      for (let h = h0; h < h1; h++) {
+        const f = reqHora(d, pu, h) - hayHora(fe, pu, h);
+        if (f > 0) {
+          nadie += f;
+          if (act && act.falta === f && act.hasta === h) act.hasta = h + 1;
+          else {
+            act = { fecha: fe, dia: d, puesto: pu, falta: f, desde: h, hasta: h + 1,
+                    motivos: motivosPuesto[pu] || {} };
+            huecos.push(act);
+          }
+        } else act = null;
+      }
+    });
+  });
+
+  return { filas, huecos, nadie };
+}
+
+/* El por que de un hueco, en palabras. Se ordena de mayor a menor para que lo
+   primero que se lea sea la razon principal, y se cortan las tres primeras: la
+   lista completa es cierta pero no se lee. */
+function diceMotivos(motivos) {
+  const ks = Object.keys(motivos || {}).filter(k => motivos[k] > 0)
+    .sort((a, b) => motivos[b] - motivos[a]);
+  if (!ks.length) return '';
+  return ks.slice(0, 3).map(k => k === 'sinGente'
+    ? MOTIVOS.sinGente
+    : motivos[k] + ' ' + MOTIVOS[k]).join(', ');
+}
+
+/* ================= COBERTURA Y COSTO ================= */
+function pintarCobertura() {
+  const f = fechas();
+  const ts = S.turnos.slice().sort((a,b) => Number(a.inicio) - Number(b.inicio));
+  const ps = puestos();
+
+  /* ---- arriba: una línea por día y turno, legible sin interpretar colores ---- */
+  const cont = $('#cobertura'); cont.innerHTML = '';
+  if (!ts.length || !ps.length) {
+    cont.innerHTML = '<p class="vacio">Agrega turnos y gente al equipo para ver esto.</p>';
+  }
+  let faltanTot = 0, sobranTot = 0, hayDotacion = false;
+  const diasVista = S.modo === 'dia' ? [iso(S.dia)] : f;
+
+  diasVista.forEach(fe => {
+    const d = (new Date(fe + 'T00:00:00').getDay() + 6) % 7;
+    const celdas = ts.map(t => {
+      const faltas = [], sobras = [];
+      ps.forEach(puesto => {
+        const req = necesita(String(d), puesto, t.id);
+        if (req) hayDotacion = true;
+        const hay = asignados(fe, t.id, puesto);
+        if (req && hay < req) { faltas.push(`${req - hay} ${puesto.toLowerCase()}`); faltanTot += req - hay; }
+        else if (req && hay > req) { sobras.push(`${hay - req} ${puesto.toLowerCase()}`); sobranTot += hay - req; }
+      });
+      const total = ps.reduce((n,x) => n + asignados(fe, t.id, x), 0);
+      let cls = 'ok', txt = total ? total + (total === 1 ? ' persona' : ' personas') : '—';
+      if (faltas.length) { cls = 'falta'; txt = 'falta ' + faltas.join(', '); }
+      else if (sobras.length) { cls = 'sobra'; txt = 'sobra ' + sobras.join(', '); }
+      return `<div class="cobcel ${cls}"><b>${esc(t.nombre)}</b><span>${esc(txt)}</span></div>`;
+    }).join('');
+    cont.appendChild(el('div','cobfila', `<div class="covday">${DIAS[d]} <span class="num">${ddmm(fe)}</span></div>
+      <div class="cobcels" style="grid-template-columns:repeat(${ts.length},1fr)">${celdas}</div>`));
+  });
+
+  /* ---- abajo: cuánta necesito, un día a la vez, por puesto y por turno ---- */
+  const tabs = $('#cobTabs'); tabs.innerHTML = '';
+  DIAS.forEach((dn, i) => {
+    const b = el('button','act' + (String(i) === S.cobDia ? ' primary' : ''), dn);
+    b.addEventListener('click', () => { S.cobDia = String(i); pintarCobertura(); });
+    tabs.appendChild(b);
+  });
+
+  const box = $('#needDia'); box.innerHTML = '';
+  if (!ps.length || !ts.length) {
+    box.innerHTML = '<p class="vacio">Primero agrega tu equipo y tus turnos.</p>';
+  } else {
+    const tabla = el('table','neces');
+    tabla.innerHTML = '<thead><tr><th>Puesto</th>' +
+      ts.map(t => `<th><button type="button" class="turnoEd" data-t="${t.id}"
+        title="Editar este turno">${esc(t.nombre)}<span class="num">${hhmm(t.inicio)}–${hhmm(t.fin)}</span></button></th>`).join('')
+      + '<th><button type="button" class="turnoEd nuevo" data-nuevo="1" title="Agregar un turno">+ turno</button></th></tr></thead>';
+    const tb = el('tbody');
+    ps.forEach(puesto => {
+      const tr = el('tr');
+      const q = puestoCat(puesto);
+      tr.innerHTML = `<th scope="row">${q
+        ? `<button type="button" class="turnoEd" data-puesto="${q.id}"
+             title="Editar este puesto">${esc(puesto)}</button>`
+        : esc(puesto)}</th>` +
+        ts.map(t => `<td><input class="n" type="number" min="0" max="99"
+          value="${necesita(S.cobDia, puesto, t.id)}" data-t="${t.id}"
+          aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('')
+        + '<td></td>';
+      tb.appendChild(tr);
+      tr.querySelectorAll('input[data-t]').forEach(inp => {
+        let tm = null;
+        inp.addEventListener('input', () => {
+          clearTimeout(tm);
+          tm = setTimeout(async () => {
+            const v = Number(inp.value) || 0;
+            recordarDot('cambiar un número');     // la foto, antes de tocar nada
+            const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
+            (pf[puesto] = pf[puesto] || {})[inp.dataset.t] = v;
+            try { await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, inp.dataset.t, v); pintarCobertura(); }
+            catch (e) { error(e); }
+          }, 600);
+        });
+      });
+    });
+    tabla.appendChild(tb);
+    box.appendChild(tabla);
+
+    // abrir el turno desde su propio título, o crear uno nuevo
+    tabla.querySelectorAll('.turnoEd').forEach(b => b.addEventListener('click', () => {
+      if (b.dataset.nuevo) return nuevoTurnoRapido();
+      if (b.dataset.puesto) {
+        $('#tab-eq').click();
+        const fila = document.querySelector(`#eqPuestos [data-puesto="${b.dataset.puesto}"]`);
+        if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
+          fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
+          const inp = fila.querySelector('input'); if (inp) { inp.focus(); inp.select(); } }
+        return;
+      }
+      $('#tab-eq').click();
+      const fila = document.querySelector(`#eqTurnos [data-turno="${b.dataset.t}"]`);
+      if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
+        fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
+        const inp = fila.querySelector('input'); if (inp) inp.focus(); }
+    }));
+  }
+
+  /* ---- costo sobre venta ---- */
+  const obj = Number(S.local.objetivo_pct) || 30;
+  const oi = $('#objetivoPct');
+  if (oi && document.activeElement !== oi) oi.value = obj;
+  let costoT = 0, ventaT = 0;
+  $('#cobDias').innerHTML = f.map((fe, d) => {
+    const costo = S.personas.reduce((s,p) => {
+      return s + horasDia(p.id, fe) * (p.valor_hora||0); }, 0);
+    const venta = (S.dias[fe]||{}).venta || 0;
+    costoT += costo; ventaT += venta;
+    const pct = venta ? (costo/venta)*100 : NaN;
+    const mal = isFinite(pct) && pct > obj;
+    return `<li><div class="prow"><span class="pname">${DIAS[d]} <span class="num">${ddmm(fe)}</span></span>
+      <span class="pstat">${clp(costo)} de ${clp(venta)} · <b style="color:${mal?'var(--bad)':'var(--ok)'}">${pfmt(pct)}</b></span></div>
+      <div class="bar"><i class="${mal?'over':''}" style="width:${isFinite(pct)?Math.min(100,pct):0}%"></i></div></li>`;
+  }).join('');
+
+  const pctT = ventaT ? (costoT/ventaT)*100 : NaN;
+  $('#cobKpis').innerHTML = [
+    { k:'Costo de personal', v:clp(costoT), n:'la semana completa' },
+    { k:'Sobre la venta', v:pfmt(pctT), n:`tu objetivo es ${obj} %`,
+      c: isFinite(pctT) ? (pctT > obj ? 'alert' : 'good') : '' },
+    { k:'Gente que falta', v: hayDotacion ? faltanTot : '—', n:'turnos con menos de la que pediste', c: faltanTot ? 'alert' : '' },
+    { k:'Gente de sobra', v: hayDotacion ? sobranTot : '—', n:'turnos con más de la necesaria' },
+  ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
+}
+
+/* ================= PROPINAS ================= */
+// Reparte al peso: el resto de la división se asigna de a $1 por mayor fracción.
+function repartir(pool, pesos) {
+  const total = pesos.reduce((a,b)=>a+b,0);
+  if (!total || !pool) return pesos.map(()=>0);
+  const monto = Math.round(pool);
+  const exacto = pesos.map(w => monto*w/total);
+  const piso = exacto.map(x => Math.floor(x));
+  let resto = monto - piso.reduce((a,b)=>a+b,0);
+  exacto.map((v,i)=>({i, f:v-Math.floor(v)})).sort((a,b)=>b.f-a.f)
+        .forEach(o => { if (resto > 0) { piso[o.i]++; resto--; } });
+  return piso;
+}
+
+function repartoDia(fecha) {
+  // Por las horas PAGADAS, no las planificadas: es lo que hace propina_de en
+  // la base. Si acá se usaran las del papel, al trabajador le aparecería un
+  // monto y al jefe otro — y la propina es justo donde eso no se perdona.
+  const pesos = S.personas.map(p => {
+    return horasPagadasDia(p.id, fecha) * (Number(p.factor_propina)||0);
+  });
+  const d = S.dias[fecha] || {};
+  const pool = (d.propina_efectivo||0) + (d.propina_tarjeta||0);
+  const base = pesos.reduce((a,b)=>a+b,0);
+  return { montos: repartir(pool, pesos), pool, base, sinRepartir: base ? 0 : pool };
+}
+
+function repartoSemana() {
+  const porPersona = S.personas.map(()=>0); const dias = [];
+  let total = 0, sinRepartir = 0;
+  fechas().forEach(fe => {
+    const r = repartoDia(fe); dias.push(r);
+    r.montos.forEach((m,i) => porPersona[i] += m);
+    total += r.montos.reduce((a,b)=>a+b,0); sinRepartir += r.sinRepartir;
+  });
+  return { dias, porPersona, total, sinRepartir };
+}
+
+function pintarPropinas() {
+  const f = fechas();
+  const box = $('#propDias'); box.innerHTML = '';
+  f.forEach((fe,i) => {
+    const d = S.dias[fe] || {};
+    const w = el('div','diaplata', `
+      <div class="diaplata-h">${DIAS[i]} <span class="num">${ddmm(fe)}</span></div>
+      <div class="fld"><label>Venta</label><input class="n" type="text" inputmode="numeric" value="${aPlata(d.venta)}" data-c="venta"></div>
+      <div class="fld"><label>Propina efectivo</label><input class="n" type="text" inputmode="numeric" value="${aPlata(d.propina_efectivo)}" data-c="propina_efectivo"></div>
+      <div class="fld"><label>Propina tarjeta</label><input class="n" type="text" inputmode="numeric" value="${aPlata(d.propina_tarjeta)}" data-c="propina_tarjeta"></div>`);
+    box.appendChild(w);
+    let t = null;
+    w.querySelectorAll('input[data-c]').forEach(inp => {
+      inp.addEventListener('input', () => {
+        const v = dePlata(inp.value);
+        inp.value = aPlata(v);
+        try { inp.setSelectionRange(inp.value.length, inp.value.length); } catch (e) {}
+        clearTimeout(t);
+        t = setTimeout(async () => {
+          try { S.dias[fe] = await DATOS.guardarDia(S.local.id, fe, { [inp.dataset.c]: dePlata(inp.value) });
+                pintarPropinas(); pintarCobertura(); pintarResumenSemana(); }
+          catch (e) { error(e); }
+        }, 700);
+      });
+    });
+  });
+
+  const rep = repartoSemana();
+  const cols = ['Persona','Factor', ...DIAS, 'Total'];
+  $('#propCab').innerHTML = cols.map((c,i) => `<th${i===cols.length-1?' class="fin"':''}>${c}</th>`).join('');
+  const cuerpo = $('#propCuerpo'); cuerpo.innerHTML = '';
+  S.personas.forEach((p,i) => {
+    cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')}</span></th>` +
+      `<td>${hfmt(p.factor_propina)}</td>` +
+      rep.dias.map(r => `<td>${r.montos[i] ? clp(r.montos[i]) : '<span style="color:var(--fg-faint)">—</span>'}</td>`).join('') +
+      `<td class="fin"><b>${clp(rep.porPersona[i])}</b></td></tr>`;
+  });
+  $('#propPie').innerHTML = '<tr class="sumrow"><th>Propina del día</th><td></td>' +
+    rep.dias.map(r => `<td${r.sinRepartir?' style="color:var(--bad)"':''}>${clp(r.pool)}</td>`).join('') +
+    `<td>${clp(rep.total)}</td></tr>`;
+
+  const ventaT = f.reduce((s,fe)=> s + ((S.dias[fe]||{}).venta||0), 0);
+  const sugerido = ventaT * 0.10;
+  const captura = sugerido ? (rep.total/sugerido)*100 : NaN;
+  const kpis = [
+    { k:'Propina de la semana', v:clp(rep.total), n:'repartida entre el equipo' },
+    { k:'Si todos dejaran el 10 %', v:clp(sugerido), n:'sobre la venta cargada' },
+    { k:'Se está capturando', v:pfmt(captura), n:'de la propina sugerida',
+      c: isFinite(captura) ? (captura >= 85 ? 'good' : 'alert') : '' },
+  ];
+  if (rep.sinRepartir) kpis.push({ k:'Sin repartir', v:clp(rep.sinRepartir), n:'hay propina y nadie con factor ese día', c:'alert' });
+  $('#propKpis').innerHTML = kpis.map(x =>
+    `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
+}
+
+/* ================= TURNOS ABIERTOS ================= */
+
+/* ================= CONFIRMACIONES ================= */
+const marcaDe = (pid, f) => S.marcas[pid + '|' + f] || {};
+// La marca de UN turno concreto, que es lo que manda desde el reloj control.
+const marcaAsig = a => (a && S.marcas['a:' + a.id]) || {};
+const horaDe = ts => { if (!ts) return null; const d = new Date(ts);
+  return d.getHours() + d.getMinutes()/60; };
+// Horas realmente trabajadas en un turno: de la entrada a la salida, menos la
+// colación. Si no están las dos marcas, no hay horas reales que mostrar.
+const horasReales = a => {
+  const m = marcaAsig(a);
+  if (!m.entrada || !m.salida) return null;
+  const h = (new Date(m.salida) - new Date(m.entrada)) / 3600000 - Number(a.colacion || 0);
+  return Math.max(h, 0);
+};
+// Lo que se paga: lo que el jefe fijó a mano, o la regla del local.
+const horasPagadasDe = a => {
+  if (a.horas_pagadas != null) return Number(a.horas_pagadas);
+  const r = horasReales(a);
+  return (S.local && S.local.pagar_marcado && r != null) ? r : horasAsig(a);
+};
+const horaLlegada = m => {
+  if (!m || !m.hora_llego) return null;
+  const d = new Date(m.hora_llego);
+  return d.getHours() + d.getMinutes()/60;
+};
+
+/* Planificado contra real.
+   OJO: esto NO son "horas trabajadas" para liquidar sueldos — eso seria el
+   registro legal de asistencia y necesita certificacion de la DT. Esto es
+   cobertura y puntualidad: cuanto de lo que planifique tiene a alguien que
+   dijo que llego, y a que hora llego respecto de su turno. */
+function planContraReal() {
+  const f = fechas();
+  return S.personas.map(p => {
+    let plan = 0, conLlegada = 0, atrasoMin = 0, atrasos = 0, sinMarca = 0;
+    f.forEach(fe => {
+      const ts = turnosDe(p.id, fe); if (!ts.length) return;
+      const t = ts[0];                       // la puntualidad se mide contra el PRIMER bloque
+      plan += horasDia(p.id, fe);
+      const m = marcaDe(p.id, fe);
+      if (m.llego === true) {
+        conLlegada += horasDia(p.id, fe);
+        const h = horaLlegada(m);
+        if (h !== null) {
+          const dif = Math.round((h - Number(t.inicio)) * 60);
+          if (dif > 5) { atrasoMin += dif; atrasos++; }
+        }
+      } else sinMarca += horasDia(p.id, fe);
+    });
+    return { p, plan, conLlegada, sinMarca, atrasoMin, atrasos };
+  });
+}
+
+function pintarConf() {
+  const f = fechas();
+  $('#confLeyenda').innerHTML =
+    '<span class="mk conf"><b>✓</b><em>confirmó</em></span>' +
+    '<span class="mk llego"><b>✓✓</b><em>llegó</em></span>' +
+    '<span class="mk nopuede"><b>✕</b><em>no puede</em></span>' +
+    '<span class="mk nada"><b>·</b><em>sin responder</em></span>';
+  $('#confCab').innerHTML = '<th>Persona</th>' + DIAS.map((d,i) => `<th>${d}<span class="num">${ddmm(f[i])}</span></th>`).join('');
+  const cuerpo = $('#confCuerpo'); cuerpo.innerHTML = '';
+  const avisos = [];
+
+  S.personas.forEach(p => {
+    cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}</th>` + f.map((fe,i) => {
+      const ts = turnosDe(p.id, fe);
+      if (!ts.length) return '<td><span class="mk"><b class="esp">libre</b></span></td>';
+      const m = marcaDe(p.id, fe);
+      // los dos casos que al dueño le interesa ver de inmediato
+      if (m.llego === true && m.confirmo === false)
+        avisos.push({ n:'bad', t:`${p.nombre}: dijo «no puedo» el ${DIAS[i]} y llegó igual` });
+      else if (m.llego === true && m.confirmo !== true)
+        avisos.push({ n:'warn', t:`${p.nombre}: llegó el ${DIAS[i]} sin haber confirmado` });
+      // Un solo estado por celda, el que de verdad importa, con el doble check
+      // de WhatsApp: todos saben que ✓ es "dijo que sí" y ✓✓ es "pasó de verdad".
+      let est;
+      if (m.llego === true && m.confirmo === false) est = { c:'alerta', i:'✓✓', t:'llegó igual' };
+      else if (m.llego === true)                    est = { c:'llego',  i:'✓✓', t:'llegó' };
+      else if (m.confirmo === true)                 est = { c:'conf',   i:'✓',  t:'confirmó' };
+      else if (m.confirmo === false)                est = { c:'nopuede',i:'✕',  t:'no puede' };
+      else                                          est = { c:'nada',   i:'·',  t:'sin responder' };
+      const porJefe = m.marcado_por === 'jefe' ? '<i class="porjefe" title="lo marcaste tú">tú</i>' : '';
+      return `<td><span class="mk ${est.c}" data-p="${p.id}" data-f="${fe}" role="button" tabindex="0"
+               title="Clic para marcar por esta persona"><b>${est.i}</b><em>${est.t}</em>${porJefe}</span></td>`;
+    }).join('') + '</tr>';
+  });
+
+  // el jefe puede marcar por alguien: un clic recorre confirmo -> llego -> limpiar
+  cuerpo.querySelectorAll('.mk[data-p]').forEach(celda => {
+    const accion = async () => {
+      const pid = celda.dataset.p, fe = celda.dataset.f, m = marcaDe(pid, fe);
+      let campo, valor;
+      if (m.confirmo !== true) { campo = 'confirmo'; valor = true; }
+      else if (m.llego !== true) { campo = 'llego'; valor = true; }
+      else { campo = 'confirmo'; valor = null; }
+      try {
+        S.marcas[pid + '|' + fe] = await DATOS.marcarComoJefe(pid, fe, campo, valor);
+        pintarConf();
+      } catch (e) { error(e); }
+    };
+    celda.addEventListener('click', accion);
+    celda.addEventListener('keydown', ev => { if (ev.key === 'Enter' || ev.key === ' ') { ev.preventDefault(); accion(); } });
+  });
+
+  // resumen planificado contra real
+  const pcr = planContraReal();
+  const plan = pcr.reduce((s,x) => s + x.plan, 0);
+  const conf = pcr.reduce((s,x) => s + x.conLlegada, 0);
+  const sinM = pcr.reduce((s,x) => s + x.sinMarca, 0);
+  const atr  = pcr.reduce((s,x) => s + x.atrasoMin, 0);
+  const pct  = plan ? (conf/plan)*100 : NaN;
+  $('#pcrKpis').innerHTML = [
+    { k:'Horas planificadas', v:hfmt(plan)+' h', n:'lo que armaste esta semana' },
+    { k:'Con alguien que llegó', v:hfmt(conf)+' h', n:pfmt(pct)+' de lo planificado',
+      c: isFinite(pct) ? (pct >= 80 ? 'good' : '') : '' },
+    { k:'Sin marca de llegada', v:hfmt(sinM)+' h', n:'nadie dijo que llegó', c: sinM ? 'alert' : '' },
+    { k:'Atrasos', v:atr ? minFmt(atr) : '—', n:'acumulados sobre la hora de entrada' },
+  ].map(x => `<div class="kpi"><div class="k">${x.k}</div><div class="v ${x.c||''}">${x.v}</div><div class="n">${x.n}</div></div>`).join('');
+
+  $('#pcrDetalle').innerHTML = pcr.filter(x => x.plan > 0).map(x =>
+    `<li><div class="prow"><span class="pname">${esc(x.p.nombre)}</span>
+       <span class="pstat">${hfmt(x.conLlegada)} de ${hfmt(x.plan)} h${x.atrasos ? ' · '+minFmt(x.atrasoMin)+' tarde' : ''}</span></div>
+     <div class="bar"><i style="width:${x.plan ? Math.min(100,(x.conLlegada/x.plan)*100) : 0}%"></i></div></li>`).join('')
+    || '<li class="vacio">Todavía nadie ha marcado que llegó.</li>';
+
+  $('#confAlertas').innerHTML = avisos.length
+    ? '<div class="flags">' + avisos.map(a => `<span class="flag ${a.n}">${esc(a.t)}</span>`).join('') + '</div>'
+    : '<p class="hint" style="margin:0">Sin novedades: nadie llegó sin confirmar.</p>';
+}
+
+/* ================= LINKS ================= */
+const linkDe = p => location.origin + location.pathname + '#' + p.token;
+
+function pintarLinks() {
+  const box = $('#linkLista'); box.innerHTML = '';
+  if (!S.personas.length) box.innerHTML = '<p class="vacio">Agrega gente al equipo y acá aparecen sus links.</p>';
+  S.personas.forEach(p => {
+    const url = linkDe(p);
+    const row = el('div','linkrow', `<div><b>${esc(p.nombre)}</b><code>${esc(url)}</code></div><button class="mini">Copiar</button>`);
+    box.appendChild(row);
+    const b = row.querySelector('button');
+    b.addEventListener('click', async () => {
+      try { await navigator.clipboard.writeText(url); b.textContent = 'Copiado'; }
+      catch (e) { b.textContent = 'No se pudo'; }
+      setTimeout(() => b.textContent = 'Copiar', 2000);
+    });
+  });
+
+  const f = fechas();
+  const rep = repartoSemana();
+  const libres = S.abiertos.filter(a => !a.tomado_por).length;
+  $('#salidaPub').value = S.personas.map((p,i) => {
+    const lineas = f.map((fe,d) => {
+      const ts = turnosDe(p.id, fe), au = ausenciaDe(p.id, fe);
+      return `${DIAS[d]} ${ddmm(fe)}: ` + (ts.length
+        ? ts.map(a => { const t = a.turno_id ? turnoDe(a.turno_id) : null;
+            return (t ? t.nombre + ' ' : '') + hhmm(a.inicio) + '–' + hhmm(a.fin); }).join(' y ')
+        : (AUSENCIAS[(au&&au.ausencia)||'L']||'libre').toLowerCase());
+    });
+    const horas = analizar(p).horas;
+    return `Hola ${p.nombre.split(' ')[0]}, tu semana del ${ddmm(f[0])} al ${ddmm(f[6])}:\n` +
+      lineas.join('\n') + `\nTotal: ${hfmt(horas)} horas.` +
+      (rep.porPersona[i] ? `\nPropina que te toca: ${clp(rep.porPersona[i])}.` : '') +
+      (libres ? `\nHay ${libres} ${libres===1?'turno':'turnos'} disponibles para tomar.` : '') +
+      `\nConfirma y marca tu llegada acá: ${linkDe(p)}`;
+  }).join('\n\n———\n\n');
+}
+
+/* ---------- Control horario: previsto · marcado · se paga ----------
+   Es la pantalla de la Badgeuse de Skello. Lo importante es que NO elige sola
+   entre lo planificado y lo real: muestra los dos y deja que el jefe decida
+   qué se paga, viendo contra qué decide. Ese era justo el problema que Pedro
+   planteó con la propina: que el número no salga de la nada. */
+function pintarReloj() {
+  const f = fechas();
+  if (!S.relojDia || !f.includes(S.relojDia)) S.relojDia = f.includes(iso(new Date())) ? iso(new Date()) : f[0];
+  const fe = S.relojDia;
+
+  const tabs = $('#relojTabs'); if (!tabs) return;
+  tabs.innerHTML = '';
+  f.forEach((x,i) => {
+    const b = el('button','act' + (x === fe ? ' primary' : ''), DIAS[i] + ' ' + ddmm(x).slice(0,5));
+    b.addEventListener('click', () => { S.relojDia = x; pintarReloj(); });
+    tabs.appendChild(b);
+  });
+
+  $('#relojCab').innerHTML = '<tr><th>Persona</th><th>Previsto</th><th>Marcado</th>'
+    + '<th>Se paga</th><th>Marcar por él</th><th></th></tr>';
+
+  const cuerpo = $('#relojCuerpo'); cuerpo.innerHTML = '';
+  const filas = S.personas.flatMap(p => turnosDe(p.id, fe).map(a => ({ p, a })));
+  if (!filas.length) {
+    cuerpo.innerHTML = '<tr><td colspan="5" class="vacio">Nadie tiene turno este día.</td></tr>';
+  }
+  let totPrev = 0, totPaga = 0;
+  filas.forEach(({ p, a }) => {
+    const m = marcaAsig(a);
+    const prev = horasAsig(a), real = horasReales(a), paga = horasPagadasDe(a);
+    totPrev += prev; totPaga += paga;
+    const hm = t => { const d = new Date(t); return String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0'); };
+    const marcado = m.entrada
+      ? hm(m.entrada) + '–' + (m.salida ? hm(m.salida) : '<i>sin salir</i>')
+        + (real != null ? ' · ' + hfmt(real) + ' h' : '')
+      : '<span class="sinmarca">sin marca</span>';
+    const difiere = real != null && Math.abs(real - prev) >= 0.08;
+    const tr = el('tr', difiere ? 'difiere' : '', `
+      <th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(puestoDe(a,p)||'')}</span></th>
+      <td class="n">${hhmm(a.inicio)}–${hhmm(a.fin)}<span class="num">${hfmt(prev)} h</span></td>
+      <td class="n">${marcado}</td>
+      <td><input type="number" class="n paga" step="0.25" min="0" max="24" value="${hfmt(paga).replace(',','.')}"
+            data-a="${a.id}" aria-label="Horas que se pagan a ${esc(p.nombre)}"></td>
+      <td class="marcar">
+        ${!m.entrada ? `<button class="mini" data-marca="entrada" data-a="${a.id}" data-p="${p.id}" data-f="${fe}">Entrada</button>` : ''}
+        ${m.entrada && !m.salida ? `<button class="mini" data-marca="salida" data-a="${a.id}" data-p="${p.id}" data-f="${fe}">Salida</button>` : ''}
+        ${m.entrada ? `<button class="mini" data-marca="borrar" data-a="${a.id}" data-p="${p.id}" data-f="${fe}" title="Borrar las marcas de este turno">✕</button>` : ''}
+      </td>
+      <td>${a.horas_pagadas != null ? `<button class="mini" data-auto="${a.id}">Automático</button>` : ''}</td>`);
+    cuerpo.appendChild(tr);
+  });
+  if (filas.length)
+    cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Total</th>
+      <td class="n">${hfmt(totPrev)} h</td><td></td><td class="n">${hfmt(totPaga)} h</td><td></td><td></td></tr>`;
+
+  cuerpo.querySelectorAll('input.paga').forEach(inp => {
+    let t = null;
+    inp.addEventListener('input', () => {
+      clearTimeout(t);
+      t = setTimeout(async () => {
+        try { await DATOS.horasPagadas(inp.dataset.a, Number(inp.value) || 0); await refrescar(); }
+        catch (e) { error(e); }
+      }, 700);
+    });
+  });
+  cuerpo.querySelectorAll('[data-auto]').forEach(b => b.addEventListener('click', async () => {
+    try { await DATOS.horasPagadas(b.dataset.auto, null); await refrescar(); } catch (e) { error(e); }
+  }));
+
+  // El jefe marca POR la persona, sin abrir el link de nadie. No es solo para
+  // probar la app: a alguien se le olvida marcar, se queda sin batería o marca
+  // tarde, y queda registrado que lo marcó el jefe (marcado_por = 'jefe').
+  cuerpo.querySelectorAll('[data-marca]').forEach(b => b.addEventListener('click', async () => {
+    b.disabled = true;
+    try { await marcarPorElJefe(b.dataset.marca, b.dataset.a, b.dataset.p, b.dataset.f); await refrescar(); }
+    catch (e) { b.disabled = false; error(e); }
+  }));
+
+  const d = S.dias[fe];
+  $('#relojEstado').innerHTML = d && d.cerrado_en
+    ? `Cerrado · venta <b>${clp(d.venta)}</b>`
+    : 'Sin cerrar. Al cerrar se te pide la venta del día.';
+  $('#btnCerrarDia').textContent = d && d.cerrado_en ? 'Corregir la venta' : 'Cerrar el día';
+}
+
+// Marcar por alguien. La hora la pone el reloj del jefe, no el servidor, y por
+// eso queda `marcado_por = 'jefe'`: una marca puesta por el jefe no puede
+// hacerse pasar por una marca de la persona.
+async function marcarPorElJefe(accion, asigId, personaId, fecha) {
+  const a = filasDe(personaId, fecha).find(x => x.id === asigId); if (!a) return;
+  const hoy = new Date(fecha + 'T00:00:00');
+  const enHora = h => { const d = new Date(hoy); const hh = ((Number(h) % 24) + 24) % 24;
+    d.setHours(Math.floor(hh), Math.round((hh - Math.floor(hh)) * 60), 0, 0);
+    if (Number(h) >= 24) d.setDate(d.getDate() + 1);
+    return d.toISOString(); };
+  if (accion === 'borrar')
+    return DATOS.marcarComoJefe(asigId, personaId, fecha, { entrada:null, salida:null, llego:null, hora_llego:null });
+  if (accion === 'entrada')
+    return DATOS.marcarComoJefe(asigId, personaId, fecha,
+      { entrada: enHora(a.inicio), llego: true, hora_llego: enHora(a.inicio) });
+  return DATOS.marcarComoJefe(asigId, personaId, fecha, { salida: enHora(a.fin) });
+}
+
+/* ================= PINTAR TODO ================= */
+function pintarTodo() {
+  $('#hLocal').textContent = S.local ? S.local.nombre : '';
+  pintarPlan(); pintarEquipo(); pintarTurnos(); pintarPuestos(); pintarPropinas(); pintarConf(); pintarReloj(); pintarLinks();
+  pintarDeshacer(); pintarDeshacerDot(); pintarDeshacerEq();
+}
+
+/* ================= VISTA DEL TRABAJADOR ================= */
+const tokenDelLink = () => (location.hash || '').replace(/^#/, '').trim();
+
+async function pintarTrabajador(token) {
+  $('#vistaTrab').hidden = false; $('#vistaJefe').hidden = true;
+  const lunes = iso(lunesDe(new Date()));
+  let d = null;
+  try { d = await DATOS.miSemana(token, lunes); }
+  catch (e) { $('#tAviso').innerHTML = `<div class="avisoro">${esc(e.message)}</div>`; return; }
+
+  if (!d) {
+    $('#tNombre').textContent = 'Link no válido';
+    $('#tSub').textContent = '';
+    $('#tAviso').innerHTML = '<div class="avisoro">Este link no corresponde a nadie del equipo. Pídele a tu jefe que te mande el tuyo de nuevo.</div>';
+    $('#tDias').innerHTML = ''; $('#tAbiertos').innerHTML = ''; $('#tPropina').innerHTML = ''; $('#tTotal').textContent = '';
+    return;
+  }
+
+  $('#tNombre').textContent = d.nombre;
+  $('#tSub').textContent = (d.rol ? d.rol + ' · ' : '') + 'semana del ' + ddmm(lunes);
+  $('#tAviso').innerHTML = '';
+
+  // propina de la semana: se calcula con lo que la base deja ver de su propia semana
+  const dias = d.dias || [], props = d.propinas || [];
+  let horasSem = 0;
+  const horasDelDia = x => (x.turnos || []).reduce((n,t) =>
+    n + Number(t.fin) - Number(t.inicio) - Number(t.colacion || 0), 0);
+  dias.forEach(x => { horasSem += horasDelDia(x); });
+
+  const hoy = iso(new Date());
+
+  // Confirmar toda la semana de una: la mayoría de las semanas puede con todo,
+  // y pedirle 5 toques para decir que sí es la mejor forma de que no lo haga.
+  const porConfirmar = dias.filter(x => (x.turnos||[]).some(b => b.confirmo !== true));
+  const btnTodo = $('#tConfTodo');
+  if (porConfirmar.length > 1) {
+    btnTodo.hidden = false;
+    const cuantos = porConfirmar.reduce((n,x) => n + (x.turnos||[]).filter(b => b.confirmo !== true).length, 0);
+    btnTodo.innerHTML = `<button class="act primary" id="btnTodaSemana">Confirmo toda la semana
+      <span>${cuantos} ${cuantos === 1 ? 'turno' : 'turnos'}</span></button>
+      <p class="soloHoy">Si alguno no puedes, lo cambias después uno por uno.</p>`;
+    on('#btnTodaSemana', 'click', async ev => {
+      const b = ev.currentTarget; b.disabled = true; b.textContent = 'Confirmando…';
+      try {
+        for (const x of porConfirmar)
+          for (const b of (x.turnos || [])) await DATOS.marcarTurno(token, b.id, 'confirmo');
+        await pintarTrabajador(token);
+      } catch (e) {
+        b.disabled = false;
+        $('#tAviso').innerHTML = `<div class="avisoro">No se pudo confirmar todo: ${esc(e.message)}</div>`;
+      }
+    });
+  } else btnTodo.hidden = true;
+
+  const cont = $('#tDias'); cont.innerHTML = '';
+  dias.forEach(x => {
+    const bloques = x.turnos || [];
+    const trabaja = bloques.length > 0;
+    const hs = horasDelDia(x);
+    const i = (new Date(x.fecha + 'T00:00:00').getDay() + 6) % 7;
+    const card = el('div','diacard' + (trabaja ? '' : ' libre'), `
+      <div class="diahead">
+        <div><div class="diafecha">${DIAS[i]} ${ddmm(x.fecha)}</div>
+          <div class="diaturno">${trabaja
+            ? bloques.map(b => esc(b.turno || b.puesto || 'Turno')).join(' + ')
+            : (AUSENCIAS[x.ausencia] || 'Libre')}</div></div>
+        <div class="diahoras">${trabaja
+            ? bloques.map(b => hhmm(b.inicio)+'–'+hhmm(b.fin)
+                + (b.puesto ? ' <i>'+esc(b.puesto)+'</i>' : '')).join('<br>')
+              + ' · ' + hfmt(hs) + ' h'
+            : ''}
+          ${x.propina ? `<span class="prop">${clp(x.propina)} de propina</span>` : ''}</div>
+      </div>` +
+      (trabaja ? bloques.map(b => {
+        const dentro = b.entrada && !b.salida, listo = b.entrada && b.salida;
+        const hEnt = b.entrada ? new Date(b.entrada) : null, hSal = b.salida ? new Date(b.salida) : null;
+        const hm = d => String(d.getHours()).padStart(2,'0') + ':' + String(d.getMinutes()).padStart(2,'0');
+        return `<div class="turnocard${dentro ? ' dentro' : ''}">
+          <div class="turnocard-h"><b>${hhmm(b.inicio)}–${hhmm(b.fin)}</b>
+            ${b.puesto ? `<span class="rol">${esc(b.puesto)}</span>` : ''}</div>
+          ${listo ? `<p class="marcado">Entraste a las <b>${hm(hEnt)}</b> y saliste a las <b>${hm(hSal)}</b>
+                       · <b>${hfmt(Math.max((hSal - hEnt)/3600000 - Number(b.colacion||0), 0))} h</b></p>`
+           : dentro ? `<p class="marcado">Entraste a las <b>${hm(hEnt)}</b>. Estás adentro.</p>` : ''}
+          <div class="btns">
+            ${!b.entrada ? `<button class="reloj" data-reloj="entrada" data-id="${b.id}">Marcar entrada</button>` : ''}
+            ${dentro ? `<button class="reloj sale" data-reloj="salida" data-id="${b.id}">Marcar salida</button>` : ''}
+            ${!b.entrada ? `<button data-a="confirmo" data-id="${b.id}" aria-pressed="${b.confirmo === true}">Confirmo</button>
+              <button class="no" data-a="no_puedo" data-id="${b.id}" aria-pressed="${b.confirmo === false}">No puedo</button>` : ''}
+          </div></div>`;
+      }).join('') + (x.ofrecido
+        ? '<p class="ofrecido">Ofreciste este turno. Si alguien lo toma, tu jefe confirma el cambio.</p>'
+        : bloques.map(b => `<button class="ofrecer" data-of="${b.id}">Ofrecer${bloques.length > 1
+             ? ' el de ' + hhmm(b.inicio) : ' este turno'} a mis compañeros</button>`).join('')) : ''));
+    cont.appendChild(card);
+    card.querySelectorAll('[data-of]').forEach(bo => bo.addEventListener('click', async () => {
+      if (!confirm('Vas a ofrecer este turno a tus compañeros.\n\n'
+                 + 'Sigue siendo tuyo hasta que alguien lo tome y tu jefe confirme el cambio.')) return;
+      bo.disabled = true;
+      try { await DATOS.ofrecerTurno(token, bo.dataset.of); await pintarTrabajador(token); }
+      catch (e) { bo.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">${esc(e.message)}</div>`; }
+    }));
+    card.querySelectorAll('button[data-a],button[data-reloj]').forEach(b => {
+      b.addEventListener('click', async () => {
+        const accion = b.dataset.reloj || b.dataset.a;
+        if (accion === 'salida' && !confirm('¿Marcar tu salida?\n\nQueda la hora exacta y no se puede deshacer.')) return;
+        b.disabled = true;
+        try {
+          const r = await DATOS.marcarTurno(token, b.dataset.id, accion);
+          if (r && r.ok === false) {
+            const porque = { ya_entro:'Ya marcaste tu entrada.', ya_salio:'Ya marcaste tu salida.',
+                             sin_entrada:'Primero tienes que marcar la entrada.',
+                             no_es_tuyo:'Ese turno no es tuyo.', link:'Tu link no es válido.' };
+            $('#tAviso').innerHTML = `<div class="avisoro">${esc(porque[r.motivo] || r.motivo)}</div>`;
+          }
+          await pintarTrabajador(token);
+        } catch (e) { b.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">No se pudo guardar: ${esc(e.message)}</div>`; }
+      });
+    });
+  });
+  const saldo = Number(d.saldo || 0);
+  $('#tTotal').innerHTML = 'Total de la semana: <b>' + hfmt(horasSem) + ' horas</b>.'
+    + (Math.abs(saldo) >= 0.5
+       ? ` Saldo acumulado: <b>${saldo > 0 ? '+' : ''}${hfmt(saldo)} h</b> ${saldo > 0 ? '<i>(te deben)</i>' : '<i>(debes)</i>'}.`
+       : '');
+
+  const miProp = dias.reduce((s,x) => s + (x.propina || 0), 0);
+  const porHora = horasSem ? miProp / horasSem : 0;
+  $('#tPropina').innerHTML = miProp
+    ? `<div class="platita"><div class="k">Tu propina de la semana</div><div class="v">${clp(miProp)}</div>
+       <div class="n">Son <b>${clp(porHora)} por hora</b> sobre tus ${hfmt(horasSem)} h.
+       Se reparte día por día entre los que trabajaron ese día, por horas × factor; el tuyo es
+       <b>${hfmt(d.factor)}</b>. El factor lo acuerda el equipo, no el jefe (art. 64).</div></div>`
+    : '';
+
+  const ab = $('#tAbiertos'); ab.innerHTML = '';
+  const abiertos = d.abiertos || [];
+  if (!abiertos.length) ab.innerHTML = '<p class="vacio">No hay turnos disponibles por ahora.</p>';
+  abiertos.forEach(a => {
+    const hs = Number(a.fin) - Number(a.inicio) - Number(a.colacion);
+    const ocupado = dias.find(x => x.fecha === a.fecha && x.turno);
+    const card = el('div','abicard' + (a.mio ? ' tomado' : ''), `
+      <div class="qué">
+        <b>${ddmm(a.fecha)} · ${esc(a.turno)} ${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
+        <span>${esc(a.puesto||'')} · ${hfmt(hs)} h</span>
+        ${a.nota ? `<em>${esc(a.nota)}</em>` : ''}
+        ${ocupado ? `<em>Ese día ya tienes ${esc(ocupado.turno)}.</em>` : ''}
+      </div>
+      <div class="abiest">${a.mio ? '<span class="flag ok">Lo tomaste tú</span>'
+                                  : '<button class="act primary" data-tomar="1">Lo tomo</button>'}</div>`);
+    ab.appendChild(card);
+    const bt = card.querySelector('[data-tomar]');
+    if (bt) bt.addEventListener('click', async () => {
+      bt.disabled = true;
+      try {
+        const r = await DATOS.tomarTurno(token, a.id) || {};
+        if (!r.ok) {
+          const txt = r.motivo === 'tope'
+            ? `No puedes tomarlo: quedarías con ${hfmt(r.horas)} h esa semana y tu contrato es de ${hfmt(r.contrato)} h. Habla con tu jefe.`
+            : r.motivo === 'tomado' ? 'Alguien lo tomó primero.'
+            : 'No se pudo tomar el turno.';
+          $('#tAviso').innerHTML = `<div class="avisoro">${esc(txt)}</div>`;
+        }
+        await pintarTrabajador(token);
+      } catch (e) { bt.disabled = false; $('#tAviso').innerHTML = `<div class="avisoro">${esc(e.message)}</div>`; }
+    });
+  });
+}
+
+/* ================= ARRANQUE ================= */
+// Si la lectura de la sesion falla o se cuelga, NUNCA dejar la pantalla en blanco:
+// mejor mostrar el formulario de entrar que un vacio que no explica nada.
+async function sesionSegura() {
+  try {
+    const r = await Promise.race([
+      sb.auth.getSession(),
+      new Promise(res => setTimeout(() => res({ data:null, lenta:true }), 6000)),
+    ]);
+    if (r && r.lenta) { console.warn('getSession no respondio en 6 s'); return null; }
+    return (r && r.data && r.data.session) || null;
+  } catch (e) { console.warn('getSession fallo', e); return null; }
+}
+
+async function verJefe() {
+  $('#vistaJefe').hidden = false; $('#vistaTrab').hidden = true;
+  const sesion = await sesionSegura();
+  const hay = !!sesion;
+  $('#cardLogin').hidden = hay;
+  $('#hAcciones').innerHTML = '';
+  if (!hay) { $('#cardLocal').hidden = true; $('#app').hidden = true; return; }
+
+  const salir = el('button','act','Cerrar sesión');
+  salir.addEventListener('click', () => sb.auth.signOut());
+  $('#hAcciones').appendChild(salir);
+
+  try { S.locales = await DATOS.misLocales() || []; }
+  catch (e) {
+    $('#diag').hidden = false; marca('#c-db','bad','La base rechazó la consulta');
+    $('#diagNota').textContent = e.message;
+    $('#cardLocal').hidden = true; $('#app').hidden = true; return;
+  }
+
+  // ¿cuál local estaba mirando? se recuerda por navegador
+  let elegido = null;
+  try { elegido = localStorage.getItem('malla-local'); } catch (e) {}
+  S.local = S.locales.find(l => l.id === elegido) || S.locales[0] || null;
+
+
+  if (!S.local) { $('#cardLocal').hidden = false; $('#app').hidden = true; pintarLocales(); return; }
+  $('#cardLocal').hidden = true; $('#app').hidden = false;
+  pintarLocales();
+
+  await cargar();
+  pintarTodo();
+
+  if (!S.canal) S.canal = DATOS.escuchar(S.local.id, () => { cargar().then(pintarTodo).catch(()=>{}); });
+}
+
+function conectarApp() {
+  // Pestañas. Se filtran las que existen de verdad: al sacar «Turnos abiertos»
+  // esta lista quedó nombrando una que ya no está, y como aquí se llamaba a
+  // addEventListener sin red, reventaba y SE CAÍA TODO LO DEMÁS de conectarApp.
+  // Es la segunda vez hoy que un elemento que falta se lleva por delante a los
+  // que venían después; que no vuelva a pasar por esta vía.
+  const TABS = ['sem','eq','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
+  TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
+    TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
+  }));
+
+  // modos de vista
+  const irA = modo => {
+    // al entrar al mes, se posa en el mes del día en que estabas parado
+    if (modo === 'mes') S.mes = new Date(S.modo === 'dia' ? S.dia : S.lunes.getTime() + 3 * 86400000);
+    S.modo = modo; refrescar().catch(error);
+  };
+  on('#modoDia', 'click', () => irA('dia'));
+  on('#modoSemana', 'click', () => irA('semana'));
+  on('#modoMes', 'click', () => irA('mes'));
+
+  // navegar: el paso depende de la vista en la que estés
+  const mover = n => {
+    if (S.modo === 'dia') S.dia = masDias(S.dia, n);
+    else if (S.modo === 'mes') S.mes = new Date(S.mes.getFullYear(), S.mes.getMonth() + n, 1);
+    else S.lunes = masDias(S.lunes, n * 7);
+    refrescar().catch(error);
+  };
+  on('#semAnt', 'click', () => mover(-1));
+  on('#semSig', 'click', () => mover(1));
+  const agrupar = modo => {
+    S.agrupar = modo;
+    $('#agrPersonas').classList.toggle('primary', modo === 'personas');
+    $('#agrPuestos').classList.toggle('primary', modo === 'puestos');
+    pintarPlan();
+  };
+  on('#agrPersonas', 'click', () => agrupar('personas'));
+  on('#agrPuestos',  'click', () => agrupar('puestos'));
+
+  on('#semHoy', 'click', () => {
+    S.dia = new Date(); S.lunes = lunesDe(new Date()); S.mes = new Date();
+    refrescar().catch(error);
+  });
+
+  // copiar la semana anterior sobre esta
+/* ---------- modelos de semana ----------
+   Lo que mas ahorra tiempo de toda la lista: una semana de local se parece a la
+   anterior, pero hoy se arma turno por turno.
+
+   «Copiar la anterior» ya existia y resuelve el caso facil. Esto resuelve el de
+   verdad: el local tiene dos o tres semanas tipo y la anterior puede ser justo
+   la rara. Un modelo con nombre SE ELIGE; «la anterior» solo se acepta. */
+function pintarModelos() {
+  const sel = $('#pModelo');
+  const antes = sel.value;
+  sel.innerHTML = S.modelos.length
+    ? S.modelos.map(m => {
+        const n = (m.modelo_turnos || []).length;
+        return `<option value="${m.id}">${esc(m.nombre)} · ${n} turno${n === 1 ? '' : 's'}</option>`;
+      }).join('')
+    : '<option value="">— todavía no hay modelos guardados —</option>';
+  if (antes && S.modelos.some(m => m.id === antes)) sel.value = antes;
+
+  const hay = S.modelos.length > 0;
+  $('#pAplicar').disabled = !hay;
+  $('#pBorrar').hidden    = !hay;
+
+  // Las personas arrancan TODAS marcadas: el caso normal es aplicar el modelo
+  // completo, y desmarcar es mas rapido que marcar a quince.
+  $('#pPersonas').innerHTML = S.personas.map(x =>
+    `<button type="button" class="act dia on" data-pid="${x.id}"
+       aria-pressed="true">${esc(x.nombre.split(' ')[0])}</button>`).join('')
+    || '<span class="hint">No hay nadie en el equipo todavía.</span>';
+  marcarTodosTexto();
+
+  // Cuantas semanas seguidas. Mas de cuatro de una vez no lo pidio nadie y
+  // pisar un mes entero sin querer es caro.
+  if (!$('#pSemanas').dataset.listo) {
+    $('#pSemanas').innerHTML = [1,2,3,4].map(n =>
+      `<button type="button" class="act dia" data-sem="${n}"
+         aria-pressed="false">${n}</button>`).join('');
+    $('#pSemanas').dataset.listo = '1';
+  }
+  // OJO: aca NO se toca la cantidad de semanas elegida. `pintarModelos` se
+  // llama tambien DESPUES de guardar y de borrar, y un repintado que pisa lo
+  // que el usuario eligio es un error silencioso: elegia 4 semanas, guardaba
+  // un modelo y la seleccion volvia a 1 sin avisar. El reinicio a 1 se hace
+  // una sola vez, al ABRIR el dialogo.
+  if (!$('#pSemanas').querySelector('button[aria-pressed="true"]')) marcarSemanas(1);
+}
+
+/* El numero de semanas es una CANTIDAD, no una posicion: con el 3 marcado, el 1
+   y el 2 tambien van llenos, como un nivel. Lo pidio Pedro mirando la pantalla
+   —«si marcas el 2 queda en blanco el 1»— y tiene razon: tal como estaba se leia
+   «la tercera semana» en vez de «tres semanas».
+
+   OJO, el detalle que importa: el relleno va por CLASE y `aria-pressed` queda
+   SOLO en el elegido. `opcionesModelo()` lee el valor con un querySelector de
+   `aria-pressed="true"`, que devuelve el PRIMERO: si se marcaran los cuatro,
+   leeria 1 y aplicaria siempre una sola semana, en silencio. */
+/* Una accion que termina cierra el dialogo: no tiene nada mas que ofrecer y
+   ademas TAPA la malla, que es justo lo que uno quiere ver despues de aplicar.
+   Lo pidio Pedro —«una vez creado y guardado no deberia desaparecer esta
+   pantalla?»—. El aviso se muestra donde ya lo muestra «Copiar la anterior»,
+   para no inventar un segundo lugar donde mirar.
+   Si algo FALLA, el dialogo se queda abierto: ahi si hay que volver a intentar. */
+function listoYCerrar(texto) {
+  $('#dlgModelos').close();
+  const m = $('#msgSem');
+  if (m) { m.textContent = texto; m.className = 'msg ok'; }
+  setTimeout(() => { const x = $('#msgSem'); if (x && x.textContent === texto) x.textContent = ''; }, 6000);
+}
+
+function marcarSemanas(n) {
+  $('#pSemanas').querySelectorAll('button[data-sem]').forEach(b => {
+    const v = Number(b.dataset.sem);
+    b.classList.toggle('on', v <= n);
+    b.setAttribute('aria-pressed', v === n ? 'true' : 'false');
+  });
+}
+
+function marcarTodosTexto() {
+  const t = $('#pPersonas').querySelectorAll('button[data-pid][aria-pressed="true"]').length;
+  const n = S.personas.length;
+  $('#pTodos').textContent = n ? (t === n ? '· todos' : `· ${t} de ${n}`) : '';
+}
+
+function opcionesModelo() {
+  const todas = S.personas.length;
+  const marcadas = [...$('#pPersonas').querySelectorAll('button[data-pid][aria-pressed="true"]')]
+    .map(b => b.dataset.pid);
+  const semBtn = $('#pSemanas').querySelector('button[aria-pressed="true"]');
+  return {
+    // null = todas, para no filtrar de mas si alguien se sumo al equipo
+    personas: marcadas.length === todas ? null : marcadas,
+    sinAsignar: $('#pSinAsignar').checked,
+    semanas: Number(semBtn ? semBtn.dataset.sem : 1) || 1,
+  };
+}
+
+  /* ---------- Copiar: un boton para los dos sentidos ----------
+     Antes habia «Copiar la anterior» suelto en la barra y NINGUNA forma de
+     copiar un dia, que es lo que Pedro pidio (msg 3770) despues de armar un
+     lunes de once turnos a mano. Ahora es un solo boton que sabe en que vista
+     estas, y de paso la barra tiene un control menos. */
+  function pintarCopiar() {
+    const esDia = S.modo === 'dia';
+    $('#cDia').hidden = !esDia;
+    $('#cSemana').hidden = esDia;
+    $('#cMsg').textContent = '';
+    if (esDia) {
+      $('#cTit').textContent = 'Copiar este día';
+      $('#cSub').textContent = `${DIAS[(new Date(iso(S.dia) + 'T00:00:00').getDay() + 6) % 7]} `
+        + `${ddmm(iso(S.dia))} · ${turnosDelDia(iso(S.dia))} turnos`;
+      // Los dias de LA SEMANA que se esta viendo, menos el de origen.
+      const f = fechas(), hoy = iso(S.dia);
+      $('#cDias').innerHTML = f.map((fe, i) => fe === hoy ? '' :
+        `<button type="button" class="act dia" data-fecha="${fe}" aria-pressed="false">
+           ${DIAS[i]}<span class="yatiene">${ddmm(fe)}</span></button>`).join('');
+    } else {
+      $('#cTit').textContent = 'Copiar la semana';
+      $('#cSub').textContent = `semana del ${ddmm(fechas()[0])}`;
+      if (!$('#cSemanas').dataset.listo) {
+        $('#cSemanas').innerHTML = [1,2,3,4].map(n =>
+          `<button type="button" class="act dia" data-sem="${n}" aria-pressed="false">${n}</button>`).join('');
+        $('#cSemanas').dataset.listo = '1';
+      }
+      marcarCuantas(1);
+      marcarQue('adelante');
+    }
+  }
+  // Cuantas semanas es una CANTIDAD, no una posicion: con el 3 marcado el 1 y
+  // el 2 van llenos. Misma regla que en Modelos, que Pedro ya corrigio una vez.
+  function marcarCuantas(n) {
+    $('#cSemanas').querySelectorAll('button[data-sem]').forEach(b => {
+      const v = Number(b.dataset.sem);
+      b.classList.toggle('on', v <= n);
+      b.setAttribute('aria-pressed', v === n ? 'true' : 'false');
+    });
+  }
+  function marcarQue(q) {
+    $('#cQue').querySelectorAll('button[data-que]').forEach(b => {
+      const on = b.dataset.que === q;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    // Traer la anterior no tiene «cuantas»: se esconde en vez de dejarlo ahi
+    // sin efecto, que es como se construye una sorpresa.
+    $('#cCajaSem').hidden = q !== 'adelante';
+  }
+  const turnosDelDia = fe => S.personas.reduce((n, p) => n + turnosDe(p.id, fe).length, 0)
+    + S.abiertos.filter(a => !a.persona_id && a.fecha === fe).length;
+
+  on('#btnCopiar', 'click', () => { pintarCopiar(); $('#dlgCopiar').showModal(); });
+  on('#cCerrar', 'click', () => $('#dlgCopiar').close());
+  on('#cDias', 'click', e => {
+    const b = e.target.closest('button[data-fecha]'); if (!b) return;
+    const on = b.getAttribute('aria-pressed') === 'true';
+    b.setAttribute('aria-pressed', on ? 'false' : 'true');
+    b.classList.toggle('on', !on);
+  });
+  on('#cSemanas', 'click', e => {
+    const b = e.target.closest('button[data-sem]'); if (b) marcarCuantas(Number(b.dataset.sem));
+  });
+  on('#cQue', 'click', e => {
+    const b = e.target.closest('button[data-que]'); if (b) marcarQue(b.dataset.que);
+  });
+
+  on('#cCopiar', 'click', async () => {
+    const m = $('#cMsg'), b = $('#cCopiar');
+    const aviso = (t, cls) => { m.textContent = t; m.className = 'msg ' + (cls || ''); };
+    b.disabled = true;
+    try {
+      if (S.modo === 'dia') {
+        const destinos = [...$('#cDias').querySelectorAll('button[aria-pressed="true"]')]
+          .map(x => x.dataset.fecha);
+        if (!destinos.length) { aviso('Elige al menos un día.', 'bad'); b.disabled = false; return; }
+        const f = fechas();
+        await recordarDeLaBase('copiar el día', f[0], f[6]);
+        const n = await DATOS.copiarDiaA(S.local.id, iso(S.dia), destinos);
+        await refrescar();
+        $('#dlgCopiar').close();
+        const ms = $('#msgSem');
+        if (ms) { ms.textContent = n ? `Listo: ${n} turnos copiados a ${destinos.length} día(s).`
+                                     : 'Ese día no tiene turnos que copiar.';
+                  ms.className = 'msg ' + (n ? 'ok' : ''); }
+      } else {
+        const que = ($('#cQue').querySelector('button[aria-pressed="true"]') || {}).dataset;
+        if (que && que.que === 'anterior') {
+          const anterior = iso(masDias(S.lunes, -7)), f = fechas();
+          await recordarDeLaBase('traer la semana anterior', f[0], f[6]);
+          const n = await DATOS.copiarSemana(S.local.id, anterior, iso(S.lunes));
+          await refrescar();
+          $('#dlgCopiar').close();
+          const ms = $('#msgSem');
+          if (ms) { ms.textContent = n ? `Listo: ${n} turnos traídos.` : 'La semana anterior estaba vacía.';
+                    ms.className = 'msg ' + (n ? 'ok' : ''); }
+        } else {
+          const bsem = $('#cSemanas').querySelector('button[aria-pressed="true"]');
+          const cuantas = Number(bsem ? bsem.dataset.sem : 1) || 1;
+          const desde = iso(masDias(S.lunes, 7));
+          const hasta = iso(masDias(S.lunes, cuantas * 7 + 6));
+          await recordarDeLaBase(`copiar la semana a ${cuantas}`, desde, hasta);
+          const n = await DATOS.copiarSemanaA(S.local.id, iso(S.lunes), cuantas);
+          await refrescar();
+          $('#dlgCopiar').close();
+          const ms = $('#msgSem');
+          if (ms) { ms.textContent = n ? `Listo: ${n} turnos copiados a ${cuantas} semana(s).`
+                                       : 'Esta semana no tiene turnos que copiar.';
+                    ms.className = 'msg ' + (n ? 'ok' : ''); }
+        }
+      }
+      setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 6000);
+    } catch (e) {
+      // Si falla, el paso atras sobra: se saca para no dejar un Deshacer que no
+      // deshace nada. Mismo criterio que el resto de la pantalla.
+      S.hist.pop(); pintarDeshacer();
+      aviso(e.message, 'bad');
+    }
+    b.disabled = false;
+  });
+
+  /* ---------- modelos de semana: los botones ---------- */
+  on('#btnModelos', 'click', () => {
+    $('#pMsg').textContent = '';
+    $('#pNombre').value = '';
+    $('#pSinAsignar').checked = false;
+    $('#cajaPPersonas').hidden = false;
+    pintarModelos();
+    // Al abrir siempre se parte en 1: aplicar cuatro semanas pisa un mes entero
+    // y que eso quede armado de la vez anterior es una sorpresa cara.
+    marcarSemanas(1);
+    $('#dlgModelos').showModal();
+  });
+  on('#pCerrar', 'click', () => $('#dlgModelos').close());
+
+  // Si se pega solo la forma, elegir personas no significa nada: se esconden en
+  // vez de dejarlas ahi sin efecto, que es como se construye una sorpresa.
+  on('#pSinAsignar', 'change', () => {
+    $('#cajaPPersonas').hidden = $('#pSinAsignar').checked;
+  });
+
+  on('#pPersonas', 'click', ev => {
+    const b = ev.target.closest('button[data-pid]'); if (!b) return;
+    const activo = b.getAttribute('aria-pressed') === 'true';
+    b.setAttribute('aria-pressed', activo ? 'false' : 'true');
+    b.classList.toggle('on', !activo);
+    marcarTodosTexto();
+  });
+
+  // Una sola cantidad de semanas: estas pastillas son excluyentes.
+  on('#pSemanas', 'click', ev => {
+    const b = ev.target.closest('button[data-sem]'); if (!b) return;
+    const v = Number(b.dataset.sem);
+    const sel = $('#pSemanas').querySelector('button[aria-pressed="true"]');
+    const hoy = sel ? Number(sel.dataset.sem) : 0;
+    // Apretar el ULTIMO encendido lo apaga y baja uno. Lo pidio Pedro: con el
+    // relleno de nivel, volver a apretar el 2 y que no pase nada se siente
+    // trabado. Pero no se baja de 1: aplicar un modelo a cero semanas no
+    // significa nada, asi que el 1 es el piso y volver a apretarlo no hace nada.
+    marcarSemanas(v === hoy ? Math.max(1, v - 1) : v);
+  });
+
+  on('#pGuardar', 'click', async () => {
+    const m = $('#pMsg');
+    const nombre = $('#pNombre').value.trim();
+    if (!nombre) { m.textContent = 'Ponle un nombre al modelo.'; m.className = 'msg bad'; return; }
+    // Si el nombre ya existe se reemplaza, pero se pregunta: perder un modelo
+    // guardado por escribir el mismo nombre seria una sorpresa cara.
+    const choca = S.modelos.find(x => x.nombre.trim().toLowerCase() === nombre.toLowerCase());
+    if (choca && !confirm('Ya existe un modelo llamado «' + choca.nombre + '».\n\n'
+                        + 'Se reemplaza por la semana que estás viendo.')) return;
+    m.textContent = 'Guardando…'; m.className = 'msg';
+    try {
+      recordar('guardar el modelo de semana «' + nombre + '»');
+      const r = await DATOS.guardarSemanaComoModelo(S.local.id, nombre, iso(S.lunes));
+      await refrescar();
+      pintarModelos();
+      $('#pModelo').value = r.id;
+      $('#pNombre').value = '';
+      const dicho = r.n
+        ? `${r.reemplazo ? 'Reemplazado' : 'Guardado'} el modelo «${r.nombre}»: ${r.n} turno${r.n === 1 ? '' : 's'}.`
+        : `Guardé «${r.nombre}», pero la semana que estás viendo no tiene turnos.`;
+      // Sin turnos NO se cierra: es un resultado raro y conviene que lo lea aca.
+      if (r.n) return listoYCerrar(dicho);
+      m.textContent = dicho; m.className = 'msg';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
+
+  on('#pAplicar', 'click', async () => {
+    const m = $('#pMsg');
+    const id = $('#pModelo').value;
+    if (!id) { m.textContent = 'No hay ningún modelo para aplicar.'; m.className = 'msg bad'; return; }
+    const o = opcionesModelo();
+    if (!o.sinAsignar && Array.isArray(o.personas) && !o.personas.length) {
+      m.textContent = 'No marcaste a nadie. Marca a alguien, o usa «solo la forma».';
+      m.className = 'msg bad'; return;
+    }
+    const nombre = S.modelos.find(x => x.id === id);
+    if (!confirm('Aplicar «' + (nombre ? nombre.nombre : '') + '» a '
+               + (o.semanas === 1 ? 'esta semana' : o.semanas + ' semanas seguidas') + '.\n\n'
+               + 'Se pisan los turnos que ya haya. Las ausencias se respetan.')) return;
+    m.textContent = 'Aplicando…'; m.className = 'msg';
+    try {
+      recordar('aplicar un modelo de semana');
+      const r = await DATOS.aplicarModelo(S.local.id, id, iso(S.lunes), o);
+      await refrescar();
+      if (r.turnos)
+        return listoYCerrar(`Listo: ${r.turnos} turno${r.turnos === 1 ? '' : 's'} en `
+          + (r.semanas === 1 ? '1 semana.' : r.semanas + ' semanas.'));
+      m.textContent = 'El modelo no tiene turnos para lo que marcaste.';
+      m.className = 'msg';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
+
+  on('#pBorrar', 'click', async () => {
+    const m = $('#pMsg');
+    const id = $('#pModelo').value; if (!id) return;
+    const x = S.modelos.find(y => y.id === id);
+    if (!confirm('Eliminar el modelo «' + (x ? x.nombre : '') + '».\n\n'
+               + 'No toca ninguna semana ya armada.')) return;
+    try {
+      recordar('eliminar un modelo de semana');
+      await DATOS.borrarModelo(id);
+      await refrescar();
+      pintarModelos();
+      m.textContent = 'Modelo eliminado.'; m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
+
+  // copiar la dotación de un día a los demás, para no teclear siete veces
+  on('#btnCopiarDotacion', 'click', async () => {
+    const dia = DIAS[Number(S.cobDia)];
+    const origen = S.dotacion[S.cobDia] || {};
+    const filas = [];
+    for (let d = 0; d < 7; d++) {
+      if (String(d) === S.cobDia) continue;
+      for (const puesto of Object.keys(origen))
+        for (const turnoId of Object.keys(origen[puesto]))
+          filas.push({ local_id:S.local.id, perfil:String(d), puesto,
+                       turno_id:turnoId, cantidad:origen[puesto][turnoId] });
+    }
+    if (!filas.length) return alert(`${dia} no tiene ningún número puesto todavía.\n\nLlénalo primero y después cópialo.`);
+    if (!confirm(`Copiar la dotación de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
+    const b = $('#btnCopiarDotacion'); b.disabled = true;
+    recordarDot('copiar ' + dia + ' a los demás');
+    try {
+      await DATOS.guardarDotacionLote(filas);     // una sola llamada, no sesenta
+      await refrescar();
+      $('#detNecesita').open = true;
+    } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
+    b.disabled = false;
+  });
+  // dejar la hoja en blanco: todo el mundo libre, sin borrar nada mas
+  on('#btnLimpiarSem', 'click', async () => {
+    const r = rango();
+    const cuantas = Object.values(S.asign).flat()
+      .filter(a => a.fecha >= r.desde && a.fecha <= r.hasta).length;
+    if (!cuantas) return alert('Esta hoja ya está en blanco.');
+    if (!confirm(`Dejar libre a todo el mundo del ${ddmm(r.desde)} al ${ddmm(r.hasta)}.\n\n`
+      + `Se borran ${cuantas} ${cuantas === 1 ? 'asignación' : 'asignaciones'}. `
+      + `Las propinas y las marcas no se tocan, y lo puedes deshacer.`)) return;
+    const m = $('#msgSem');
+    recordar('limpiar la hoja');
+    try {
+      await DATOS.borrarAsignaciones(S.local.id, r.desde, r.hasta);
+      await refrescar();
+      m.textContent = 'Hoja en blanco. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
+    } catch (e) { S.hist.pop(); pintarDeshacer(); m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { $('#msgSem').textContent = ''; }, 6000);
+  });
+  on('#btnDeshacer', 'click', deshacer);
+
+  /* --- el diálogo del turno --- */
+  on('#dPersona', 'change', ajustarAusencia);
+  on('#tabTurno', 'click', () => pestañaDlg(true));
+  on('#tabAus',   'click', () => pestañaDlg(false));
+  on('#dCancelar','click', () => $('#dlgTurno').close());
+  on('#dGuardar', 'click', guardarDlg);
+  on('#dBorrar',  'click', borrarDlg);
+  // Al salir del campo se acomoda lo tecleado: «830» queda «08:30». Mientras
+  // escribe no se toca, porque reescribirle el texto bajo los dedos es peor.
+  ['#dEntra','#dSale'].forEach(id => on(id, 'blur', () => {
+    const e = $(id), v = normalizarHora(e.value);
+    if (v && v !== e.value) { e.value = v; duraDlg(); }
+  }));
+  ['#dEntra','#dSale','#dPausa'].forEach(id => on(id, 'input', () => {
+    duraDlg();
+    // Si las horas dejan de ser las de la plantilla, la plantilla SE SUELTA.
+    // Si no, queda un turno que dice ser «Apertura 08:00–16:30» corriendo de
+    // 13:30 a 22:00 — y como el color sale de la plantilla, el color miente.
+    // Lo encontro Pedro: «¿por que Ana y Carla quedaron en el mismo color?».
+    const sel = $('#dPlantilla'); const t = turnoDe(sel.value);
+    if (!t) return;
+    const i = deHora($('#dEntra').value), f = deHora($('#dSale').value);
+    const c = Number($('#dPausa').value || 0) / 60;
+    const igual = i != null && f != null
+      && Math.abs(i - Number(t.inicio)) < 0.005
+      && Math.abs(f - Number(t.fin)) < 0.005
+      && Math.abs(c - Number(t.colacion || 0)) < 0.005;
+    if (!igual) sel.value = '';
+  }));
+  // Elegir plantilla solo RELLENA los campos: después se editan. La plantilla
+  // deja de ser la verdad y pasa a ser un atajo para no teclear.
+  on('#dPlantilla', 'change', () => {
+    const t = turnoDe($('#dPlantilla').value); if (!t) return;
+    $('#dEntra').value = aHora(t.inicio);
+    $('#dSale').value  = aHora(t.fin);
+    $('#dPausa').value = Math.round(Number(t.colacion) * 60);
+    duraDlg();
+  });
+  // Al cambiar el puesto se reordenan las pastillas: la gente de ESE puesto
+  // adelante. Se conserva lo que ya estaba marcado.
+  on('#dPuesto', 'change', () => {
+    const marcados = [...$('#dPersonas').querySelectorAll('button[data-pid][aria-pressed="true"]')]
+      .map(b => b.dataset.pid).filter(Boolean);
+    pintarPastillasPersonas(marcados.length === 1 ? marcados[0] : null);
+    if (marcados.length > 1) marcados.forEach(id => {
+      const b = $('#dPersonas').querySelector(`button[data-pid="${id}"]`);
+      if (b) { b.setAttribute('aria-pressed', 'true'); b.classList.add('on'); }
+    });
+    if (marcados.length) {
+      const n = $('#dPersonas').querySelector('button[data-pid=""]');
+      if (n) { n.setAttribute('aria-pressed','false'); n.classList.remove('on'); }
+    }
+    marcarTodosTextoDlg();
+  });
+
+  on('#dPersonas', 'click', ev => {
+    const b = ev.target.closest('button[data-pid]'); if (!b) return;
+    const sinAsignar = b.dataset.pid === '';
+    const activo = b.getAttribute('aria-pressed') === 'true';
+    // «sin asignar» es excluyente: un turno es de nadie o de alguien
+    if (sinAsignar && !activo)
+      $('#dPersonas').querySelectorAll('button[data-pid]').forEach(x => {
+        x.setAttribute('aria-pressed','false'); x.classList.remove('on'); });
+    if (!sinAsignar && !activo) {
+      const n = $('#dPersonas').querySelector('button[data-pid=""]');
+      if (n) { n.setAttribute('aria-pressed','false'); n.classList.remove('on'); }
+    }
+    b.setAttribute('aria-pressed', activo ? 'false' : 'true');
+    b.classList.toggle('on', !activo);
+    ajustarAusencia();
+  });
+
+  on('#dRepetir', 'click', ev => {
+    const b = ev.target.closest('button[data-fe]'); if (!b) return;
+    b.setAttribute('aria-pressed', b.getAttribute('aria-pressed') === 'true' ? 'false' : 'true');
+    b.classList.toggle('on');
+  });
+
+  // dejar en blanco la dotacion del DIA que se esta editando. Si quiere los
+  // siete, limpia uno y lo copia a los demas: ya existe ese boton.
+  on('#btnLimpiarDot', 'click', async () => {
+    const dia = DIAS[Number(S.cobDia)];
+    const hoy = S.dotacion[S.cobDia] || {};
+    let cuantas = 0;
+    for (const puesto of Object.keys(hoy)) cuantas += Object.keys(hoy[puesto]).length;
+    if (!cuantas) return alert(`${dia} ya está en blanco.`);
+    if (!confirm(`Borrar los números de ${dia}.\n\n`
+      + `Son ${cuantas} ${cuantas === 1 ? 'casilla' : 'casillas'}. Los otros días no se tocan, `
+      + `y lo puedes deshacer.`)) return;
+    const m = $('#msgDot');
+    recordarDot('limpiar ' + dia);
+    try {
+      await DATOS.borrarDotacion(S.local.id, S.cobDia);
+      await refrescar();
+      $('#detNecesita').open = true;
+      m.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
+    } catch (e) { S.histDot.pop(); pintarDeshacerDot(); m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
+  });
+  on('#btnDeshacerDot', 'click', deshacerDot);
+
+  // sacar a todo el equipo de la lista. No borra: los deja inactivos, igual que
+  // el Quitar de cada fila, asi que sus turnos y sus marcas quedan intactos.
+  on('#btnLimpiarEq', 'click', async () => {
+    const ids = S.personas.map(p => p.id);
+    if (!ids.length) return alert('El equipo ya está vacío.');
+    if (!confirm(`Sacar de la lista a las ${ids.length} personas del equipo.\n\n`
+      + `No se borra nada: sus turnos, sus marcas y sus propinas quedan guardados, `
+      + `igual que cuando quitas a alguien de a uno. Lo puedes deshacer.`)) return;
+    const m = $('#msgEq');
+    recordarEq(ids, 'limpiar el equipo');
+    try {
+      await DATOS.activarPersonas(ids, false);
+      await refrescar();
+      m.textContent = 'Equipo vacío. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
+    } catch (e) { S.histEq.pop(); pintarDeshacerEq(); m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgEq'); if (x) x.textContent = ''; }, 6000);
+  });
+  on('#btnDeshacerEq', 'click', deshacerEq);
+
+  /* --- cargar el equipo desde una planilla --- */
+  on('#btnEjemplo', 'click', llenarEjemplo);
+
+  // Borrar un local es de lo poco que NO se puede deshacer en esta app, asi que
+  // se pide escribir el nombre. Un «¿seguro?» se aprieta sin leer; escribir el
+  // nombre obliga a mirar cual se esta borrando.
+  on('#btnBorrarLocal', 'click', async () => {
+    const m = $('#msgBorrarLocal');
+    if ((S.locales || []).length < 2) {
+      m.textContent = 'Es tu único local. Crea otro antes de borrar este.';
+      m.className = 'msg bad'; return;
+    }
+    const n = S.personas.length, t = Object.values(S.asign).flat().length;
+    const r = prompt(`Vas a borrar «${S.local.nombre}» con TODO lo suyo:\n\n`
+      + `· ${n} ${n === 1 ? 'persona' : 'personas'}\n`
+      + `· ${t} ${t === 1 ? 'turno' : 'turnos'} de esta semana\n`
+      + '· sus marcas, sus propinas y su historial\n\n'
+      + 'Esto NO se puede deshacer.\n\n'
+      + `Para confirmar, escribe el nombre del local: ${S.local.nombre}`);
+    if (r === null) return;
+    // Sin distinguir mayusculas ni tildes: la gracia de escribir el nombre es
+    // obligar a MIRAR cual se borra, no tomarle una prueba de ortografia.
+    if (normal(r) !== normal(S.local.nombre)) {
+      m.textContent = `No se borró nada: escribiste «${r.trim()}» y el local se llama «${S.local.nombre}».`;
+      m.className = 'msg bad'; return;
+    }
+    try {
+      await DATOS.borrarLocal(S.local.id);
+      try { localStorage.removeItem('malla-local'); } catch (e) {}
+      await verJefe();
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+  });
+
+  on('#btnPuesto', 'click', async () => {
+    const nombre = prompt('¿Cómo se llama el puesto?\n\nPor ejemplo: Barra, Cocina, Garzón.');
+    if (!nombre || !nombre.trim()) return;
+    try {
+      await DATOS.crearPuesto(S.local.id, { nombre: nombre.trim(),
+        color: (S.puestos.length % 4) + 1, orden: S.puestos.length + 1 });
+      await refrescar();
+    } catch (e) {
+      $('#msgPuestos').textContent = /duplicate|unicos/i.test(e.message)
+        ? 'Ya tienes un puesto con ese nombre.' : e.message;
+      $('#msgPuestos').className = 'msg bad';
+    }
+  });
+
+  on('#btnPlantilla', 'click', () => {
+    // Punto y coma: es lo que Excel en Chile espera, y así se abre en columnas
+    // con doble clic en vez de quedar todo apelmazado en la primera.
+    const cab = ['Nombre','Puesto','Equipo','Valor hora','Horas contrato','Factor propina'];
+    const ej  = [['Juana Pérez','Barra','Fijos','3500','45','1'],
+                 ['Luis Soto','Cocina','Por llamado','4000','30','1']];
+    const csv = '\uFEFF' + [cab, ...ej].map(f => f.join(';')).join('\r\n');
+    const a = document.createElement('a');
+    a.href = URL.createObjectURL(new Blob([csv], { type:'text/csv;charset=utf-8' }));
+    a.download = 'equipo-plantilla.csv'; a.click();
+    setTimeout(() => URL.revokeObjectURL(a.href), 2000);
+  });
+  on('#btnCargar', 'click', () => $('#archivoEq').click());
+  on('#archivoEq', 'change', ev => {
+    const f = ev.target.files && ev.target.files[0]; if (!f) return;
+    const lector = new FileReader();
+    lector.onload = () => { pintarPrevia(analizarPlanilla(String(lector.result || ''))); ev.target.value = ''; };
+    lector.onerror = () => { $('#previaEq').innerHTML = '<p class="msg bad">No se pudo leer el archivo.</p>'; };
+    lector.readAsText(f, 'UTF-8');
+  });
+
+  // Cerrar el día es cuando se carga la venta. Skello la pide ahí y tiene
+  // razón: es el momento en que el jefe ya está haciendo la caja, y no una
+  // pestaña aparte que hay que acordarse de visitar.
+  // Marcar el dia entero de una. Pedro lo pidio para poder MOSTRAR la app sin
+  // tener que abrir el link de cada persona y hacerse pasar por ella.
+  const todosDelDia = () => S.personas.flatMap(p => turnosDe(p.id, S.relojDia).map(a => ({ p, a })));
+
+  on('#btnMarcarTodos', 'click', async () => {
+    const fe = S.relojDia; const lista = todosDelDia();
+    if (!lista.length) return alert('Nadie tiene turno este día.');
+    if (!confirm(`Marcar entrada y salida de ${lista.length} ${lista.length === 1 ? 'turno' : 'turnos'} del `
+      + ddmm(fe) + ', en el horario que estaba planificado.\n\n'
+      + 'Queda registrado que las marcaste tú y no cada persona.')) return;
+    const b = $('#btnMarcarTodos'); b.disabled = true; b.textContent = 'Marcando…';
+    const m = $('#msgReloj');
+    try {
+      for (const { p, a } of lista) {
+        await marcarPorElJefe('entrada', a.id, p.id, fe);
+        await marcarPorElJefe('salida',  a.id, p.id, fe);
+      }
+      await refrescar();
+      m.textContent = `Listo: ${lista.length} ${lista.length === 1 ? 'turno marcado' : 'turnos marcados'}.`;
+      m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+    b.disabled = false; b.textContent = 'Marcar el día completo';
+    setTimeout(() => { const x = $('#msgReloj'); if (x) x.textContent = ''; }, 6000);
+  });
+
+  on('#btnBorrarMarcas', 'click', async () => {
+    const fe = S.relojDia; const lista = todosDelDia().filter(x => marcaAsig(x.a).entrada);
+    if (!lista.length) return alert('No hay marcas que borrar en este día.');
+    if (!confirm(`Borrar las marcas de ${lista.length} ${lista.length === 1 ? 'turno' : 'turnos'} del `
+      + ddmm(fe) + '.\n\nLo planificado no se toca.')) return;
+    const m = $('#msgReloj');
+    try {
+      for (const { p, a } of lista) await marcarPorElJefe('borrar', a.id, p.id, fe);
+      await refrescar();
+      m.textContent = 'Marcas borradas.'; m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgReloj'); if (x) x.textContent = ''; }, 6000);
+  });
+
+  on('#btnCerrarDia', 'click', async () => {
+    const fe = S.relojDia; if (!fe) return;
+    const d = S.dias[fe] || {};
+    const sinSalir = S.personas.flatMap(p => turnosDe(p.id, fe))
+      .filter(a => { const m = marcaAsig(a); return m.entrada && !m.salida; }).length;
+    if (sinSalir && !confirm(`Hay ${sinSalir} ${sinSalir === 1 ? 'persona que marcó entrada y no salida' : 'personas que marcaron entrada y no salida'}.\n\n`
+      + 'A esas se les va a pagar lo planificado. ¿Cierro igual?')) return;
+
+    const txt = prompt('¿Cuánto se vendió el ' + ddmm(fe) + '?\n\n'
+      + 'Sirve para el costo sobre venta. Lo puedes corregir después.',
+      d.venta ? String(d.venta) : '');
+    if (txt === null) return;
+    const venta = Number(soloDigitos(txt)) || 0;
+    const m = $('#msgReloj');
+    try {
+      await DATOS.cerrarDia(S.local.id, fe, venta);
+      await refrescar();
+      m.textContent = 'Día cerrado con una venta de ' + clp(venta) + '.'; m.className = 'msg ok';
+    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
+    setTimeout(() => { const x = $('#msgReloj'); if (x) x.textContent = ''; }, 6000);
+  });
+
+  on('#objetivoPct', 'change', async ev => {
+    const v = Number(ev.target.value) || 30;
+    try { S.local = await DATOS.guardarLocal(S.local.id, { objetivo_pct: v }); pintarCobertura(); pintarResumenSemana(); }
+    catch (e) { error(e); }
+  });
+  on('#filtroPuesto', 'change', ev => { S.filtro = ev.target.value; pintarPlan(); });
+  on('#filtroEquipo', 'change', ev => { S.filtroE = ev.target.value; pintarPlan(); });
+  on('#btnImprimir', 'click', () => window.print());
+  on('#btnIrPublicar', 'click', () => $('#tab-link').click());
+
+  // crear local, con turnos de partida para que no arranque en blanco
+  on('#formLocal', 'submit', async ev => {
+    ev.preventDefault();
+    const nombre = $('#nombreLocal').value.trim(); if (!nombre) return;
+    $('#msgLocal').textContent = 'Creando…';
+    try {
+      S.local = await DATOS.crearLocal(nombre);
+      await Promise.all([
+        DATOS.crearTurno(S.local.id, { nombre:'Apertura', inicio:8,  fin:16.5, colacion:0.5, orden:1 }),
+        DATOS.crearTurno(S.local.id, { nombre:'Tarde',    inicio:13, fin:21.5, colacion:0.5, orden:2 }),
+        DATOS.crearTurno(S.local.id, { nombre:'Cierre',   inicio:17, fin:25,   colacion:0.5, orden:3 }),
+      ]);
+      try { localStorage.setItem('malla-local', S.local.id); } catch (e) {}
+      $('#msgLocal').textContent = '';
+      $('#nombreLocal').value = '';
+      await verJefe();
+    } catch (e) { $('#msgLocal').textContent = e.message; $('#msgLocal').className = 'msg bad'; }
+  });
+
+  on('#btnCerrarSemana', 'click', async () => {
+    const lista = S.personas.map(p => ({ p, dif: analizar(p).dif })).filter(x => Math.abs(x.dif) >= 0.01);
+    if (!lista.length) return alert('No hay diferencias que sumar esta semana.');
+    const detalle = lista.map(x => `· ${x.p.nombre}: ${x.dif>0?'+':''}${hfmt(x.dif)} h`).join('\n');
+    if (!confirm('Sumar al saldo de cada uno la diferencia entre lo planificado y su contrato:\n\n'
+               + detalle + '\n\nEsto se hace una vez por semana.')) return;
+    try {
+      for (const x of lista)
+        await DATOS.guardarPersona(x.p.id, { saldo_horas: Number(x.p.saldo_horas || 0) + x.dif });
+      await refrescar();
+    } catch (e) { error(e); }
+  });
+  on('#cancelarLocal', 'click', () => { $('#cardLocal').hidden = true; $('#app').hidden = false; });
+  // La lista va ordenada por puesto y nombre, asi que la persona recien creada
+  // NO aparece debajo del boton sino donde le toca por orden — y si hay diez,
+  // queda fuera de la pantalla y parece que el boton no hizo nada.
+  on('#btnPersona', 'click', async () => {
+    try {
+      const nueva = await DATOS.crearPersona(S.local.id, { nombre:'Nueva persona', rol:'', valor_hora:2900,
+            horas_contrato:42, factor_propina:1 });
+      S.recien = nueva.id;
+      await refrescar();
+      mostrarRecien();
+    } catch (e) { error(e); }
+  });
+  on('#btnTurno', 'click', async () => {
+    try { await DATOS.crearTurno(S.local.id, { nombre:'Turno '+(S.turnos.length+1), inicio:9, fin:17,
+            colacion:0.5, orden:S.turnos.length+1 }); await refrescar(); } catch (e) { error(e); }
+  });
+  on('#bloqTope', 'change', async ev => {
+    try { S.local = await DATOS.guardarLocal(S.local.id, { bloquear_sobre_tope: ev.target.checked }); }
+    catch (e) { error(e); }
+  });
+  on('#btnCopiarPub', 'click', async () => {
+    const m = $('#msgPub');
+    try { await navigator.clipboard.writeText($('#salidaPub').value); m.textContent = 'Copiado'; }
+    catch (e) { $('#salidaPub').select(); m.textContent = 'Selecciónalo y copia con el teclado'; }
+    setTimeout(() => m.textContent = '', 2600);
+  });
+}
+
+async function arrancar() {
+  $('#pie').textContent = location.host || 'local';
+  if (!revisar()) { $('#vistaJefe').hidden = false; return; }
+  marca('#c-db','ok');
+  conectarLogin(); conectarApp();
+
+  const token = tokenDelLink();
+  if (token) return pintarTrabajador(token);
+
+  await verJefe();
+  sb.auth.onAuthStateChange(() => { if (!tokenDelLink()) verJefe().catch(error); });
+  window.addEventListener('hashchange', () => {
+    const t = tokenDelLink();
+    if (t) pintarTrabajador(t); else { $('#vistaTrab').hidden = true; verJefe().catch(error); }
+  });
+}
+
+// Si algun boton quedo sin conectar, la app parece funcionar pero no responde.
+// Vale mas un aviso feo que un boton mudo.
+function avisarSinConectar() {
+  if (!SIN_CONECTAR.length) return;
+  const d = document.getElementById('diag');
+  if (!d) return;
+  d.hidden = false;
+  document.getElementById('diagNota').textContent =
+    'Quedaron sin conectar ' + SIN_CONECTAR.length + ' controles: ' + SIN_CONECTAR.join(', ')
+    + '. Los botones existen pero no responden.';
+}
+
+arrancar().then(avisarSinConectar).catch(e => {
+  // ultimo recurso: que la pagina diga algo en vez de quedarse muda
+  const d = document.getElementById('diag');
+  if (d) { d.hidden = false; document.getElementById('diagNota').textContent = 'Error al arrancar: ' + (e && e.message ? e.message : e); }
+  const v = document.getElementById('vistaJefe'); if (v) v.hidden = false;
+  console.error(e);
+});
