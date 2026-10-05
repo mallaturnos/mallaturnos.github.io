@@ -1754,16 +1754,42 @@ function pintarDia() {
 }
 
 /* ---------- vista del mes: el patrón de la dotación de un vistazo ---------- */
+/* Los cortes de semana del mes: en que indice de `ds` cierra cada semana y que
+   dias la forman. Sirve para meter una columna con las horas de ESA semana, que
+   es lo que hace Skello y lo que convierte el mes en algo que se mira en vez de
+   algo que se recorre. */
+function semanasDelMes(ds) {
+  const out = []; let act = null;
+  ds.forEach((f, n) => {
+    const dow = (new Date(f + 'T00:00:00').getDay() + 6) % 7;
+    if (!act || (dow === 0 && n > 0)) { act = { desde: n, dias: [] }; out.push(act); }
+    act.dias.push(f); act.hasta = n;
+  });
+  return out;
+}
+
 function pintarMes() {
   const ds = diasDelMes();
   const ref = new Date(ds[0] + 'T00:00:00');
   $('#semTitulo').textContent = ref.toLocaleDateString('es-CL', { month:'long', year:'numeric' });
 
+  /* Las celdas del mes van SIN TEXTO: un cuadrito de color por turno, y las
+     horas en el globo al pasar por encima.
+
+     Pedro miro septiembre, lo vio «en blanco» y pregunto si estaba roto. No lo
+     estaba: con una fila por persona, 30 columnas de 46 px y el horario escrito
+     adentro, la tabla no cabe en ninguna pantalla y sus turnos quedaban fuera
+     del borde. Skello resuelve lo mismo sacando el texto —se ve en la captura
+     que mando el 05-10— y de paso mete el total de cada semana entre medio.
+     El mes no se lee: se mira. */
+  const sems = semanasDelMes(ds);
+  const cierra = {};                       // indice de `ds` -> esa semana cierra ahi
+  sems.forEach(w => { cierra[w.hasta] = w; });
+
   $('#mesCab').innerHTML = '<th>Persona</th>' + ds.map((f,n) => {
     const d = new Date(f + 'T00:00:00'), i = (d.getDay() + 6) % 7;
-    // una columna fina antes de cada lunes: parte el mes en semanas legibles
-    const corte = (i === 0 && n > 0) ? '<th class="corte"></th>' : '';
-    return corte + `<th class="${i>=5?'fin':''}">${d.getDate()}<span class="dsem">${DIAS[i][0]}</span></th>`;
+    const sem = cierra[n] ? '<th class="semcol">sem</th>' : '';
+    return `<th class="${i>=5?'fin':''}">${d.getDate()}<span class="dsem">${DIAS[i][0]}</span></th>` + sem;
   }).join('') + '<th>Horas</th>';
 
   const cuerpo = $('#mesCuerpo'); cuerpo.innerHTML = '';
@@ -1775,12 +1801,11 @@ function pintarMes() {
      vacia. Si la app deja crearlos, el mes tiene que mostrarlos: si no, uno
      planifica y concluye que no se guardo nada. */
   const sinDueno = ds.map((f, n) => {
-    const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
-    const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
+    const sem = cierra[n] ? '<td class="semcol"></td>' : '';
     const aqui = S.abiertos.filter(a => a.fecha === f);
     if (!aqui.length)
-      return corte + `<td class="mcel vacia" data-noasig="1" data-fecha="${f}"></td>`;
-    return corte + `<td class="mcel" data-noasig="1" data-fecha="${f}">` + aqui.map(a => {
+      return `<td class="mcel vacia" data-noasig="1" data-fecha="${f}"></td>` + sem;
+    return `<td class="mcel" data-noasig="1" data-fecha="${f}">` + aqui.map(a => {
       const t = a.turno_id ? turnoDe(a.turno_id) : null;
       const ci = colorDe(a);
       const pu = (a.puesto || '').trim();
@@ -1788,8 +1813,8 @@ function pintarMes() {
         role="button" tabindex="0"
         title="${esc('Sin asignar · ' + (pu ? pu + ' · ' : '')
         + hhmm(a.inicio) + '–' + hhmm(a.fin) + ' · ' + hfmt(horasAsig(a)) + ' h')}"
-        >${hhmm(a.inicio)}<br>${hhmm(a.fin)}</span>`;
-    }).join('') + '</td>';
+        ></span>`;
+    }).join('') + '</td>' + sem;
   }).join('');
   const nSin = S.abiertos.length;
   cuerpo.innerHTML = `<tr class="noasig"><th class="r" scope="row">Sin asignar`
@@ -1799,15 +1824,32 @@ function pintarMes() {
   personasVisibles().forEach(p => {
     let horas = 0;
     const celdas = ds.map((f,n) => {
-      const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
-      const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
+      // Al cerrar una semana, su total y la diferencia contra el contrato. Es
+      // lo que uno busca en el mes: quien va corto y quien va pasado.
+      let sem = '';
+      if (cierra[n]) {
+        const w = cierra[n];
+        const hs = w.dias.reduce((x, fe) => x + horasDia(p.id, fe), 0);
+        const tope = Number(p.horas_contrato) || 0;
+        /* La diferencia contra el contrato SOLO en las semanas completas.
+           Octubre parte un jueves: su primera «semana» son cuatro días, y
+           compararlos contra un contrato de 42 h da «−19 h» en rojo para alguien
+           que no debe nada. Un número alarmante que no significa nada es peor
+           que no poner número. */
+        const entera = w.dias.length === 7;
+        const dif = (entera && tope) ? hs - tope : 0;
+        sem = `<td class="semcol"${entera ? '' : ' title="Semana incompleta: no se compara contra el contrato"'}>`
+            + `<b>${hs ? hfmt(hs) : '—'}</b>`
+            + (hs && dif ? `<span class="${dif > 0 ? 'mas' : 'menos'}">${dif > 0 ? '+' : '−'}${hfmt(Math.abs(dif))}</span>` : '')
+            + '</td>';
+      }
       const ts = turnosDe(p.id, f), a = ausenciaDe(p.id, f);
       if (ts.length) {
         horas += horasDia(p.id, f);
         // Un bloque por turno, con las horas en dos líneas. El mes sirve para
         // ver el patrón —«tres garzones todos los sábados»— y con una inicial
         // no se ve nada.
-        return corte + `<td class="mcel" data-p="${p.id}" data-fecha="${f}">` + ts.map(x => {
+        return `<td class="mcel" data-p="${p.id}" data-fecha="${f}">` + ts.map(x => {
           const pl = x.turno_id ? turnoDe(x.turno_id) : null;
           const ci = colorDe(x);
           const pu = puestoDe(x, p);
@@ -1815,27 +1857,31 @@ function pintarMes() {
             role="button" tabindex="0"
             title="${esc((pu ? pu + ' · ' : '')
             + hhmm(x.inicio) + '–' + hhmm(x.fin) + ' · ' + hfmt(horasAsig(x)) + ' h'
-            + (x.nota ? '\n' + x.nota : ''))}">${hhmm(x.inicio)}<br>${hhmm(x.fin)}</span>`;
-        }).join('') + '</td>';
+            + (x.nota ? '\n' + x.nota : ''))}"></span>`;
+        }).join('') + '</td>' + sem;
       }
       if (a && a.ausencia && a.ausencia !== 'L')
-        return corte + `<td class="mcel" data-p="${p.id}" data-fecha="${f}"><span class="mbl aus"
-          data-asig="${a.id}" role="button" tabindex="0" title="${AUSENCIAS[a.ausencia]}">${AUSENCIAS[a.ausencia]}</span></td>`;
-      return corte + `<td class="mcel vacia" data-p="${p.id}" data-fecha="${f}" role="button" tabindex="0"
-        title="Agregar turno"></td>`;
+        return `<td class="mcel" data-p="${p.id}" data-fecha="${f}"><span class="mbl aus"
+          data-asig="${a.id}" role="button" tabindex="0" title="${AUSENCIAS[a.ausencia]}"></span></td>` + sem;
+      return `<td class="mcel vacia" data-p="${p.id}" data-fecha="${f}" role="button" tabindex="0"
+        title="Agregar turno"></td>` + sem;
     }).join('');
-    cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')}</span></th>${celdas}<td class="tot">${hfmt(horas)} h</td></tr>`;
+    cuerpo.innerHTML += `<tr><th class="r" scope="row">${esc(p.nombre)}<span class="rol">${esc(p.rol||'')}`
+      + `${Number(p.horas_contrato) ? ' · ' + hfmt(p.horas_contrato) + ' h' : ''}</span></th>`
+      + `${celdas}<td class="tot">${hfmt(horas)} h</td></tr>`;
   });
 
   // Al pie, las horas de cada día y el total del mes: es lo que convierte la
   // tabla en algo con lo que se decide, y no solo en una grilla de colores.
   let totMes = 0;
   const pie = ds.map((f,n) => {
-    const d = new Date(f + 'T00:00:00'), dow = (d.getDay() + 6) % 7;
-    const corte = (dow === 0 && n > 0) ? '<td class="corte"></td>' : '';
     const h = personasVisibles().reduce((x,p) => x + horasDia(p.id, f), 0);
     totMes += h;
-    return corte + `<td class="mpie">${h ? hfmt(h) : ''}</td>`;
+    const sem = cierra[n]
+      ? `<td class="semcol"><b>${hfmt(cierra[n].dias.reduce((x, fe) =>
+          x + personasVisibles().reduce((y,p) => y + horasDia(p.id, fe), 0), 0))}</b></td>`
+      : '';
+    return `<td class="mpie">${h ? hfmt(h) : ''}</td>` + sem;
   }).join('');
   cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Horas del día</th>${pie}<td class="tot">${hfmt(totMes)} h</td></tr>`;
 

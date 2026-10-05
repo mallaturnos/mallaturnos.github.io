@@ -494,9 +494,8 @@ td.mcel{padding:2px}
    Va con el mismo peso que `table.mes thead th`, que fija 46px de ancho
    mínimo para que quepa «08:00»: sin esta especificidad, el separador se
    comía 46px por semana. Medido en el navegador, no supuesto. */
-table.mes thead th.corte,
-table.mes td.corte{width:8px;min-width:8px;max-width:8px;padding:0;
-  background:var(--surface-3);border:0}
+/* (La columna fina «corte» entre semanas se fue: ahora ese lugar lo ocupa
+   la columna con el total de la semana, que dice algo.) */
 
 /* Fila al pie con las horas de cada día y el total del mes. */
 tr.piemes th,tr.piemes td{background:var(--surface-2);font-weight:600;position:sticky;bottom:0}
@@ -745,3 +744,24 @@ nav[role=tablist]{position:relative}
 .maspop hr{border:0;border-top:1px solid var(--linea,#e3e8e5);margin:2px 0;width:100%}
 .maspop .act{width:100%;text-align:left}
 @media print{.maspop{display:none}}
+
+/* ---------- la vista MES compacta (Prototipo 3) ----------
+   Las celdas no llevan texto: un cuadrito de color por turno y las horas en el
+   globo. Con 30 columnas y el horario escrito la tabla no cabía en pantalla —
+   Pedro vio septiembre «en blanco» y preguntó si estaba roto; no lo estaba, sus
+   turnos quedaban fuera del borde. Skello hace lo mismo. El mes no se lee, se mira. */
+table.mes thead th{min-width:0;width:22px;padding:6px 1px}
+table.mes thead th.semcol{width:46px;min-width:46px;font-size:.6875rem;color:var(--fg-faint);
+  font-weight:400;text-transform:uppercase;letter-spacing:.06em}
+table.mes th.r{min-width:140px}
+td.mcel{padding:1px}
+.mcel .mbl{height:15px;margin-bottom:2px;border-radius:3px;font-size:0;line-height:0}
+.mcel .mbl.aus{background:var(--surface-3);height:15px}
+/* El total de cada semana, intercalado: es lo que uno busca en el mes —quién va
+   corto y quién va pasado— y antes había que sumarlo a ojo. */
+td.semcol{text-align:right;padding:2px 6px;background:var(--surface-2);
+  border-left:1px solid var(--linea,#e3e8e5);white-space:nowrap}
+td.semcol b{display:block;font-size:.75rem;font-family:var(--font-mono)}
+td.semcol span{display:block;font-size:.625rem;font-family:var(--font-mono)}
+td.semcol span.menos{color:#b4701c}
+td.semcol span.mas{color:#a3402a}
