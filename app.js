@@ -2782,7 +2782,7 @@ function pintarNecesidad(box) {
       <div class="trtit"><b>${esc(puesto)}</b>
         <button type="button" class="act trmas">+ tramo</button></div>
       ${lista.length ? `<table class="tramos"><tbody>${filas}</tbody></table>`
-                     : '<p class="hint">Sin tramos: a esta hora no se pide a nadie de este puesto.</p>'}
+                     : '<p class="hint">Sin tramos: este día no se pide a nadie de este puesto.</p>'}
       ${lista.length ? barrasNecesidad(S.cobDia, puesto) : ''}`);
     box.appendChild(caja);
 
@@ -3593,6 +3593,26 @@ async function verJefe() {
   if (!S.canal) S.canal = DATOS.escuchar(S.local.id, () => { cargar().then(pintarTodo).catch(()=>{}); });
 }
 
+/* ---------- sub-pestañas de Planificación ----------
+   VAN AQUI ARRIBA, no dentro de `conectarApp()`, y eso es el arreglo de un bug
+   que encontro Pedro apretando «quitar» en un tramo (msg 4074): salia
+   `verSub is not defined`. Estaban declaradas dentro de `conectarApp()`, asi
+   que de las once llamadas solo las DOS que viven ahi adentro funcionaban; las
+   otras nueve —quitar un tramo, guardarlo, copiarlo, volver de un dialogo—
+   reventaban. `node --check` pasa igual y las pruebas tambien: esto solo se ve
+   apretando el boton. */
+const SUBS = ['malla', 'plant', 'nec', 'obj'];
+function verSub(cual) {
+  if (SUBS.indexOf(cual) < 0) cual = 'malla';
+  S.sub = cual;
+  SUBS.forEach(x => {
+    const b = $('#sub-' + x), pnl = $('#s-' + x);
+    if (b) b.setAttribute('aria-selected', x === cual ? 'true' : 'false');
+    if (pnl) pnl.hidden = x !== cual;
+  });
+  if (cual === 'plant') pintarModelos();
+}
+
 function conectarApp() {
   // Pestañas. Se filtran las que existen de verdad: al sacar «Turnos abiertos»
   // esta lista quedó nombrando una que ya no está, y como aquí se llamaba a
@@ -3617,17 +3637,6 @@ function conectarApp() {
 
      `pintarModelos()` se llama al ENTRAR a Plantillas, que es cuando hace falta:
      antes se llamaba al abrir el dialogo. */
-  const SUBS = ['malla', 'plant', 'nec', 'obj'];
-  function verSub(cual) {
-    if (SUBS.indexOf(cual) < 0) cual = 'malla';
-    S.sub = cual;
-    SUBS.forEach(x => {
-      const b = $('#sub-' + x), pnl = $('#s-' + x);
-      if (b) b.setAttribute('aria-selected', x === cual ? 'true' : 'false');
-      if (pnl) pnl.hidden = x !== cual;
-    });
-    if (cual === 'plant') pintarModelos();
-  }
   SUBS.forEach(x => on('#sub-' + x, 'click', () => verSub(x)));
 
   /* ---------- el menú «···» ----------
