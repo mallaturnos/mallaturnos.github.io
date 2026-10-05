@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=64">
+<link rel="stylesheet" href="estilo.css?v=65">
 </head>
 <body>
 
@@ -95,8 +95,35 @@
     </nav>
 
     <div class="panel" id="p-sem" role="tabpanel" aria-labelledby="tab-sem">
+      <!-- SUB-PESTAÑAS. Es lo que hace 7shifts y nosotros no: arriba poquisimo, y
+           el detalle ADENTRO de su pagina en vez de peleando por un lugar en la
+           barra. Plantillas y Objetivo de costo son de ellos sub-pestañas de la
+           malla, no areas propias, y tienen razon: se usan planificando. -->
+      <nav class="subtabs" role="tablist" aria-label="Planificación">
+        <button role="tab" id="sub-malla" aria-selected="true"  aria-controls="s-malla">Malla</button>
+        <button role="tab" id="sub-plant" aria-selected="false" aria-controls="s-plant">Plantillas</button>
+        <button role="tab" id="sub-nec"   aria-selected="false" aria-controls="s-nec">Cuánta gente necesito</button>
+        <button role="tab" id="sub-obj"   aria-selected="false" aria-controls="s-obj">Objetivo de costo</button>
+      </nav>
+
+      <div id="s-malla" role="tabpanel" aria-labelledby="sub-malla">
       <div class="card">
+        <!-- LA BARRA, 05-10-2026. Pedro: «como esta la pagina esta poco intuitiva».
+             Tenia 14 controles y se partia en dos filas. Quedan los de todas las
+             semanas; el resto vive en el menu «…».
+
+             Mirando a los dos competidores: 7shifts tiene SEIS y guarda lo demas
+             en dos desplegables; Skello tiene doce pero en iconos y con un solo
+             boton escrito. O sea que el arreglo no era «sacar botones» a secas,
+             era bajarles el volumen y agrupar. «Modelos de semana» ni siquiera
+             esta: paso a ser la sub-pestaña Plantillas. -->
         <div class="semnav">
+          <div class="gfechas">
+            <button class="act" id="semAnt" aria-label="Semana anterior">←</button>
+            <b id="semTitulo">—</b>
+            <button class="act" id="semSig" aria-label="Semana siguiente">→</button>
+            <button class="act" id="semHoy">Hoy</button>
+          </div>
           <div class="modos" role="group" aria-label="Vista">
             <button class="act" id="modoDia">Día</button>
             <button class="act" id="modoSemana" aria-pressed="true">Semana</button>
@@ -108,18 +135,22 @@
           <span class="segm" role="group" aria-label="Agrupar por">
             <button class="act primary" id="agrPersonas">Personas</button><button class="act" id="agrPuestos">Puestos</button>
           </span>
-          <button class="act" id="semAnt" aria-label="Anterior">←</button>
-          <b id="semTitulo">—</b>
-          <button class="act" id="semSig" aria-label="Siguiente">→</button>
-          <button class="act" id="semHoy">Hoy</button>
-          <select id="filtroPuesto" aria-label="Filtrar por puesto"></select>
-          <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
-          <span class="sep"></span>
-          <button class="act" id="btnModelos">Modelos de semana</button>
+          <span class="espacio"></span>
           <button class="act" id="btnCopiar">Copiar…</button>
-          <button class="act" id="btnLimpiarSem">Limpiar</button>
           <button class="act" id="btnDeshacer" disabled>Deshacer</button>
-          <button class="act" id="btnImprimir">Imprimir</button>
+          <div class="masmenu">
+            <button class="act" id="btnMas" aria-haspopup="true" aria-expanded="false"
+                    aria-label="Más opciones" title="Más opciones">···</button>
+            <div class="maspop" id="masPop" hidden>
+              <label class="maslbl" for="filtroPuesto">Filtrar por puesto</label>
+              <select id="filtroPuesto" aria-label="Filtrar por puesto"></select>
+              <label class="maslbl" for="filtroEquipo" id="lblEquipo" hidden>Filtrar por equipo</label>
+              <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
+              <hr>
+              <button class="act" id="btnImprimir">Imprimir</button>
+              <button class="act" id="btnLimpiarSem">Limpiar la semana</button>
+            </div>
+          </div>
           <button class="act primary" id="btnIrPublicar">Publicar</button>
         </div>
         <p class="msg" id="msgSem"></p>
@@ -131,12 +162,74 @@
 
       <div class="card" id="cardCobertura">
         <h2>¿Te alcanza la gente?</h2>
-        <p class="hint">Turno por turno, si te alcanza la gente. <b>Rojo</b> = falta, <b>ámbar</b> = sobra, <b>verde</b> = justo.</p>
+        <p class="hint">Cada casilla dice <b>cuánta gente hay</b> en ese turno. Debajo de cada día, lo que falta <b>hora por hora</b> — <i>«faltan 2 garzones de 17:00 a 22:00»</i>.
+          <br>Va por hora y no por turno a propósito: cuando dos turnos se pisan, contar por turno da por cubierto lo que no lo está.</p>
         <div class="scroll" style="border:0;background:transparent">
           <div class="cov" id="cobertura"></div>
         </div>
-        <details id="detNecesita">
-          <summary>Cuánta gente necesito</summary>
+      </div>
+      <div class="card">
+        <h2>Por persona</h2>
+        <ul class="people" id="semPersonas"></ul>
+      </div>
+      </div>
+
+      <div id="s-plant" role="tabpanel" aria-labelledby="sub-plant" hidden>
+        <div class="card">
+    <h2>Plantillas de semana</h2>
+    <p class="hint">Un modelo guarda <b>la forma</b> de una semana: qué días, a qué horas y en qué
+      puesto. Se guarda el día de la semana y no la fecha, así que sirve para cualquier semana.
+      <b>Las ausencias no entran</b>, para que no se dupliquen.</p>
+
+    <!-- Aplicar va PRIMERO: es lo que se hace todas las semanas. Guardar se hace
+         una vez y despues casi nunca, asi que va abajo. -->
+    <div class="fld">
+      <label for="pModelo">Aplicar un modelo</label>
+      <select id="pModelo"></select>
+    </div>
+    <div class="fld" id="cajaPPersonas">
+      <label>Quiénes entran <span class="hint" id="pTodos"></span></label>
+      <div class="acciones diapills" id="pPersonas"></div>
+    </div>
+    <div class="fld">
+      <label class="chk"><input type="checkbox" id="pSinAsignar"><span>Pegar
+        <b>solo la forma</b>, como turnos sin asignar</span></label>
+    </div>
+    <div class="fld">
+      <label>En cuántas semanas seguidas, desde la que estás viendo</label>
+      <div class="acciones diapills" id="pSemanas"></div>
+    </div>
+    <p class="hint">Al aplicar se <b>pisan los turnos</b> de esas semanas. Las ausencias que ya
+      estén puestas se respetan.</p>
+    <div class="acciones">
+      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
+      <button type="button" class="act" id="pBorrar" hidden>Eliminar este modelo</button>
+    </div>
+
+    <hr class="sepdlg">
+
+    <div class="fld">
+      <label for="pNombre">Guardar la semana que estás viendo como modelo nuevo</label>
+      <div class="acciones">
+        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
+        <button type="button" class="act" id="pGuardar">Guardar</button>
+      </div>
+    </div>
+
+    <p class="msg" id="pMsg"></p>
+    <div class="acciones dlgpie">
+      
+    </div>
+  </div>
+      </div>
+
+      <div id="s-nec" role="tabpanel" aria-labelledby="sub-nec" hidden>
+        <div class="card">
+          <h2>Cuánta gente necesito</h2>
+          <p class="hint">Cuánta gente de cada puesto necesitas <b>a cada hora</b>.
+            Un número, un significado: si de 12:00 a 16:00 quieres cuatro garzones, pones cuatro —
+            da lo mismo si vienen de un corrido o de un refuerzo.</p>
+
           <p class="hint" style="margin-top:10px">Cuánta gente de cada puesto necesitas <b>a cada hora</b>. Un número, un significado: si de 12 a 16 quieres cuatro garzones, pones cuatro — da lo mismo si vienen de un corrido o de un refuerzo. Llena un día y cópialo a los demás.</p>
           <div class="acciones diatabs" id="cobTabs" style="margin-bottom:10px"></div>
           <div class="scroll" style="border:0;background:transparent"><div id="needDia"></div></div>
@@ -146,11 +239,19 @@
             <button class="act" id="btnDeshacerDot" disabled>Deshacer</button>
           </div>
           <p class="msg" id="msgDot"></p>
-        </details>
+                </div>
       </div>
-      <div class="card">
-        <h2>Por persona</h2>
-        <ul class="people" id="semPersonas"></ul>
+
+      <div id="s-obj" role="tabpanel" aria-labelledby="sub-obj" hidden>
+        <div class="card">
+          <h2>Objetivo de costo</h2>
+          <p class="hint">Qué porcentaje de la venta quieres gastar en personal. Es contra esto
+            que se pinta el costo de cada día. <b>Se define una vez</b>; lo que mide está en Propinas.</p>
+          <div class="grid2" style="max-width:220px">
+            <div class="fld"><label for="objetivoPct">Objetivo %</label>
+              <input class="n" type="number" id="objetivoPct" min="1" max="100" step="1"></div>
+          </div>
+        </div>
       </div>
     </div>
 
@@ -229,10 +330,6 @@
         <h2>Costo de personal sobre la venta</h2>
         <p class="hint">El indicador que de verdad mira un dueño.</p>
         <div class="kpis" id="cobKpis" style="margin-bottom:14px"></div>
-        <div class="grid2" style="max-width:220px">
-          <div class="fld"><label for="objetivoPct">Objetivo %</label>
-            <input class="n" type="number" id="objetivoPct" min="1" max="100" step="1"></div>
-        </div>
         <ul class="people" id="cobDias" style="margin-top:14px"></ul>
       </div>
       <div class="card">
@@ -290,54 +387,6 @@
   <footer>Malla de Turnos · <span id="pie"></span></footer>
 </div>
 
-<dialog id="dlgModelos" class="dlg">
-  <form method="dialog" id="formModelos">
-    <h3>Modelos de semana</h3>
-    <p class="hint">Un modelo guarda <b>la forma</b> de una semana: qué días, a qué horas y en qué
-      puesto. Se guarda el día de la semana y no la fecha, así que sirve para cualquier semana.
-      <b>Las ausencias no entran</b>, para que no se dupliquen.</p>
-
-    <!-- Aplicar va PRIMERO: es lo que se hace todas las semanas. Guardar se hace
-         una vez y despues casi nunca, asi que va abajo. -->
-    <div class="fld">
-      <label for="pModelo">Aplicar un modelo</label>
-      <select id="pModelo"></select>
-    </div>
-    <div class="fld" id="cajaPPersonas">
-      <label>Quiénes entran <span class="hint" id="pTodos"></span></label>
-      <div class="acciones diapills" id="pPersonas"></div>
-    </div>
-    <div class="fld">
-      <label class="chk"><input type="checkbox" id="pSinAsignar"><span>Pegar
-        <b>solo la forma</b>, como turnos sin asignar</span></label>
-    </div>
-    <div class="fld">
-      <label>En cuántas semanas seguidas, desde la que estás viendo</label>
-      <div class="acciones diapills" id="pSemanas"></div>
-    </div>
-    <p class="hint">Al aplicar se <b>pisan los turnos</b> de esas semanas. Las ausencias que ya
-      estén puestas se respetan.</p>
-    <div class="acciones">
-      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
-      <button type="button" class="act" id="pBorrar" hidden>Eliminar este modelo</button>
-    </div>
-
-    <hr class="sepdlg">
-
-    <div class="fld">
-      <label for="pNombre">Guardar la semana que estás viendo como modelo nuevo</label>
-      <div class="acciones">
-        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
-        <button type="button" class="act" id="pGuardar">Guardar</button>
-      </div>
-    </div>
-
-    <p class="msg" id="pMsg"></p>
-    <div class="acciones dlgpie">
-      <button type="button" class="act" id="pCerrar">Cerrar</button>
-    </div>
-  </form>
-</dialog>
 
 <dialog id="dlgCopiar" class="dlg">
   <form method="dialog" id="formCopiar">
@@ -434,7 +483,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=70"></script>
-<script src="app.js?v=88"></script>
+<script src="app.js?v=89"></script>
 
 
 </body>

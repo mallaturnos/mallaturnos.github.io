@@ -148,7 +148,7 @@ async function deshacerDot() {
     if (h.tramos) await reponerTramos(h.tramos);
     else await DATOS.reponerDotacion(S.local.id, h.filas);
     await refrescar();
-    $('#detNecesita').open = true;
+    verSub('nec');
     if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
   } catch (e) {
     S.histDot.push(h);                   // no se pudo: el paso atras sigue ahi
@@ -566,9 +566,11 @@ function pintarPlan() {
     sel.classList.toggle('activo', !!S.filtro);
   }
   const selE = $('#filtroEquipo');
+  const lblE = $('#lblEquipo');
   if (selE) {
     const es = equipos();
     selE.hidden = !es.length;                 // si nadie tiene equipo, no estorba
+    if (lblE) lblE.hidden = !es.length;       // y su rotulo se va con el
     selE.innerHTML = '<option value="">Todos los equipos</option>' +
       es.map(x => `<option value="${esc(x)}">${esc(x)}</option>`).join('');
     if (S.filtroE && !es.includes(S.filtroE)) S.filtroE = '';
@@ -578,7 +580,6 @@ function pintarPlan() {
   $('#cajaSemana').hidden = S.modo !== 'semana';
   $('#cajaDia').hidden    = S.modo !== 'dia';
   $('#cajaMes').hidden    = S.modo !== 'mes';
-  $('#btnModelos').hidden   = S.modo !== 'semana';
   // Copiar sirve en Dia y en Semana; en Mes no hay nada que copiar.
   $('#btnCopiar').hidden    = S.modo === 'mes';
   // Agrupar por puesto vale en la semana Y en el dia (Pedro, 04-10: «ok, agregar
@@ -1871,7 +1872,7 @@ async function nuevoTurnoRapido() {
     await DATOS.crearTurno(S.local.id, { nombre: nombre.trim(), inicio: 9, fin: 17, colacion: 0.5,
                                          orden: S.turnos.length });
     await refrescar();
-    $('#detNecesita').open = true;
+    verSub('nec');
   } catch (e) { error(e); }
 }
 
@@ -2415,6 +2416,7 @@ const MOTIVOS = {
      turnos:   [{ id, nombre, inicio, fin, colacion }],
      puestos:  [nombre],
      dotacion: { perfil: { puesto: { turnoId: cantidad } } },   perfil '0'..'6'
+     tramos:   { perfil: { puesto: [ {desde, hasta, cantidad} ] } },  manda sobre `dotacion`
      personas: [{ id, nombre, rol, horas_contrato, no_disponible:[dow] }],
      asign:    { 'personaId|fecha': [ fila ] },   lo que YA hay
      sinDueno: [ { fecha, inicio, fin, puesto } ],
@@ -2464,13 +2466,30 @@ function proponer(ent) {
     });
   });
 
-  /* Cuanta gente de ese puesto se necesita a esa hora. Dos turnos que se pisan
-     SUMAN su necesidad en las horas compartidas: si de 13:00 a 16:30 corren la
-     mañana y la tarde, a esa hora se necesita la gente de las dos. No es doble
-     conteo — es lo que el local pidio. */
-  const reqHora = (d, puesto, h) => turnos.reduce((n, t) =>
-    n + ((Number(t.inicio) <= h && h < Number(t.fin))
-      ? ((((dot[String(d)] || {})[puesto] || {})[t.id]) || 0) : 0), 0);
+  /* Cuanta gente de ese puesto se necesita a esa hora.
+
+     Si hay TRAMOS definidos mandan ellos, y no se suman entre si: se toma el
+     mayor. Es la misma regla que `necesitaHora()` usa en la pantalla, y tiene
+     que ser la misma — si el generador contara distinto que el panel que esta
+     al lado, uno de los dos estaria mintiendo y no se sabria cual.
+
+     Sin tramos se deduce de la dotacion vieja sumando los turnos que pasan por
+     la hora. Ahi SI se suma, porque asi se leia: si de 13:00 a 16:30 corren la
+     mañana y la tarde, se pide la gente de las dos. Esa ambigueedad es
+     justamente la que los tramos vinieron a matar. */
+  const reqHora = (d, puesto, h) => {
+    const lista = (((ent.tramos || {})[String(d)] || {})[puesto]) || [];
+    if (lista.length) {
+      let n = 0;
+      lista.forEach(t => {
+        if (Number(t.desde) <= h && h < Number(t.hasta)) n = Math.max(n, Number(t.cantidad) || 0);
+      });
+      return n;
+    }
+    return turnos.reduce((n, t) =>
+      n + ((Number(t.inicio) <= h && h < Number(t.fin))
+        ? ((((dot[String(d)] || {})[puesto] || {})[t.id]) || 0) : 0), 0);
+  };
 
   /* Cuanta gente de ese puesto hay puesta a esa hora: lo que ya estaba mas lo
      que llevamos propuesto en esta corrida.
@@ -2567,13 +2586,21 @@ function proponer(ent) {
       });
       if (!peor) break;
 
-      /* Por que turno se tapa. Entre los que pasan por esa hora y que el local
-         pidio para ese puesto, gana el que cubre MAS horas con falta: poner a
-         alguien en el turno que tapa tres horas deficitarias vale mas que en el
-         que tapa una. */
+      /* Por que turno se tapa. Entre los que pasan por esa hora, gana el que
+         cubre MAS horas con falta: poner a alguien en el turno que tapa tres
+         horas deficitarias vale mas que en el que tapa una.
+
+         Con la dotacion VIEJA solo sirven los turnos que el local pidio para
+         ese puesto, porque la necesidad venia atada al turno. Con TRAMOS la
+         necesidad ya no sabe de turnos: sirve cualquiera que pase por la hora,
+         y el turno es solo la forma de darle horario al bloque que se crea.
+         Sin esta distincion, con tramos y la dotacion vieja en blanco no habia
+         ningun turno elegible y el generador no proponia nada — lo cazo una
+         prueba, no la pantalla. */
+      const conTramos = ((( ent.tramos || {})[String(d)] || {})[peor.puesto] || []).length > 0;
       const sirven = turnos.filter(t =>
         Number(t.inicio) <= peor.h && peor.h < Number(t.fin)
-        && ((((dot[String(d)] || {})[peor.puesto] || {})[t.id]) || 0) > 0
+        && (conTramos || ((((dot[String(d)] || {})[peor.puesto] || {})[t.id]) || 0) > 0)
         && !agotado[peor.puesto + '|' + t.id]);
       if (!sirven.length) { sinSalida[peor.puesto] = true; continue; }
 
@@ -2725,7 +2752,7 @@ function pintarNecesidad(box) {
         recordarTr(que);
         await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(leer()));
         await refrescar();
-        $('#detNecesita').open = true;
+        verSub('nec');
       } catch (e) {
         S.histDot.pop(); pintarDeshacerDot();
         if (m) { m.textContent = e.message; m.className = 'msg bad'; }
@@ -2741,14 +2768,14 @@ function pintarNecesidad(box) {
       l.push({ desde, hasta: Math.min(desde + 4, franja().h1), cantidad: 1 });
       DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(l))
         .then(() => { recordarTr('agregar un tramo'); return refrescar(); })
-        .then(() => { $('#detNecesita').open = true; })
+        .then(() => { verSub('nec'); })
         .catch(error);
     });
     caja.querySelectorAll('.trx').forEach((b, i) => b.addEventListener('click', () => {
       const l = leer(); l.splice(i, 1);
       recordarTr('quitar un tramo');
       DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(l))
-        .then(refrescar).then(() => { $('#detNecesita').open = true; }).catch(error);
+        .then(refrescar).then(() => { verSub('nec'); }).catch(error);
     }));
     caja.querySelectorAll('.trh, .trn').forEach(inp => {
       inp.addEventListener('change', () => guardar('cambiar un tramo'));
@@ -3520,6 +3547,50 @@ function conectarApp() {
     if (modo === 'mes') S.mes = new Date(S.modo === 'dia' ? S.dia : S.lunes.getTime() + 3 * 86400000);
     S.modo = modo; refrescar().catch(error);
   };
+  /* ---------- sub-pestañas de Planificación ----------
+     Lo que hace 7shifts y nosotros no: arriba poquisimo, y el detalle adentro
+     de su propia pagina. «Plantillas» y «Objetivo de costo» eran un boton en la
+     barra y un campo perdido en Propinas; ahora cada uno tiene su lugar.
+
+     `pintarModelos()` se llama al ENTRAR a Plantillas, que es cuando hace falta:
+     antes se llamaba al abrir el dialogo. */
+  const SUBS = ['malla', 'plant', 'nec', 'obj'];
+  function verSub(cual) {
+    if (SUBS.indexOf(cual) < 0) cual = 'malla';
+    S.sub = cual;
+    SUBS.forEach(x => {
+      const b = $('#sub-' + x), pnl = $('#s-' + x);
+      if (b) b.setAttribute('aria-selected', x === cual ? 'true' : 'false');
+      if (pnl) pnl.hidden = x !== cual;
+    });
+    if (cual === 'plant') pintarModelos();
+  }
+  SUBS.forEach(x => on('#sub-' + x, 'click', () => verSub(x)));
+
+  /* ---------- el menú «···» ----------
+     Se traga los filtros, Imprimir y Limpiar. No son malos botones: son los que
+     NO se usan todas las semanas, y por estar al mismo nivel que los que sí
+     hacian que la barra se partiera en dos filas. */
+  const cerrarMas = () => {
+    const pop = $('#masPop'); if (!pop) return;
+    pop.hidden = true;
+    const b = $('#btnMas'); if (b) b.setAttribute('aria-expanded', 'false');
+  };
+  on('#btnMas', 'click', ev => {
+    ev.stopPropagation();
+    const pop = $('#masPop'); if (!pop) return;
+    const abrir = pop.hidden;
+    pop.hidden = !abrir;
+    $('#btnMas').setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  });
+  // Un menu que no se cierra solo es una trampa: se cierra al tocar fuera o con
+  // Escape, que es lo que todo el mundo intenta.
+  document.addEventListener('click', ev => {
+    const pop = $('#masPop');
+    if (pop && !pop.hidden && !ev.target.closest('.masmenu')) cerrarMas();
+  });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') cerrarMas(); });
+
   on('#modoDia', 'click', () => irA('dia'));
   on('#modoSemana', 'click', () => irA('semana'));
   on('#modoMes', 'click', () => irA('mes'));
@@ -3610,7 +3681,10 @@ function pintarModelos() {
    para no inventar un segundo lugar donde mirar.
    Si algo FALLA, el dialogo se queda abierto: ahi si hay que volver a intentar. */
 function listoYCerrar(texto) {
-  $('#dlgModelos').close();
+  // Antes esto cerraba el dialogo. Ahora Plantillas es una sub-pestaña, asi que
+  // lo que corresponde es volver a la malla: es lo que uno quiere ver despues
+  // de aplicar, y era la razon por la que el dialogo se cerraba solo.
+  verSub('malla');
   const m = $('#msgSem');
   if (m) { m.textContent = texto; m.className = 'msg ok'; }
   setTimeout(() => { const x = $('#msgSem'); if (x && x.textContent === texto) x.textContent = ''; }, 6000);
@@ -3766,18 +3840,8 @@ function opcionesModelo() {
   });
 
   /* ---------- modelos de semana: los botones ---------- */
-  on('#btnModelos', 'click', () => {
-    $('#pMsg').textContent = '';
-    $('#pNombre').value = '';
-    $('#pSinAsignar').checked = false;
-    $('#cajaPPersonas').hidden = false;
-    pintarModelos();
-    // Al abrir siempre se parte en 1: aplicar cuatro semanas pisa un mes entero
-    // y que eso quede armado de la vez anterior es una sorpresa cara.
-    marcarSemanas(1);
-    $('#dlgModelos').showModal();
-  });
-  on('#pCerrar', 'click', () => $('#dlgModelos').close());
+  /* Plantillas ya no es un dialogo: es una sub-pestaña. `pintarModelos()` se
+     llama al entrar a ella en vez de al abrir el modal. */
 
   // Si se pega solo la forma, elegir personas no significa nada: se esconden en
   // vez de dejarlas ahi sin efecto, que es como se construye una sorpresa.
@@ -3888,7 +3952,7 @@ function opcionesModelo() {
       try {
         await DATOS.copiarTramosDia(S.local.id, S.cobDia, destinos);
         await refrescar();
-        $('#detNecesita').open = true;
+        verSub('nec');
       } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
       bt.disabled = false;
       return;
@@ -3909,7 +3973,7 @@ function opcionesModelo() {
     try {
       await DATOS.guardarDotacionLote(filas);     // una sola llamada, no sesenta
       await refrescar();
-      $('#detNecesita').open = true;
+      verSub('nec');
     } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
     b.disabled = false;
   });
@@ -4025,7 +4089,7 @@ function opcionesModelo() {
       try {
         await DATOS.borrarTramos(S.local.id, S.cobDia);
         await refrescar();
-        $('#detNecesita').open = true;
+        verSub('nec');
         msg.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; msg.className = 'msg ok';
       } catch (e) { S.histDot.pop(); pintarDeshacerDot(); msg.textContent = e.message; msg.className = 'msg bad'; }
       setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
@@ -4043,7 +4107,7 @@ function opcionesModelo() {
     try {
       await DATOS.borrarDotacion(S.local.id, S.cobDia);
       await refrescar();
-      $('#detNecesita').open = true;
+      verSub('nec');
       m.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
     } catch (e) { S.histDot.pop(); pintarDeshacerDot(); m.textContent = e.message; m.className = 'msg bad'; }
     setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
