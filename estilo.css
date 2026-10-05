@@ -306,7 +306,7 @@ td.mcel.aus{background:var(--surface-3);font-style:italic}
 #filtroPuesto:focus-visible,#filtroEquipo:focus-visible{outline:2px solid var(--accent);outline-offset:1px}
 
 /* ===== cobertura hora por hora ===== */
-.cov{display:flex;flex-direction:column;gap:6px;min-width:540px}
+.cov{display:flex;flex-direction:column;gap:6px}
 .covrow{display:grid;grid-template-columns:38px 1fr;gap:8px;align-items:center}
 .covday{font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-dim);text-transform:uppercase}
 .covbars{display:grid;gap:1px}
@@ -716,7 +716,16 @@ input.trn{width:4.2em;text-align:center;font-weight:700}
 /* Las casillas de turno dicen un hecho, no un veredicto: el color se fue de
    ahí y el juicio bajó a esta línea, que se calcula por hora. */
 .cobcel.dato{background:#fafbfa;border-color:#e6eae8}
-.cobfalta{margin:4px 0 0;font-size:.86rem;color:#9c3a1e;line-height:1.4}
+@media (max-width:640px){
+  .cobfila{min-width:0;grid-template-columns:1fr;align-items:start}
+  .cobcels{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))!important}
+}
+/* El parrafo de los huecos es el TERCER hijo de `.cobfila`, que es una grilla
+   de DOS columnas (92px y 1fr). Sin decirle nada, caia en la fila siguiente y
+   dentro de la PRIMERA columna: el texto quedaba en un canuto de 92 px y una
+   frase de seis renglones se volvia de veinte. Lo encontro Pedro mirando la
+   pagina publicada (msg 4061). `1 / -1` lo hace cruzar las dos columnas. */
+.cobfalta{grid-column:1/-1;margin:4px 0 0;font-size:.86rem;color:#9c3a1e;line-height:1.4}
 /* En qué prototipo estás. Va al final de las pestañas, empujado a la derecha. */
 nav[role=tablist]{position:relative}
 .proto{margin-left:auto;align-self:center;font-size:.76rem;color:#9aa29d;padding:0 4px;white-space:nowrap}
