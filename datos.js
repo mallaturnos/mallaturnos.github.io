@@ -191,6 +191,17 @@
       puesto: t.puesto || '', nota: t.nota || '',
     }).select().single());
 
+  // Varios turnos de una vez, para «Generar turnos»: una semana propuesta son
+  // facilmente cuarenta filas, y cuarenta llamadas sueltas tardan y ademas
+  // pueden quedar a medias si una falla. Esta entra entera o no entra.
+  const crearAsignacionesLote = (localId, filas) =>
+    pedir(sb.from('asignaciones').insert(filas.map(t => ({
+      local_id: localId, persona_id: t.persona_id || null, fecha: t.fecha, ausencia: null,
+      turno_id: t.turno_id || null,
+      inicio: t.inicio, fin: t.fin, colacion: t.colacion || 0,
+      puesto: t.puesto || '', nota: t.nota || '',
+    }))).select());
+
   const editarAsignacion = (id, campos) =>
     pedir(sb.from('asignaciones').update(campos).eq('id', id).select().single());
 
@@ -242,6 +253,55 @@
                   .not('inicio', 'is', null));
     await pedir(sb.from('asignaciones').insert(filas).select());
     return filas.length;
+  };
+
+  /* ---------- copiar un DIA a otros dias ----------
+     Lo pidio Pedro el 05-10-2026 (msg 3770): armo el lunes con once turnos y no
+     habia forma de llevarlo al resto. Existian «Repetir tambien en» —dentro de
+     cada turno, once veces— y copiar la semana entera. El dia, que es el pedazo
+     que uno arma primero, era justo el que no se podia copiar.
+
+     Mismo criterio que `copiarSemana`: se pisan los turnos del destino y las
+     AUSENCIAS se respetan — ni se copian ni se borran. Ademas, a quien tenga
+     una ausencia ese dia no se le pega turno encima: la ausencia manda sobre
+     los turnos y dejar las dos cosas seria una contradiccion guardada. */
+  const copiarDiaA = async (localId, origen, destinos) => {
+    if (!destinos || !destinos.length) return 0;
+    const turnos = await pedir(sb.from('asignaciones').select('*').eq('local_id', localId)
+      .eq('fecha', origen).not('inicio', 'is', null));
+    if (!turnos || !turnos.length) return 0;
+
+    // Quien esta ausente en cada dia de destino, para no pisarle la ausencia.
+    const ausentes = await pedir(sb.from('asignaciones').select('persona_id,fecha')
+      .eq('local_id', localId).in('fecha', destinos).not('ausencia', 'is', null));
+    const bloqueado = new Set((ausentes || []).map(a => a.persona_id + '|' + a.fecha));
+
+    const filas = [];
+    for (const fecha of destinos)
+      for (const a of turnos) {
+        if (a.persona_id && bloqueado.has(a.persona_id + '|' + fecha)) continue;
+        filas.push({ local_id: localId, persona_id: a.persona_id, fecha, ausencia: null,
+                     turno_id: a.turno_id, inicio: a.inicio, fin: a.fin,
+                     colacion: a.colacion || 0, puesto: a.puesto || '', nota: a.nota || '' });
+      }
+    await pedir(sb.from('asignaciones').delete().eq('local_id', localId)
+                  .in('fecha', destinos).not('inicio', 'is', null));
+    if (filas.length) await pedir(sb.from('asignaciones').insert(filas));
+    return filas.length;
+  };
+
+  /* ---------- copiar la semana que se esta viendo a las siguientes ----------
+     `copiarSemana` trae la anterior sobre esta; esto empuja esta hacia adelante,
+     que es lo que se hace al armar un mes de una vez. Son dos sentidos del mismo
+     gesto y conviene que vivan juntos en la pantalla. */
+  const copiarSemanaA = async (localId, lunes, cuantas) => {
+    let total = 0;
+    for (let k = 1; k <= cuantas; k++) {
+      const d = new Date(lunes + 'T00:00:00');
+      d.setDate(d.getDate() + k * 7);
+      total += await copiarSemana(localId, lunes, d.toISOString().slice(0, 10));
+    }
+    return total;
   };
 
   // Borra todo lo asignado en un rango: la hoja queda en blanco y, al no haber
@@ -504,8 +564,9 @@
     turnos, crearTurno, guardarTurno, quitarTurno,
     baseAlDia,
     puestos, crearPuesto, guardarPuesto, quitarPuesto, renombrarPuesto,
-    asignaciones, crearAsignacion, editarAsignacion, borrarAsignacion, ponerAusencia, limpiarDia,
-    marcas, marcarComoJefe, horasPagadas, cerrarDia, copiarSemana,
+    asignaciones, crearAsignacion, crearAsignacionesLote, editarAsignacion, borrarAsignacion,
+    ponerAusencia, limpiarDia,
+    marcas, marcarComoJefe, horasPagadas, cerrarDia, copiarSemana, copiarDiaA, copiarSemanaA,
     borrarAsignaciones, reponerAsignaciones,
     dias, guardarDia, dotacion, guardarDotacion, guardarDotacionLote,
     borrarDotacion, reponerDotacion,

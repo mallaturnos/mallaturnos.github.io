@@ -112,7 +112,7 @@
           <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
           <span class="sep"></span>
           <button class="act" id="btnModelos">Modelos de semana</button>
-          <button class="act" id="btnCopiarSem">Copiar la anterior</button>
+          <button class="act" id="btnCopiar">Copiar…</button>
           <button class="act" id="btnLimpiarSem">Limpiar</button>
           <button class="act" id="btnDeshacer" disabled>Deshacer</button>
           <button class="act" id="btnImprimir">Imprimir</button>
@@ -335,6 +335,44 @@
   </form>
 </dialog>
 
+<dialog id="dlgCopiar" class="dlg">
+  <form method="dialog" id="formCopiar">
+    <h3 id="cTit">Copiar</h3>
+    <p class="hint" id="cSub"></p>
+
+    <!-- vista DIA: a que otros dias de esta semana va -->
+    <div id="cDia" hidden>
+      <div class="fld">
+        <label>¿A qué días?</label>
+        <div class="acciones diapills" id="cDias"></div>
+      </div>
+    </div>
+
+    <!-- vista SEMANA: traer la anterior, o empujar esta hacia adelante -->
+    <div id="cSemana" hidden>
+      <div class="fld">
+        <label>¿Qué quieres hacer?</label>
+        <div class="acciones diapills" id="cQue">
+          <button type="button" class="act dia on" data-que="adelante" aria-pressed="true">Copiar ESTA semana a las siguientes</button>
+          <button type="button" class="act dia" data-que="anterior" aria-pressed="false">Traer la semana ANTERIOR sobre esta</button>
+        </div>
+      </div>
+      <div class="fld" id="cCajaSem">
+        <label>¿A cuántas semanas?</label>
+        <div class="acciones diapills" id="cSemanas"></div>
+      </div>
+    </div>
+
+    <p class="hint">Se <b>pisan los turnos</b> del destino. Las <b>ausencias se respetan</b>:
+      ni se copian ni se borran, y a quien tenga una no se le pega un turno encima.</p>
+    <p class="msg" id="cMsg"></p>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="cCerrar">Cerrar</button>
+      <button type="button" class="act primary" id="cCopiar">Copiar</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlgTurno" class="dlg">
   <form method="dialog" id="formTurno">
     <h3 id="dlgTit">Agregar turno</h3>
@@ -391,8 +429,8 @@
 
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
-<script src="datos.js?v=68"></script>
-<script src="app.js?v=86"></script>
+<script src="datos.js?v=69"></script>
+<script src="app.js?v=87"></script>
 
 
 </body>

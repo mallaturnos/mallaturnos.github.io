@@ -75,6 +75,26 @@ function recordar(que) {
   if (S.hist.length > MAX_HIST) S.hist.shift();
   pintarDeshacer();
 }
+/* Un paso atras sobre un rango que NO es el que se esta viendo.
+
+   `recordar()` fotografia `S.asign`, que solo tiene lo que la vista cargo. Al
+   copiar esta semana a las tres siguientes, esas semanas no estan cargadas: la
+   foto saldria vacia y Deshacer, en vez de reponerlas, BORRARIA lo que hubiera
+   ahi. Por eso esta lee el rango de la base antes de tocarlo.
+
+   Vale lo mismo en la vista de Dia, donde `rango()` es un solo dia y copiar a
+   otros seis se saldria de la foto. */
+async function recordarDeLaBase(que, desde, hasta) {
+  const filas = (await DATOS.asignaciones(S.local.id, desde, hasta) || []).map(a => ({
+    persona_id: a.persona_id, fecha: a.fecha, turno_id: a.turno_id,
+    ausencia: a.ausencia, inicio: a.inicio, fin: a.fin,
+    colacion: a.colacion, puesto: a.puesto, nota: a.nota,
+  }));
+  S.hist.push({ desde, hasta, filas, que: que || 'el ultimo cambio' });
+  if (S.hist.length > MAX_HIST) S.hist.shift();
+  pintarDeshacer();
+}
+
 function pintarDeshacer() {
   const b = $('#btnDeshacer'); if (!b) return;
   const h = S.hist[S.hist.length - 1];
@@ -477,8 +497,9 @@ function pintarPlan() {
   $('#cajaSemana').hidden = S.modo !== 'semana';
   $('#cajaDia').hidden    = S.modo !== 'dia';
   $('#cajaMes').hidden    = S.modo !== 'mes';
-  $('#btnCopiarSem').hidden = S.modo !== 'semana';
   $('#btnModelos').hidden   = S.modo !== 'semana';
+  // Copiar sirve en Dia y en Semana; en Mes no hay nada que copiar.
+  $('#btnCopiar').hidden    = S.modo === 'mes';
   // Agrupar por puesto vale en la semana Y en el dia (Pedro, 04-10: «ok, agregar
   // a dia»). En el MES no: quedaria un conteo por dia y poco mas, asi que ahi se
   // esconde — es una decision, no un olvido.
@@ -2254,6 +2275,295 @@ function pintarTurnos() {
   });
 }
 
+/* ================= GENERAR LA PROPUESTA DE TURNOS =================
+   Pedro, 05-10-2026 (msg 3764), y es el encargo entero en dos frases:
+
+     «el administrador no deberia comenzar diciendo "Juan trabaja el lunes a
+      las 12". Primero deberia decir "el lunes necesito 5 garzones entre 12:00
+      y 16:00". Despues el sistema asigna las personas disponibles.»
+
+   Hasta hoy la dotacion era un numero que solo servia para pintar la cobertura
+   de rojo: pedia 84 casillas y no devolvia nada, y por eso esa pantalla se
+   sentia debil. Esto es lo que la consume.
+
+   NO es IA, y no debe serlo. Es un problema de encaje, y lo unico que se le
+   exige a esto es que sea EXPLICABLE: si no puede cubrir algo tiene que decir
+   por que —«dos ya tienen turno ese dia, uno esta de vacaciones»—. Una IA ahi
+   inventaria, y en un producto que promete cumplimiento laboral el invento lo
+   paga Pedro.
+
+   ⚠️ LA CUENTA VA POR HORA, NO POR TURNO, y eso no es un lujo: lo encontro
+   Pedro el mismo dia (msg 3772) agregando «almuerzo 11:00–15:30» y «Cena
+   20:30–01:00» sobre los tres turnos que ya tenia. Contando por turno, quien
+   trabaja 08:00–16:30 cuenta como cobertura de la Tarde 13:00–21:30 porque se
+   pisan — asi que con UNA persona el panel daba por cubiertos los dos turnos y
+   a las 17:00 no habia nadie. Por hora eso no puede pasar.
+
+   `proponer()` entra y sale SOLO por parametro: no toca `S`, no toca la base y
+   no toca el DOM. Es a proposito, para poder probarla en node. */
+
+/* Cuantas horas tiene que descansar alguien entre el fin de un turno y el
+   inicio del siguiente para que el repartidor se lo ofrezca.
+
+   ⚠️ Esto NO es una regla legal chilena: el Codigo del Trabajo no fija un
+   descanso diario minimo general como el de 11 h de la directiva europea. Es
+   una regla de SENTIDO COMUN del local, para que la maquina no le encaje a
+   nadie un cierre 17:00–01:00 y una apertura a las 08:00 del dia siguiente.
+   El encargado puede hacerlo a mano si quiere; el automatico no lo propone. */
+const DESCANSO_MIN = 10;
+
+/* Tope de vueltas del repartidor. Cada vuelta o pone a alguien o descarta un
+   par puesto+turno, asi que termina solo; esto es un cinturon por si un dato
+   raro —un turno de fin menor que su inicio— lo dejara dando vueltas. Que la
+   pantalla se congele es peor que una propuesta incompleta. */
+const MAX_VUELTAS = 400;
+
+/* Las razones por las que alguien no entra. El texto va en plural porque
+   siempre se muestra con un numero delante. */
+const MOTIVOS = {
+  ocupado:      'ya tienen turno ese día',
+  ausencia:     'están de ausencia',
+  noDisponible: 'dijeron que no pueden ese día',
+  contrato:     'se pasarían de su contrato',
+  sieteDias:    'quedarían con 7 días seguidos',
+  descanso:     'no alcanzan a descansar ' + DESCANSO_MIN + ' h',
+  sinGente:     'no hay nadie con ese puesto',
+};
+
+/* proponer(ent) -> { filas, huecos, nadie }
+
+   ent = {
+     fechas:   [iso x7, lunes primero],
+     turnos:   [{ id, nombre, inicio, fin, colacion }],
+     puestos:  [nombre],
+     dotacion: { perfil: { puesto: { turnoId: cantidad } } },   perfil '0'..'6'
+     personas: [{ id, nombre, rol, horas_contrato, no_disponible:[dow] }],
+     asign:    { 'personaId|fecha': [ fila ] },   lo que YA hay
+     sinDueno: [ { fecha, inicio, fin, puesto } ],
+   }
+
+   `filas` son turnos nuevos CON persona. `huecos` es lo que quedo sin cubrir,
+   en TRAMOS de horas y con su explicacion. `nadie` suma las persona-horas que
+   faltan, que es la unidad honesta cuando los turnos se pisan. */
+function proponer(ent) {
+  const norm = s => String(s == null ? '' : s).trim().toLowerCase();
+  const horasT = t => Number(t.fin) - Number(t.inicio) - Number(t.colacion || 0);
+
+  const turnos  = (ent.turnos || []).slice().sort((a, b) => Number(a.inicio) - Number(b.inicio));
+  const puestos = (ent.puestos || []).slice();
+  const dot     = ent.dotacion || {};
+  const filasDe = (pid, fe) => (ent.asign || {})[pid + '|' + fe] || [];
+  if (!turnos.length || !puestos.length || !ent.personas.length)
+    return { filas: [], huecos: [], nadie: 0 };
+
+  // La franja del local sale de los turnos que existen. Un turno que cruza la
+  // medianoche trae `fin` > 24 (01:00 es 25), asi que el techo puede pasar de 24.
+  const h0 = Math.floor(Math.min.apply(null, turnos.map(t => Number(t.inicio))));
+  const h1 = Math.ceil(Math.max.apply(null, turnos.map(t => Number(t.fin))));
+
+  /* El estado de cada persona durante el reparto: lo que YA tenia MAS lo que le
+     vamos proponiendo. Sin esto todos quedan empatados en cero horas y la
+     segunda ranura del mismo turno le vuelve a tocar al mismo de la primera. */
+  const est = {};
+  ent.personas.forEach(p => { est[p.id] = { horas: 0, dias: 0, bloques: {}, ausente: {} }; });
+  ent.fechas.forEach(fe => {
+    ent.personas.forEach(p => {
+      const fs = filasDe(p.id, fe);
+      const ts = fs.filter(a => a.inicio != null);
+      const au = fs.find(a => a.ausencia);
+      // «Libre» no es una ausencia que impida nada: es no tener nada ese dia.
+      if (au && au.ausencia && au.ausencia !== 'L') est[p.id].ausente[fe] = true;
+      if (ts.length) est[p.id].dias++;
+      ts.forEach(a => {
+        est[p.id].horas += Number(a.fin) - Number(a.inicio) - Number(a.colacion || 0);
+        (est[p.id].bloques[fe] = est[p.id].bloques[fe] || []).push({
+          inicio: Number(a.inicio), fin: Number(a.fin),
+          // el puesto DE LA ASIGNACION manda: si Camila hace barra el lunes,
+          // ese lunes cuenta en barra aunque su puesto habitual sea garzon.
+          puesto: (a.puesto || '').trim() || (p.rol || '').trim(),
+        });
+      });
+    });
+  });
+
+  /* Cuanta gente de ese puesto se necesita a esa hora. Dos turnos que se pisan
+     SUMAN su necesidad en las horas compartidas: si de 13:00 a 16:30 corren la
+     mañana y la tarde, a esa hora se necesita la gente de las dos. No es doble
+     conteo — es lo que el local pidio. */
+  const reqHora = (d, puesto, h) => turnos.reduce((n, t) =>
+    n + ((Number(t.inicio) <= h && h < Number(t.fin))
+      ? ((((dot[String(d)] || {})[puesto] || {})[t.id]) || 0) : 0), 0);
+
+  /* Cuanta gente de ese puesto hay puesta a esa hora: lo que ya estaba mas lo
+     que llevamos propuesto en esta corrida.
+
+     Los turnos SIN DUEÑO cuentan aca a proposito, y es la unica concesion del
+     archivo: en la pantalla de cobertura NO cuentan como gente —no hay nadie,
+     y ese es justo el hueco que hay que mostrar— pero para el repartidor son
+     una ranura ya planificada. Si no contaran, apretar el boton dos veces
+     crearia el mismo turno dos veces. Este boton no les pone gente: solo
+     agrega turnos nuevos. */
+  const hayHora = (fe, puesto, h) => {
+    let n = 0;
+    ent.personas.forEach(p => {
+      if ((est[p.id].bloques[fe] || []).some(b =>
+        b.inicio <= h && h < b.fin && norm(b.puesto) === norm(puesto))) n++;
+    });
+    (ent.sinDueno || []).forEach(a => {
+      if (a.fecha === fe && norm(a.puesto) === norm(puesto)
+        && Number(a.inicio) <= h && h < Number(a.fin)) n++;
+    });
+    return n;
+  };
+
+  /* El descanso desde el ultimo turno que la persona tenga ANTES de este. Se
+     mira el dia anterior y el mismo dia: un cierre que termina a las 25.0
+     (01:00 del dia siguiente) se compara contra el inicio de mañana + 24. */
+  const descansoAntes = (p, fe, d, t) => {
+    const antes = [];
+    const prev = ent.fechas[d - 1];
+    if (prev) (est[p.id].bloques[prev] || []).forEach(b => antes.push(b.fin - 24));
+    (est[p.id].bloques[fe] || []).forEach(b => { if (b.fin <= Number(t.inicio)) antes.push(b.fin); });
+    if (!antes.length) return Infinity;
+    return Number(t.inicio) - Math.max.apply(null, antes);
+  };
+
+  /* Quien puede tomar ese turno en ese puesto, ya ordenado. Devuelve tambien el
+     recuento de por que NO pudieron los demas: es lo que despues se lee en
+     palabras debajo del hueco. */
+  const candidatos = (fe, d, t, puesto) => {
+    const motivos = {};
+    const suma = k => { motivos[k] = (motivos[k] || 0) + 1; };
+    // Solo la gente de ESE puesto. Mandar a un cocinero a atender mesas es una
+    // decision del encargado, no de un algoritmo: el que mira la propuesta
+    // puede moverlo, la maquina no lo inventa.
+    const delPuesto = ent.personas.filter(p => norm(p.rol) === norm(puesto));
+    if (!delPuesto.length) { suma('sinGente'); return { pueden: [], motivos }; }
+
+    const pueden = [];
+    delPuesto.forEach(p => {
+      const e = est[p.id];
+      if (e.ausente[fe]) return suma('ausencia');
+      if ((e.bloques[fe] || []).some(b => b.inicio < Number(t.fin) && Number(t.inicio) < b.fin))
+        return suma('ocupado');
+      if ((p.no_disponible || []).indexOf(d) >= 0) return suma('noDisponible');
+      const tope = Number(p.horas_contrato) || 0;
+      if (tope && e.horas + horasT(t) > tope) return suma('contrato');
+      // El 7.º dia seguido solo cuenta si ese dia todavia no trabajaba.
+      if (!(e.bloques[fe] || []).length && e.dias + 1 >= 7) return suma('sieteDias');
+      if (descansoAntes(p, fe, d, t) < DESCANSO_MIN) return suma('descanso');
+      pueden.push(p);
+    });
+
+    /* Reparte parejo: el que menos horas lleva, y a igualdad el que menos dias.
+       El nombre al final no es decoracion — sin un desempate fijo, dos corridas
+       sobre los mismos datos darian mallas distintas y nadie podria revisar
+       nada. */
+    pueden.sort((a, b) => (est[a.id].horas - est[b.id].horas)
+      || (est[a.id].dias - est[b.id].dias)
+      || String(a.nombre).localeCompare(String(b.nombre)));
+    return { pueden, motivos };
+  };
+
+  const filas = [], huecos = [];
+  let nadie = 0;
+
+  ent.fechas.forEach((fe, d) => {
+    const agotado = {};          // 'puesto|turnoId' que ya no tiene a quien mandar
+    const sinSalida = {};        // puesto que ya no tiene ningun turno por donde entrar
+    const motivosPuesto = {};    // puesto -> recuento acumulado del dia
+    let vueltas = 0;
+
+    while (vueltas++ < MAX_VUELTAS) {
+      /* El hueco mas grande del dia. A igual tamaño gana la hora mas temprana:
+         tapar primero la mañana deja la tarde entera disponible para el resto,
+         y ademas hace la propuesta reproducible. */
+      let peor = null;
+      puestos.forEach(pu => {
+        if (sinSalida[pu]) return;
+        for (let h = h0; h < h1; h++) {
+          const f = reqHora(d, pu, h) - hayHora(fe, pu, h);
+          if (f > 0 && (!peor || f > peor.falta || (f === peor.falta && h < peor.h)))
+            peor = { puesto: pu, h, falta: f };
+        }
+      });
+      if (!peor) break;
+
+      /* Por que turno se tapa. Entre los que pasan por esa hora y que el local
+         pidio para ese puesto, gana el que cubre MAS horas con falta: poner a
+         alguien en el turno que tapa tres horas deficitarias vale mas que en el
+         que tapa una. */
+      const sirven = turnos.filter(t =>
+        Number(t.inicio) <= peor.h && peor.h < Number(t.fin)
+        && ((((dot[String(d)] || {})[peor.puesto] || {})[t.id]) || 0) > 0
+        && !agotado[peor.puesto + '|' + t.id]);
+      if (!sirven.length) { sinSalida[peor.puesto] = true; continue; }
+
+      const tapa = t => {
+        let n = 0;
+        for (let h = Math.floor(Number(t.inicio)); h < Number(t.fin); h++)
+          if (reqHora(d, peor.puesto, h) - hayHora(fe, peor.puesto, h) > 0) n++;
+        return n;
+      };
+      sirven.sort((a, b) => (tapa(b) - tapa(a)) || (Number(a.inicio) - Number(b.inicio)));
+      const t = sirven[0];
+
+      const { pueden, motivos } = candidatos(fe, d, t, peor.puesto);
+      const acum = motivosPuesto[peor.puesto] = motivosPuesto[peor.puesto] || {};
+      Object.keys(motivos).forEach(k => { acum[k] = Math.max(acum[k] || 0, motivos[k]); });
+
+      if (!pueden.length) { agotado[peor.puesto + '|' + t.id] = true; continue; }
+
+      const q = pueden[0], e = est[q.id];
+      if (!(e.bloques[fe] || []).length) e.dias++;
+      e.horas += horasT(t);
+      (e.bloques[fe] = e.bloques[fe] || []).push({
+        inicio: Number(t.inicio), fin: Number(t.fin), puesto: peor.puesto });
+
+      filas.push({
+        persona_id: q.id, nombre: q.nombre, fecha: fe, dia: d,
+        turno_id: t.id, turno: t.nombre, puesto: peor.puesto,
+        inicio: Number(t.inicio), fin: Number(t.fin), colacion: Number(t.colacion || 0),
+      });
+    }
+
+    /* Lo que quedo sin cubrir, dicho en TRAMOS de horas y no hora por hora:
+       «falta 1 garzón de 17:00 a 21:00» se lee; cuatro lineas de una hora, no.
+       Horas seguidas con el MISMO faltante se juntan; faltantes distintos no,
+       porque son dos problemas distintos. Es la misma regla que ya sigue la
+       vista de dia. */
+    puestos.forEach(pu => {
+      let act = null;
+      for (let h = h0; h < h1; h++) {
+        const f = reqHora(d, pu, h) - hayHora(fe, pu, h);
+        if (f > 0) {
+          nadie += f;
+          if (act && act.falta === f && act.hasta === h) act.hasta = h + 1;
+          else {
+            act = { fecha: fe, dia: d, puesto: pu, falta: f, desde: h, hasta: h + 1,
+                    motivos: motivosPuesto[pu] || {} };
+            huecos.push(act);
+          }
+        } else act = null;
+      }
+    });
+  });
+
+  return { filas, huecos, nadie };
+}
+
+/* El por que de un hueco, en palabras. Se ordena de mayor a menor para que lo
+   primero que se lea sea la razon principal, y se cortan las tres primeras: la
+   lista completa es cierta pero no se lee. */
+function diceMotivos(motivos) {
+  const ks = Object.keys(motivos || {}).filter(k => motivos[k] > 0)
+    .sort((a, b) => motivos[b] - motivos[a]);
+  if (!ks.length) return '';
+  return ks.slice(0, 3).map(k => k === 'sinGente'
+    ? MOTIVOS.sinGente
+    : motivos[k] + ' ' + MOTIVOS[k]).join(', ');
+}
+
 /* ================= COBERTURA Y COSTO ================= */
 function pintarCobertura() {
   const f = fechas();
@@ -3114,6 +3424,128 @@ function opcionesModelo() {
   };
 }
 
+  /* ---------- Copiar: un boton para los dos sentidos ----------
+     Antes habia «Copiar la anterior» suelto en la barra y NINGUNA forma de
+     copiar un dia, que es lo que Pedro pidio (msg 3770) despues de armar un
+     lunes de once turnos a mano. Ahora es un solo boton que sabe en que vista
+     estas, y de paso la barra tiene un control menos. */
+  function pintarCopiar() {
+    const esDia = S.modo === 'dia';
+    $('#cDia').hidden = !esDia;
+    $('#cSemana').hidden = esDia;
+    $('#cMsg').textContent = '';
+    if (esDia) {
+      $('#cTit').textContent = 'Copiar este día';
+      $('#cSub').textContent = `${DIAS[(new Date(iso(S.dia) + 'T00:00:00').getDay() + 6) % 7]} `
+        + `${ddmm(iso(S.dia))} · ${turnosDelDia(iso(S.dia))} turnos`;
+      // Los dias de LA SEMANA que se esta viendo, menos el de origen.
+      const f = fechas(), hoy = iso(S.dia);
+      $('#cDias').innerHTML = f.map((fe, i) => fe === hoy ? '' :
+        `<button type="button" class="act dia" data-fecha="${fe}" aria-pressed="false">
+           ${DIAS[i]}<span class="yatiene">${ddmm(fe)}</span></button>`).join('');
+    } else {
+      $('#cTit').textContent = 'Copiar la semana';
+      $('#cSub').textContent = `semana del ${ddmm(fechas()[0])}`;
+      if (!$('#cSemanas').dataset.listo) {
+        $('#cSemanas').innerHTML = [1,2,3,4].map(n =>
+          `<button type="button" class="act dia" data-sem="${n}" aria-pressed="false">${n}</button>`).join('');
+        $('#cSemanas').dataset.listo = '1';
+      }
+      marcarCuantas(1);
+      marcarQue('adelante');
+    }
+  }
+  // Cuantas semanas es una CANTIDAD, no una posicion: con el 3 marcado el 1 y
+  // el 2 van llenos. Misma regla que en Modelos, que Pedro ya corrigio una vez.
+  function marcarCuantas(n) {
+    $('#cSemanas').querySelectorAll('button[data-sem]').forEach(b => {
+      const v = Number(b.dataset.sem);
+      b.classList.toggle('on', v <= n);
+      b.setAttribute('aria-pressed', v === n ? 'true' : 'false');
+    });
+  }
+  function marcarQue(q) {
+    $('#cQue').querySelectorAll('button[data-que]').forEach(b => {
+      const on = b.dataset.que === q;
+      b.classList.toggle('on', on);
+      b.setAttribute('aria-pressed', on ? 'true' : 'false');
+    });
+    // Traer la anterior no tiene «cuantas»: se esconde en vez de dejarlo ahi
+    // sin efecto, que es como se construye una sorpresa.
+    $('#cCajaSem').hidden = q !== 'adelante';
+  }
+  const turnosDelDia = fe => S.personas.reduce((n, p) => n + turnosDe(p.id, fe).length, 0)
+    + S.abiertos.filter(a => !a.persona_id && a.fecha === fe).length;
+
+  on('#btnCopiar', 'click', () => { pintarCopiar(); $('#dlgCopiar').showModal(); });
+  on('#cCerrar', 'click', () => $('#dlgCopiar').close());
+  on('#cDias', 'click', e => {
+    const b = e.target.closest('button[data-fecha]'); if (!b) return;
+    const on = b.getAttribute('aria-pressed') === 'true';
+    b.setAttribute('aria-pressed', on ? 'false' : 'true');
+    b.classList.toggle('on', !on);
+  });
+  on('#cSemanas', 'click', e => {
+    const b = e.target.closest('button[data-sem]'); if (b) marcarCuantas(Number(b.dataset.sem));
+  });
+  on('#cQue', 'click', e => {
+    const b = e.target.closest('button[data-que]'); if (b) marcarQue(b.dataset.que);
+  });
+
+  on('#cCopiar', 'click', async () => {
+    const m = $('#cMsg'), b = $('#cCopiar');
+    const aviso = (t, cls) => { m.textContent = t; m.className = 'msg ' + (cls || ''); };
+    b.disabled = true;
+    try {
+      if (S.modo === 'dia') {
+        const destinos = [...$('#cDias').querySelectorAll('button[aria-pressed="true"]')]
+          .map(x => x.dataset.fecha);
+        if (!destinos.length) { aviso('Elige al menos un día.', 'bad'); b.disabled = false; return; }
+        const f = fechas();
+        await recordarDeLaBase('copiar el día', f[0], f[6]);
+        const n = await DATOS.copiarDiaA(S.local.id, iso(S.dia), destinos);
+        await refrescar();
+        $('#dlgCopiar').close();
+        const ms = $('#msgSem');
+        if (ms) { ms.textContent = n ? `Listo: ${n} turnos copiados a ${destinos.length} día(s).`
+                                     : 'Ese día no tiene turnos que copiar.';
+                  ms.className = 'msg ' + (n ? 'ok' : ''); }
+      } else {
+        const que = ($('#cQue').querySelector('button[aria-pressed="true"]') || {}).dataset;
+        if (que && que.que === 'anterior') {
+          const anterior = iso(masDias(S.lunes, -7)), f = fechas();
+          await recordarDeLaBase('traer la semana anterior', f[0], f[6]);
+          const n = await DATOS.copiarSemana(S.local.id, anterior, iso(S.lunes));
+          await refrescar();
+          $('#dlgCopiar').close();
+          const ms = $('#msgSem');
+          if (ms) { ms.textContent = n ? `Listo: ${n} turnos traídos.` : 'La semana anterior estaba vacía.';
+                    ms.className = 'msg ' + (n ? 'ok' : ''); }
+        } else {
+          const bsem = $('#cSemanas').querySelector('button[aria-pressed="true"]');
+          const cuantas = Number(bsem ? bsem.dataset.sem : 1) || 1;
+          const desde = iso(masDias(S.lunes, 7));
+          const hasta = iso(masDias(S.lunes, cuantas * 7 + 6));
+          await recordarDeLaBase(`copiar la semana a ${cuantas}`, desde, hasta);
+          const n = await DATOS.copiarSemanaA(S.local.id, iso(S.lunes), cuantas);
+          await refrescar();
+          $('#dlgCopiar').close();
+          const ms = $('#msgSem');
+          if (ms) { ms.textContent = n ? `Listo: ${n} turnos copiados a ${cuantas} semana(s).`
+                                       : 'Esta semana no tiene turnos que copiar.';
+                    ms.className = 'msg ' + (n ? 'ok' : ''); }
+        }
+      }
+      setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 6000);
+    } catch (e) {
+      // Si falla, el paso atras sobra: se saca para no dejar un Deshacer que no
+      // deshace nada. Mismo criterio que el resto de la pantalla.
+      S.hist.pop(); pintarDeshacer();
+      aviso(e.message, 'bad');
+    }
+    b.disabled = false;
+  });
+
   /* ---------- modelos de semana: los botones ---------- */
   on('#btnModelos', 'click', () => {
     $('#pMsg').textContent = '';
@@ -3220,22 +3652,6 @@ function opcionesModelo() {
       pintarModelos();
       m.textContent = 'Modelo eliminado.'; m.className = 'msg ok';
     } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
-  });
-
-  on('#btnCopiarSem', 'click', async () => {
-    const m = $('#msgSem');
-    const anterior = iso(masDias(S.lunes, -7));
-    if (!confirm('Copiar los turnos de la semana del ' + ddmm(anterior) + ' sobre esta.\n\n'
-               + 'Se pisan los turnos que ya pusiste. Las ausencias NO se copian.')) return;
-    m.textContent = 'Copiando…'; m.className = 'msg';
-    try {
-      recordar('copiar la semana anterior');
-      const n = await DATOS.copiarSemana(S.local.id, anterior, iso(S.lunes));
-      await refrescar();
-      m.textContent = n ? `Listo: ${n} turnos copiados.` : 'La semana anterior estaba vacía.';
-      m.className = 'msg ' + (n ? 'ok' : '');
-    } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
-    setTimeout(() => { $('#msgSem').textContent = ''; }, 5000);
   });
 
   // copiar la dotación de un día a los demás, para no teclear siete veces
