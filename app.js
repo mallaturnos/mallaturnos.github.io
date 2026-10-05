@@ -2898,79 +2898,104 @@ function pintarNecesidadBox(box, ps, ts) {
 }
 
 function pintarNecesidadPorTurno(box, ps, ts) {
-  const tabla = el('table','neces');
-  tabla.innerHTML = '<thead><tr><th>Puesto</th>' +
-    ts.map(t => `<th><button type="button" class="turnoEd" data-t="${t.id}"
-      title="Editar este turno">${esc(t.nombre)}<span class="num">${hhmm(t.inicio)}–${hhmm(t.fin)}</span></button></th>`).join('')
-    + '<th><button type="button" class="turnoEd nuevo" data-nuevo="1" title="Agregar un turno">+ turno</button></th></tr></thead>';
-  const tb = el('tbody');
+  /* UNA LISTA CORTA POR PUESTO, no una matriz.
+
+     La matriz puesto x turno es lo que habia antes y es lo que Pedro miro y
+     pregunto «por que volver a esto?» (msg 4089). Con sus cinco turnos y sus
+     cuatro puestos son VEINTE casillas y trece quedan en cero. El lo habia
+     descrito en dos lineas: «un aseo en la manana, otro en la tarde y un
+     refuerzo». Y lo remato el mismo: «era mejor lo de antes» —la lista corta
+     del editor de tramos— «pero con la nueva forma de por debajo las horas».
+
+     Entonces: la FORMA de la lista, que le gusta, con TURNOS adentro, que es
+     lo que no le hace teclear horas. Una linea por turno que ese puesto usa de
+     verdad, y ninguna en cero. */
   ps.forEach(puesto => {
-    const tr = el('tr');
+    const usados = ts.filter(t => necesita(S.cobDia, puesto, t.id) > 0);
+    const opciones = (sel) => ts.map(t =>
+      `<option value="${t.id}"${t.id === sel ? ' selected' : ''}>${esc(t.nombre)} · `
+      + `${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
+    const filas = usados.map(t => `<tr data-t="${t.id}">
+        <td><select class="ntsel" aria-label="turno">${opciones(t.id)}</select></td>
+        <td><input class="n ntn" type="number" min="0" max="99"
+            value="${necesita(S.cobDia, puesto, t.id)}" aria-label="cuántas personas"></td>
+        <td><button type="button" class="act ntx" title="Quitar esta línea">quitar</button></td>
+      </tr>`).join('');
     const q = puestoCat(puesto);
-    tr.innerHTML = `<th scope="row">${q
-      ? `<button type="button" class="turnoEd" data-puesto="${q.id}"
-           title="Editar este puesto">${esc(puesto)}</button>`
-      : esc(puesto)}</th>` +
-      ts.map(t => `<td><input class="n" type="number" min="0" max="99"
-        value="${necesita(S.cobDia, puesto, t.id)}" data-t="${t.id}"
-        aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('')
-      + '<td></td>';
-    tb.appendChild(tr);
-    tr.querySelectorAll('input[data-t]').forEach(inp => {
+    const caja = el('div', 'trpuesto', `
+      <div class="trtit"><b>${esc(puesto)}</b>
+        <button type="button" class="act ntmas"${usados.length >= ts.length
+          ? ' disabled title="Ya están todos los turnos de este puesto"' : ''}>+ turno</button></div>
+      ${usados.length ? `<table class="tramos nt"><tbody>${filas}</tbody></table>`
+        : '<p class="hint">Este día no se pide a nadie de este puesto. Agrega un turno.</p>'}
+      ${usados.length ? barrasNecesidad(S.cobDia, puesto) : ''}`);
+    box.appendChild(caja);
+    if (q) caja.querySelector('.trtit b').dataset.puesto = q.id;
+
+    /* Guardar es siempre lo mismo: el numero de un turno, y de paso fuera los
+       tramos a mano de este puesto. Si quedaran, `necesitaHora()` los preferiria
+       y lo recien tecleado no moveria nada en pantalla — teclear y que no pase
+       nada es el peor de los finales. */
+    const poner = async (turnoId, v, que) => {
+      recordarDot(que);
+      const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
+      (pf[puesto] = pf[puesto] || {})[turnoId] = v;
+      try {
+        await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, turnoId, v);
+        if (!S.sinTablaTramos && tramosDe(S.cobDia, puesto).length)
+          await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, []);
+        await refrescar();
+      } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
+    };
+
+    caja.querySelectorAll('.ntn').forEach(inp => {
       let tm = null;
       inp.addEventListener('input', () => {
         clearTimeout(tm);
-        tm = setTimeout(async () => {
-          const v = Number(inp.value) || 0;
-          recordarDot('cambiar un número');     // la foto, antes de tocar nada
-          const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
-          (pf[puesto] = pf[puesto] || {})[inp.dataset.t] = v;
-          try {
-            await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, inp.dataset.t, v);
-            /* Y se BORRAN los tramos de este puesto y este día. Si quedaran,
-               `necesitaHora()` los preferiría y el número recién tecleado no
-               movería nada en pantalla: el usuario teclea y no pasa nada, que
-               es el peor de los finales. Borrándolos, la cuenta cae sola en la
-               suma de los turnos. Lo que se pierde es un ajuste a mano previo
-               de este puesto, y eso lo avisa la pantalla. */
-            if (!S.sinTablaTramos && tramosDe(S.cobDia, puesto).length)
-              await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, []);
-            await refrescar();
-          }
-          catch (e) { error(e); }
-        }, 600);
+        tm = setTimeout(() => poner(inp.closest('tr').dataset.t,
+                                    Number(inp.value) || 0, 'cambiar un número'), 600);
       });
     });
-  });
-  tabla.appendChild(tb);
-  box.appendChild(tabla);
 
-  // abrir el turno desde su propio título, o crear uno nuevo
-  tabla.querySelectorAll('.turnoEd').forEach(b => b.addEventListener('click', () => {
-    if (b.dataset.nuevo) return nuevoTurnoRapido();
-    if (b.dataset.puesto) {
-      $('#tab-eq').click();
-      const fila = document.querySelector(`#eqPuestos [data-puesto="${b.dataset.puesto}"]`);
-      if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
-        fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
-        const inp = fila.querySelector('input'); if (inp) { inp.focus(); inp.select(); } }
-      return;
-    }
-    $('#tab-eq').click();
-    const fila = document.querySelector(`#eqTurnos [data-turno="${b.dataset.t}"]`);
-    if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
-      fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
-      const inp = fila.querySelector('input'); if (inp) inp.focus(); }
-  }));
-  // La curva por hora, de SOLO LECTURA: es el resultado de lo que tecleo
-  // arriba, no un segundo lugar donde teclear. `barrasNecesidad()` lee
-  // `necesitaHora()`, asi que vale igual con tramos o sin ellos.
-  ps.forEach(puesto => {
-    box.appendChild(el('div', 'trpuesto',
-      `<div class="trtit"><b>${esc(puesto)}</b>`
-      + `<span class="hint">en qué queda, hora por hora</span></div>`
-      + barrasNecesidad(S.cobDia, puesto)));
+    // Cambiar de turno en el desplegable: el viejo se apaga y el nuevo toma su
+    // numero. Son dos escrituras, y la segunda recarga, asi que la primera no
+    // puede refrescar en medio.
+    caja.querySelectorAll('.ntsel').forEach(sel => {
+      sel.addEventListener('change', async () => {
+        const tr = sel.closest('tr'), antes = tr.dataset.t, ahora = sel.value;
+        if (antes === ahora) return;
+        const v = Number(tr.querySelector('.ntn').value) || 0;
+        recordarDot('cambiar de turno');
+        try {
+          await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, antes, 0);
+          await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, ahora, v);
+          if (!S.sinTablaTramos && tramosDe(S.cobDia, puesto).length)
+            await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, []);
+          await refrescar();
+        } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
+      });
+    });
+
+    caja.querySelectorAll('.ntx').forEach(b => b.addEventListener('click', () =>
+      poner(b.closest('tr').dataset.t, 0, 'quitar una línea')));
+
+    caja.querySelector('.ntmas').addEventListener('click', () => {
+      // El primer turno que este puesto todavia no usa, con 1 persona: es lo
+      // que uno quiere casi siempre, y si no, se cambia en el desplegable.
+      const libre = ts.find(t => !usados.some(u => u.id === t.id));
+      if (!libre) return;
+      poner(libre.id, 1, 'agregar un turno');
+    });
   });
+
+  // Crear un turno NUEVO del local es otra cosa que agregar una linea, asi que
+  // va aparte y abajo, no mezclado con los «+ turno» de cada puesto.
+  const pie = el('p', 'hint', '');
+  const b = el('button', 'act', '+ turno nuevo del local');
+  b.addEventListener('click', () => nuevoTurnoRapido());
+  pie.appendChild(b);
+  box.appendChild(pie);
+
 }
 
 /* ================= COBERTURA Y COSTO ================= */

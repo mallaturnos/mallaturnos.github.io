@@ -720,6 +720,16 @@ input.trn{width:4.2em;text-align:center;font-weight:700}
    no debajo: es una línea, y debajo empujaba la tabla fuera de la pantalla. */
 .necmodo{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
 .necmodo .hint{margin:0;flex:1 1 220px;min-width:0}
+/* La lista por puesto: una linea por turno, sin casillas en cero. El select
+   lleva el ancho porque el nombre del turno y sus horas van juntos. */
+table.tramos.nt .ntsel{width:100%;min-width:190px;padding:7px 8px;border:1px solid var(--line);
+  border-radius:6px;background:var(--surface);font:inherit;color:inherit}
+table.tramos.nt td:first-child{width:auto}
+/* El numero es de uno o dos digitos: con el ancho suelto se estiraba a 175 px
+   y parecia un campo de texto. Visto al renderizar, no deducido. */
+table.tramos.nt .ntn{width:72px}
+table.tramos.nt td:nth-child(2){width:84px}
+table.tramos.nt td:last-child{width:92px}
 @media (max-width:640px){
   .cobfila{min-width:0;grid-template-columns:1fr;align-items:start}
   .cobcels{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))!important}
