@@ -718,3 +718,8 @@ input.trn{width:4.2em;text-align:center;font-weight:700}
    ahí y el juicio bajó a esta línea, que se calcula por hora. */
 .cobcel.dato{background:#fafbfa;border-color:#e6eae8}
 .cobfalta{margin:4px 0 0;font-size:.86rem;color:#9c3a1e;line-height:1.4}
+/* En qué prototipo estás. Va al final de las pestañas, empujado a la derecha. */
+nav[role=tablist]{position:relative}
+.proto{margin-left:auto;align-self:center;font-size:.76rem;color:#9aa29d;padding:0 4px;white-space:nowrap}
+.proto a{color:#7d968a}
+@media print{.proto{display:none}}
