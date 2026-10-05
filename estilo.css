@@ -716,6 +716,10 @@ input.trn{width:4.2em;text-align:center;font-weight:700}
 /* Las casillas de turno dicen un hecho, no un veredicto: el color se fue de
    ahí y el juicio bajó a esta línea, que se calcula por hora. */
 .cobcel.dato{background:#fafbfa;border-color:#e6eae8}
+/* El conmutador «Por turno» / «Ajustar por hora». La explicación va AL LADO y
+   no debajo: es una línea, y debajo empujaba la tabla fuera de la pantalla. */
+.necmodo{display:flex;flex-wrap:wrap;align-items:center;gap:8px;margin-bottom:12px}
+.necmodo .hint{margin:0;flex:1 1 220px;min-width:0}
 @media (max-width:640px){
   .cobfila{min-width:0;grid-template-columns:1fr;align-items:start}
   .cobcels{grid-template-columns:repeat(auto-fill,minmax(104px,1fr))!important}

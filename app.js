@@ -45,7 +45,7 @@ const masDias = (d, n) => { const x = new Date(d); x.setDate(x.getDate() + n); r
 const ddmm = f => { const [a,m,d] = f.split('-'); return d + '-' + m; };
 
 let sb = null;
-const S = { local:null, personas:[], turnos:[], puestos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
+const S = { necModo:'turno', local:null, personas:[], turnos:[], puestos:[], asign:{}, marcas:{}, dias:{}, abiertos:[],
             lunes:lunesDe(new Date()), mes:new Date(), modo:'semana', dia:new Date(), filtro:'', filtroE:'', cobDia:'0', dotacion:{}, canal:null,
             hist:[], histDot:[], histEq:[], recien:null, relojDia:null, agrupar:'personas', modelos:[] };
 
@@ -2845,6 +2845,134 @@ function pintarNecesidad(box) {
   });
 }
 
+
+/* ================= CUÁNTA GENTE NECESITO =================
+   DOS MANERAS DE DECIR LO MISMO, y la de por turno manda.
+
+   Pedro, despues de probar la version por tramos (msgs 4081-4086):
+     «es que para mi es mas intuitivo de la otra forma... son turnos separados»
+     «no quiero que me toque a mi tipiar por hora porque serian muchos tipeos»
+     «claro, por detras es por hora, pero al designar turnos me ahorro teclear»
+
+   Y tenia razon, asi que esto deshace media decision mia del mismo dia. Cuando
+   pase la necesidad a tramos junte DOS problemas distintos en uno:
+
+     1. Como se COMPARA. Contar por turno estaba mal de verdad: con un corrido y
+        un refuerzo que se pisan, una persona salia cubriendo los dos. Ese error
+        lo encontro el (msg 3772) y habia que arreglarlo por hora.
+     2. Como se TECLEA. Aca no habia ningun error. Habia una ETIQUETA mala: la
+        tabla no decia si el numero del refuerzo era «uno mas» o «uno en total».
+
+   Cambie los dos cuando solo el primero lo necesitaba, y el precio lo pago el,
+   tecleando rangos de hora. La comparacion sigue siendo por hora —eso no se
+   toca— y la entrada vuelve a ser por turno.
+
+   COMO CONVIVEN, que es lo unico delicado: `necesitaHora()` usa los tramos SI
+   los hay, y si no SUMA los turnos que pasan por esa hora. Entonces no hay que
+   guardar nada derivado: al teclear por turno se BORRAN los tramos de ese
+   puesto y la cuenta cae sola en la suma. Un solo dato, siempre en sintonia.
+   Los tramos quedan para lo que no calza con ningun turno. */
+function pintarNecesidadBox(box, ps, ts) {
+  if (!ps.length || !ts.length) {
+    box.innerHTML = '<p class="vacio">Primero agrega tu equipo y tus turnos.</p>';
+    return;
+  }
+  // Sin la tabla `dotacion_tramos` solo existe el modo por turno, y no hay nada
+  // que elegir: ofrecer un conmutador a una pantalla que no puede abrir seria
+  // mentir.
+  if (!S.sinTablaTramos) {
+    const sel = el('div', 'necmodo');
+    sel.innerHTML =
+      `<button type="button" class="act${S.necModo !== 'hora' ? ' primary' : ''}" data-m="turno">Por turno</button>`
+      + `<button type="button" class="act${S.necModo === 'hora' ? ' primary' : ''}" data-m="hora">Ajustar por hora</button>`
+      + `<span class="hint">${S.necModo === 'hora'
+          ? 'A mano, para lo que no calza con ningún turno. Manda sobre lo de arriba.'
+          : 'Cuántas personas pones en cada turno. Abajo ves en qué queda, hora por hora.'}</span>`;
+    sel.querySelectorAll('button').forEach(b => b.addEventListener('click', () => {
+      S.necModo = b.dataset.m; pintarCobertura();
+    }));
+    box.appendChild(sel);
+  }
+  if (!S.sinTablaTramos && S.necModo === 'hora') { pintarNecesidad(box); return; }
+  pintarNecesidadPorTurno(box, ps, ts);
+}
+
+function pintarNecesidadPorTurno(box, ps, ts) {
+  const tabla = el('table','neces');
+  tabla.innerHTML = '<thead><tr><th>Puesto</th>' +
+    ts.map(t => `<th><button type="button" class="turnoEd" data-t="${t.id}"
+      title="Editar este turno">${esc(t.nombre)}<span class="num">${hhmm(t.inicio)}–${hhmm(t.fin)}</span></button></th>`).join('')
+    + '<th><button type="button" class="turnoEd nuevo" data-nuevo="1" title="Agregar un turno">+ turno</button></th></tr></thead>';
+  const tb = el('tbody');
+  ps.forEach(puesto => {
+    const tr = el('tr');
+    const q = puestoCat(puesto);
+    tr.innerHTML = `<th scope="row">${q
+      ? `<button type="button" class="turnoEd" data-puesto="${q.id}"
+           title="Editar este puesto">${esc(puesto)}</button>`
+      : esc(puesto)}</th>` +
+      ts.map(t => `<td><input class="n" type="number" min="0" max="99"
+        value="${necesita(S.cobDia, puesto, t.id)}" data-t="${t.id}"
+        aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('')
+      + '<td></td>';
+    tb.appendChild(tr);
+    tr.querySelectorAll('input[data-t]').forEach(inp => {
+      let tm = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(tm);
+        tm = setTimeout(async () => {
+          const v = Number(inp.value) || 0;
+          recordarDot('cambiar un número');     // la foto, antes de tocar nada
+          const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
+          (pf[puesto] = pf[puesto] || {})[inp.dataset.t] = v;
+          try {
+            await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, inp.dataset.t, v);
+            /* Y se BORRAN los tramos de este puesto y este día. Si quedaran,
+               `necesitaHora()` los preferiría y el número recién tecleado no
+               movería nada en pantalla: el usuario teclea y no pasa nada, que
+               es el peor de los finales. Borrándolos, la cuenta cae sola en la
+               suma de los turnos. Lo que se pierde es un ajuste a mano previo
+               de este puesto, y eso lo avisa la pantalla. */
+            if (!S.sinTablaTramos && tramosDe(S.cobDia, puesto).length)
+              await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, []);
+            await refrescar();
+          }
+          catch (e) { error(e); }
+        }, 600);
+      });
+    });
+  });
+  tabla.appendChild(tb);
+  box.appendChild(tabla);
+
+  // abrir el turno desde su propio título, o crear uno nuevo
+  tabla.querySelectorAll('.turnoEd').forEach(b => b.addEventListener('click', () => {
+    if (b.dataset.nuevo) return nuevoTurnoRapido();
+    if (b.dataset.puesto) {
+      $('#tab-eq').click();
+      const fila = document.querySelector(`#eqPuestos [data-puesto="${b.dataset.puesto}"]`);
+      if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
+        fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
+        const inp = fila.querySelector('input'); if (inp) { inp.focus(); inp.select(); } }
+      return;
+    }
+    $('#tab-eq').click();
+    const fila = document.querySelector(`#eqTurnos [data-turno="${b.dataset.t}"]`);
+    if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
+      fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
+      const inp = fila.querySelector('input'); if (inp) inp.focus(); }
+  }));
+  // La curva por hora, de SOLO LECTURA: es el resultado de lo que tecleo
+  // arriba, no un segundo lugar donde teclear. `barrasNecesidad()` lee
+  // `necesitaHora()`, asi que vale igual con tramos o sin ellos.
+  ps.forEach(puesto => {
+    box.appendChild(el('div', 'trpuesto',
+      `<div class="trtit"><b>${esc(puesto)}</b>`
+      + `<span class="hint">en qué queda, hora por hora</span></div>`
+      + barrasNecesidad(S.cobDia, puesto)));
+  });
+}
+
 /* ================= COBERTURA Y COSTO ================= */
 function pintarCobertura() {
   const f = fechas();
@@ -2925,66 +3053,7 @@ function pintarCobertura() {
   });
 
   const box = $('#needDia'); box.innerHTML = '';
-  // Mientras no se pegue `arreglo-tramos.sql` se sigue mostrando la tabla
-  // vieja: la app no puede quedar inservible por un SQL pendiente.
-  if (!S.sinTablaTramos) { pintarNecesidad(box); }
-  else if (!ps.length || !ts.length) {
-    box.innerHTML = '<p class="vacio">Primero agrega tu equipo y tus turnos.</p>';
-  } else {
-    const tabla = el('table','neces');
-    tabla.innerHTML = '<thead><tr><th>Puesto</th>' +
-      ts.map(t => `<th><button type="button" class="turnoEd" data-t="${t.id}"
-        title="Editar este turno">${esc(t.nombre)}<span class="num">${hhmm(t.inicio)}–${hhmm(t.fin)}</span></button></th>`).join('')
-      + '<th><button type="button" class="turnoEd nuevo" data-nuevo="1" title="Agregar un turno">+ turno</button></th></tr></thead>';
-    const tb = el('tbody');
-    ps.forEach(puesto => {
-      const tr = el('tr');
-      const q = puestoCat(puesto);
-      tr.innerHTML = `<th scope="row">${q
-        ? `<button type="button" class="turnoEd" data-puesto="${q.id}"
-             title="Editar este puesto">${esc(puesto)}</button>`
-        : esc(puesto)}</th>` +
-        ts.map(t => `<td><input class="n" type="number" min="0" max="99"
-          value="${necesita(S.cobDia, puesto, t.id)}" data-t="${t.id}"
-          aria-label="${esc(puesto)}, ${DIAS[Number(S.cobDia)]}, turno ${esc(t.nombre)}"></td>`).join('')
-        + '<td></td>';
-      tb.appendChild(tr);
-      tr.querySelectorAll('input[data-t]').forEach(inp => {
-        let tm = null;
-        inp.addEventListener('input', () => {
-          clearTimeout(tm);
-          tm = setTimeout(async () => {
-            const v = Number(inp.value) || 0;
-            recordarDot('cambiar un número');     // la foto, antes de tocar nada
-            const pf = S.dotacion[S.cobDia] = S.dotacion[S.cobDia] || {};
-            (pf[puesto] = pf[puesto] || {})[inp.dataset.t] = v;
-            try { await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, inp.dataset.t, v); pintarCobertura(); }
-            catch (e) { error(e); }
-          }, 600);
-        });
-      });
-    });
-    tabla.appendChild(tb);
-    box.appendChild(tabla);
-
-    // abrir el turno desde su propio título, o crear uno nuevo
-    tabla.querySelectorAll('.turnoEd').forEach(b => b.addEventListener('click', () => {
-      if (b.dataset.nuevo) return nuevoTurnoRapido();
-      if (b.dataset.puesto) {
-        $('#tab-eq').click();
-        const fila = document.querySelector(`#eqPuestos [data-puesto="${b.dataset.puesto}"]`);
-        if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
-          fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
-          const inp = fila.querySelector('input'); if (inp) { inp.focus(); inp.select(); } }
-        return;
-      }
-      $('#tab-eq').click();
-      const fila = document.querySelector(`#eqTurnos [data-turno="${b.dataset.t}"]`);
-      if (fila) { fila.scrollIntoView({ behavior:'smooth', block:'center' });
-        fila.classList.add('recien'); setTimeout(() => fila.classList.remove('recien'), 2500);
-        const inp = fila.querySelector('input'); if (inp) inp.focus(); }
-    }));
-  }
+  pintarNecesidadBox(box, ps, ts);
 
   /* ---- costo sobre venta ---- */
   const obj = Number(S.local.objetivo_pct) || 30;
