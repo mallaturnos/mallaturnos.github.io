@@ -1983,13 +1983,13 @@ function analizar(p) {
     if (ts.length) {
       const hd = horasDia(p.id, fe);
       horas += hd; trabajados++;
-      if (hd > 10) alertas.push({n:'bad', t:`${DIAS[i]} sobre 10 h`});
+      if (hd > 10) alertas.push({n:'bad', t:`${DIAS[i]} sobre 10 h en el día`});
     }
     else if (a.ausencia && a.ausencia !== 'L') aus++;
   });
   const tope = Number(p.horas_contrato) || Number(S.local.tope_semanal) || 42;
   if (horas > tope) alertas.push({ n:'bad', t:`${hfmt(horas)} h · ${hfmt(horas-tope)} sobre su contrato de ${hfmt(tope)}` });
-  if (trabajados === 7) alertas.push({ n:'bad', t:'7 días seguidos' });
+  if (trabajados === 7) alertas.push({ n:'bad', t:'7 días seguidos' });   // tope del local, no legal
   // disponibilidad: avisa, no bloquea. El encargado decide igual, pero viéndolo.
   const nd = p.no_disponible || [];
   f.forEach((fe, i) => {
@@ -1997,7 +1997,11 @@ function analizar(p) {
       alertas.push({ n:'warn', t:`${DIAS[i]}: dijo que no puede` });
   });
   if (aus) alertas.push({ n:'info', t:`${aus} ${aus===1?'día':'días'} de ausencia` });
-  if (!alertas.some(a => a.n==='bad' || a.n==='warn')) alertas.unshift({ n:'ok', t:'conforme' });
+  // «conforme» sonaba a veredicto legal, y no lo es: lo unico que dice es que no
+  // salto ninguno de los avisos que el propio local se puso. Pedro eligio el
+  // 06-10 llamar a las cosas por su nombre mientras la app no tenga reglas del
+  // Codigo del Trabajo de verdad — prometer cumplimiento que no existe lo paga el.
+  if (!alertas.some(a => a.n==='bad' || a.n==='warn')) alertas.unshift({ n:'ok', t:'sin avisos' });
   const dif = horas - (Number(p.horas_contrato) || 0);
   return { horas, trabajados, aus, costo: horas * (p.valor_hora||0), alertas, tope, dif };
 }
@@ -3172,8 +3176,11 @@ const MOTIVOS = {
   ausencia:     'están de ausencia',
   noDisponible: 'dijeron que no pueden ese día',
   contrato:     'se pasarían de su contrato',
-  sieteDias:    'quedarían con 7 días seguidos',
-  descanso:     'no alcanzan a descansar ' + DESCANSO_MIN + ' h',
+  // Estos dos son topes DEL LOCAL, no del Codigo del Trabajo. Se dice en el
+  // propio texto para que nadie los lea como una exigencia legal: Pedro eligio
+  // el 06-10 llamarlos por su nombre mientras no haya reglas de verdad.
+  sieteDias:    'quedarían con 7 días seguidos (tope del local)',
+  descanso:     'no alcanzan a descansar ' + DESCANSO_MIN + ' h entre turnos (tope del local)',
   sinGente:     'no hay nadie con ese puesto',
 };
 
