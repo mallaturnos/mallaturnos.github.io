@@ -2834,7 +2834,18 @@ function pintarNecesidad(box) {
    La regla, que es la que ya usan los turnos al guardar 01:00 como 25: una hora
    que cae ANTES de la apertura, o un fin que no es mayor que su inicio,
    pertenece al dia siguiente y se le suman 24. */
-    const leer = () => [...caja.querySelectorAll('tbody tr')].map(tr => {
+    /* `.filter(...)` y no `.map(...)` a secas: la fila del «+ tramo» que se
+       agrego al final de la tabla NO tiene campos de hora, asi que
+       `tr.querySelector('.trh').value` reventaba al llegar a ella. Y como
+       `leer()` la llaman TODOS los botones —guardar, quitar, agregar—, un
+       error ahi los deja mudos a los tres. Lo vio Pedro al instante: «todos los
+       botones quitar no funcionan» (msg 4176).
+
+       La leccion, que ya me costo dos veces hoy: agregar una fila de adorno a
+       una tabla de datos obliga a revisar a quien recorre esa tabla. */
+    const leer = () => [...caja.querySelectorAll('tbody tr')]
+      .filter(tr => tr.querySelector('.trh'))
+      .map(tr => {
       const t = tramoDelDia(deHora(tr.querySelector('.trh').value),
                             deHora(tr.querySelectorAll('.trh')[1].value), franja().h0);
       return { desde: t.desde, hasta: t.hasta,
