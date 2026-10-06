@@ -2798,7 +2798,6 @@ function barrasNecesidad(perfil, puesto) {
 
 function pintarNecesidad(box) {
   const ps = puestos();
-  box.innerHTML = '';
   if (!ps.length) { box.innerHTML = '<p class="vacio">Primero agrega tu equipo.</p>'; return; }
 
   ps.forEach(puesto => {
@@ -2923,6 +2922,7 @@ function pintarNecesidad(box) {
    puesto y la cuenta cae sola en la suma. Un solo dato, siempre en sintonia.
    Los tramos quedan para lo que no calza con ningun turno. */
 function pintarNecesidadBox(box, ps, ts) {
+  box.innerHTML = '';
   if (!ps.length || !ts.length) {
     box.innerHTML = '<p class="vacio">Primero agrega tu equipo y tus turnos.</p>';
     return;
