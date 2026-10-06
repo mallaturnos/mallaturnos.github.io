@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=73">
+<link rel="stylesheet" href="estilo.css?v=74">
 </head>
 <body>
 
@@ -310,7 +310,9 @@
       </div>
       <div class="card">
         <h2>Turnos del local</h2>
-        <p class="hint">Si el fin es menor que el inicio, se entiende que cruza la medianoche.</p>
+        <!-- El aviso de la medianoche vivia aca cuando las horas se editaban en esta
+             lista. Ahora se editan en el dialogo, que lo dice ahi mismo cuando pasa. -->
+        <p class="hint"><b>Aprieta un turno para abrirlo</b>: nombre, días, horas y quién lo trabaja.</p>
         <div id="eqTurnos"></div>
         <div class="acciones" style="margin-top:14px"><button class="act" id="btnTurno">Agregar turno</button></div>
         <label class="ctrl" style="margin-top:14px;display:flex;gap:8px;align-items:flex-start;max-width:60ch">
@@ -492,10 +494,89 @@
   </form>
 </dialog>
 
+<!-- ================= CREAR / EDITAR UN TURNO =================
+     Los tres pasos que describio Pedro: como se llama, cuando es, quien lo
+     trabaja. El tercero es el que hoy no existe en ningun sitio: para meter
+     gente a un turno hay que irse a la malla y ponerlos casilla por casilla.
+
+     El paso 2 va con CALENDARIO, no con botones Lun..Dom. Pedro lo pidio tres
+     veces y a la tercera quedo claro por que: lo que el marca es lo que queda
+     —un dia, ese dia— y la repeticion se OFRECE debajo, no se asume. De ahi
+     sale que «hasta cuando» solo aparezca si acepto repetir: no se puede
+     repetir para siempre lo que son cuatro fechas sueltas. -->
+<dialog id="dlgTN" class="dlg dlgancho">
+  <form method="dialog">
+    <h3 id="tnTit">Turno nuevo</h3>
+
+    <div class="tnpasos">
+      <section class="tnpaso">
+        <p class="tnnum">Paso 1</p><h4>¿Cómo se llama?</h4>
+        <p class="hint">Como lo nombran entre ustedes.</p>
+        <div class="fld"><label for="tnNombre">Nombre</label>
+          <input type="text" id="tnNombre" maxlength="40" placeholder="Cena" autocomplete="off"></div>
+        <div class="fld"><label for="tnCopiar">Copiar de</label><select id="tnCopiar"></select></div>
+        <div class="fld"><label for="tnPuesto">Puesto</label><select id="tnPuesto"></select></div>
+      </section>
+
+      <section class="tnpaso">
+        <p class="tnnum">Paso 2</p><h4>¿Cuándo es?</h4>
+        <p class="hint">Marca en el calendario los días que trabaja este turno.</p>
+        <div class="fld"><label for="tnRepite">Se repite</label>
+          <select id="tnRepite">
+            <option value="dias" selected>Por días de la semana</option>
+            <option value="ciclo" disabled>Por ciclo: 4×4, 7×7, 5×2… (pronto)</option>
+          </select></div>
+        <div id="tnCal" class="tncal"></div>
+        <div id="tnOferta" class="tnoferta" hidden></div>
+        <div class="fldrow">
+          <div class="fld"><label for="tnEntra">Entra</label>
+            <input type="text" id="tnEntra" class="hora" inputmode="numeric" maxlength="5"
+                   placeholder="18:00" autocomplete="off"></div>
+          <div class="fld"><label for="tnSale">Sale</label>
+            <input type="text" id="tnSale" class="hora" inputmode="numeric" maxlength="5"
+                   placeholder="01:00" autocomplete="off"></div>
+          <div class="fld"><label for="tnColacion">Colación</label>
+            <select id="tnColacion"></select></div>
+        </div>
+        <p class="hint" id="tnMedia" hidden>Cruza la medianoche: termina el día siguiente.</p>
+        <div class="fld" id="tnCajaHasta" hidden><label for="tnHasta">Hasta cuándo</label>
+          <select id="tnHasta"></select></div>
+        <p class="tnhoras" id="tnHoras"></p>
+      </section>
+
+      <section class="tnpaso">
+        <p class="tnnum">Paso 3</p><h4>¿Quién lo trabaja?</h4>
+        <p class="hint">Puedes dejarlo para después.</p>
+        <label class="tnrad"><input type="radio" name="tnQuien" value="nadie" checked>
+          <span><b>Nadie por ahora</b><i>Queda solo la plantilla. Repartes después.</i></span></label>
+        <label class="tnrad"><input type="radio" name="tnQuien" value="personas">
+          <span><b>Estas personas</b><i>Les queda puesto en la malla.</i></span></label>
+        <div class="tnlista" id="tnPersonas" hidden></div>
+        <label class="tnrad"><input type="radio" name="tnQuien" value="abierto">
+          <span><b>Dejarlo abierto</b><i>Sin dueño. Se lo queda el primero que lo tome desde su link.</i></span></label>
+        <div class="tnlista" id="tnCajaCupos" hidden>
+          <div class="fld"><label for="tnCupos">¿Cuántos cupos por día?</label>
+            <input type="number" id="tnCupos" class="n" min="1" max="20" value="1"></div>
+        </div>
+      </section>
+    </div>
+
+    <p class="msg" id="tnMsg"></p>
+    <div class="acciones dlgpie tnpie">
+      <p class="tnresumen" id="tnResumen"></p>
+      <div>
+        <button type="button" class="act" id="tnBorrar" hidden>Quitar el turno</button>
+        <button type="button" class="act" id="tnCancelar">Cancelar</button>
+        <button type="button" class="act primary" id="tnCrear">Crear el turno</button>
+      </div>
+    </div>
+  </form>
+</dialog>
+
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=71"></script>
-<script src="app.js?v=106"></script>
+<script src="app.js?v=107"></script>
 
 
 </body>

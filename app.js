@@ -2661,16 +2661,14 @@ function pintarMes() {
   pintarSeleccion();
 }
 
-async function nuevoTurnoRapido() {
-  const nombre = prompt('¿Cómo se llama el turno nuevo?\n\nPor ejemplo: Apertura, Tarde, Cierre.');
-  if (!nombre || !nombre.trim()) return;
-  try {
-    await DATOS.crearTurno(S.local.id, { nombre: nombre.trim(), inicio: 9, fin: 17, colacion: 0.5,
-                                         orden: S.turnos.length });
-    await refrescar();
-    verSub('nec');
-  } catch (e) { error(e); }
-}
+/* `nuevoTurnoRapido()` se borro el 06-10-2026. Era esto:
+
+     const nombre = prompt('¿Cómo se llama el turno nuevo?');
+     await DATOS.crearTurno(S.local.id, { nombre, inicio: 9, fin: 17, colacion: 0.5 });
+
+   Una ventanita del navegador que pedia SOLO el nombre y dejaba el turno de
+   9:00 a 17:00 todos los dias, para que despues uno fuera a Equipo a corregir
+   las horas en una fila de campos sueltos. Lo reemplaza `abrirTN()`. */
 
 /* ---------- llenar con datos de ejemplo ----------
    Pedro: «si quiero probar la plataforma tengo que gestionar a todo el
@@ -3112,41 +3110,38 @@ function pintarPuestos() {
   });
 }
 
+/* ---------- la lista de turnos del local ----------
+   Era una fila de CAMPOS SUELTOS por turno —nombre, entra, sale, colacion,
+   horas y «Quitar»— sin titulo ni jerarquia: cinco controles para algo que
+   mentalmente es una sola cosa. Y era el unico sitio donde se podia editar un
+   turno, cuando crearlos ya se hace en otra pantalla distinta.
+
+   Decision 5 de Pedro: **editar abre el mismo dialogo que crear**. Asi que esto
+   pasa a ser una LISTA en la que cada linea se abre, y la edicion vive en un
+   solo lugar. Los dias salen del patron guardado (`turnos.dias`), que hasta hoy
+   no se mostraba en ninguna parte aunque la columna existiera. */
 function pintarTurnos() {
-  const box = $('#eqTurnos'); box.innerHTML = '';
+  const box = $('#eqTurnos'); if (!box) return;
+  box.innerHTML = '';
+  if (!S.turnos.length) {
+    box.innerHTML = '<p class="vacio">Todavía no hay turnos. Crea el primero con el botón de abajo.</p>';
+    return;
+  }
+  const CORTOS = ['Lun','Mar','Mié','Jue','Vie','Sáb','Dom'];
   S.turnos.forEach(t => {
-    const row = el('div','rowline', `
-      ${filaCampo('Nombre','text',t.nombre,'data-k="nombre"')}
-      ${filaCampo('Entra','time',hhmm(t.inicio),'data-k="inicio"')}
-      ${filaCampo('Sale','time',hhmm(t.fin),'data-k="fin"')}
-      ${filaCampo('Colación (min)','number',Math.round(t.colacion*60),'data-k="colacion" class="n" min="0" max="120" step="15"')}
-      <div class="fld"><label>Horas</label><input type="text" value="${hfmt(horasDe(t))}" readonly tabindex="-1" class="n"></div>
-      <button class="mini" data-del="1">Quitar</button>`);
-    row.dataset.turno = t.id;    // para poder saltar aquí desde la dotación
-    box.appendChild(row);
-    let tm = null;
-    row.querySelectorAll('input[data-k]').forEach(inp => {
-      inp.addEventListener('input', () => {
-        clearTimeout(tm);
-        tm = setTimeout(async () => {
-          const k = inp.dataset.k; let campos = {};
-          if (k === 'nombre') campos.nombre = inp.value;
-          else if (k === 'colacion') campos.colacion = (Number(inp.value)||0)/60;
-          else {
-            const v = aDec(inp.value);
-            if (k === 'inicio') { campos.inicio = v; if (Number(t.fin) <= v) campos.fin = v + 8; }
-            else campos.fin = v <= Number(t.inicio) ? v + 24 : v;   // cruza la medianoche
-          }
-          try { Object.assign(t, await DATOS.guardarTurno(t.id, campos)); pintarTurnos(); pintarSemana(); }
-          catch (e) { error(e); }
-        }, 600);
-      });
-    });
-    row.querySelector('[data-del]').addEventListener('click', async () => {
-      if (S.turnos.length <= 1) return alert('Tiene que quedar al menos un turno.');
-      if (!confirm('¿Quitar el turno "' + t.nombre + '"?')) return;
-      try { await DATOS.quitarTurno(t.id); await refrescar(); } catch (e) { error(e); }
-    });
+    const dias = String(t.dias == null ? '' : t.dias);
+    const cuando = !dias ? 'sin días fijos'
+      : dias.length === 7 ? 'todos los días'
+      : dias.split('').map(d => CORTOS[Number(d)]).join(' · ');
+    const fila = el('button', 'tnfila');
+    fila.type = 'button';
+    fila.dataset.turno = t.id;
+    fila.innerHTML = `<span class="tnf-nom">${esc(t.nombre)}</span>`
+      + `<span class="tnf-hor">${hhmm(t.inicio)}–${hhmm(t.fin)}</span>`
+      + `<span class="tnf-dias">${esc(cuando)}</span>`
+      + `<span class="tnf-h">${hfmt(horasDe(t))} h</span>`;
+    fila.addEventListener('click', () => abrirTN(t));
+    box.appendChild(fila);
   });
 }
 
@@ -3821,7 +3816,7 @@ function pintarNecesidadPorTurno(box, ps, ts) {
   // va aparte y abajo, no mezclado con los «+ linea» de cada puesto.
   const pie = el('p', 'hint', '');
   const b = el('button', 'act', '+ turno nuevo del local');
-  b.addEventListener('click', () => nuevoTurnoRapido());
+  b.addEventListener('click', () => abrirTN(null));
   pie.appendChild(b);
   box.appendChild(pie);
 }
@@ -4659,6 +4654,401 @@ function opcionesModelo() {
   };
 }
 
+
+/* ================= CREAR Y EDITAR UN TURNO =================
+   Los tres pasos que describio Pedro (msgs 4360-4361): como se llama, cuando
+   es, quien lo trabaja. El tercero es el que HOY NO EXISTE: para meter gente a
+   un turno hay que irse a la malla y ponerlos casilla por casilla.
+
+   Reemplaza a `nuevoTurnoRapido()`, que era un `prompt()` pidiendo solo el
+   nombre y dejaba el turno de 9:00 a 17:00 todos los dias.
+
+   LA DECISION QUE COSTO TRES RONDAS. El paso 2 va con calendario, no con
+   botones Lun..Dom. Yo proponia los botones porque un calendario de octubre no
+   puede decir «la Cena existe los jueves, para siempre»; Pedro pidio el
+   calendario tres veces, y a la tercera quedo claro que el que no entendia era
+   yo. Lo que el quiere es literal:
+
+     «si marco un dia, es solo ese dia, si marco dos, son esos dos»
+
+   Asi que **lo que se marca es lo que queda**, y la repeticion se OFRECE
+   debajo en vez de asumirse. Es lo que de verdad hace Google Calendar, que era
+   lo que el tenia en la cabeza: eliges un dia y DESPUES decides si se repite.
+
+   De ahi sale una regla que no estaba escrita en ninguna parte: **«hasta
+   cuando» —indefinido incluido— solo existe si se acepto la repeticion.** No
+   se puede repetir para siempre lo que son cuatro fechas sueltas. */
+
+const TN = { turno: null, mes: null, dias: new Set(), patron: null };
+
+const COLACIONES = [0, 15, 30, 45, 60];
+const HASTAS = [
+  ['1',  'Solo esta semana'],
+  ['2',  '2 semanas'],
+  ['4',  '4 semanas'],
+  ['inf', 'Indefinido'],
+];
+// Cuantas semanas se escriben por adelantado cuando el turno es indefinido.
+// Es la opcion «A» que eligio Pedro: materializar un horizonte y estirarlo
+// solo, en vez de que la malla calcule turnos al vuelo. Se puede cambiar a la
+// «B» por dentro sin que el usuario vea nada distinto.
+const HORIZONTE_SEMANAS = 8;
+
+const dowDe = f => (new Date(f + 'T00:00:00').getDay() + 6) % 7;   // 0 = lunes
+
+/* Que dias de la semana salen de lo marcado. Devuelve los dow ordenados, sin
+   repetir. No decide nada: solo describe, para poder OFRECER la repeticion. */
+function patronDeDias(dias) {
+  return [...new Set([...dias].map(dowDe))].sort((a, b) => a - b);
+}
+
+function nombraDias(dows) {
+  const LARGOS = ['lunes','martes','miércoles','jueves','viernes','sábado','domingo'];
+  const n = dows.map(d => LARGOS[d]);
+  if (n.length === 1) return n[0];
+  return n.slice(0, -1).join(', ') + ' y ' + n[n.length - 1];
+}
+
+function abrirTN(turno) {
+  TN.turno = turno || null;
+  TN.mes = new Date(S.lunes.getFullYear(), S.lunes.getMonth(), 1);
+  TN.dias = new Set();
+  TN.patron = null;
+
+  $('#tnTit').textContent = turno ? 'Editar el turno' : 'Turno nuevo';
+  $('#tnCrear').textContent = turno ? 'Guardar' : 'Crear el turno';
+  $('#tnBorrar').hidden = !turno;
+  $('#tnMsg').textContent = ''; $('#tnMsg').className = 'msg';
+
+  // Al editar, el patron guardado se carga y se ve como eco en el calendario.
+  // No se marcan dias concretos: el turno no vive en fechas, vive en el patron.
+  if (turno && turno.dias) TN.patron = String(turno.dias).split('').map(Number);
+
+  $('#tnNombre').value = turno ? turno.nombre : '';
+  $('#tnEntra').value  = turno ? hhmm(turno.inicio) : '';
+  $('#tnSale').value   = turno ? hhmm(turno.fin) : '';
+
+  // «Copiar de»: solo al crear. Editar un turno copiando otro encima es un
+  // caso que nadie pidio y que se presta a pisar sin querer.
+  $('#tnCopiar').innerHTML = '<option value="">— empezar en blanco —</option>'
+    + S.turnos.filter(t => !turno || t.id !== turno.id)
+        .map(t => `<option value="${t.id}">${esc(t.nombre)} · ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
+  $('#tnCopiar').closest('.fld').hidden = !!turno || !S.turnos.length;
+
+  $('#tnPuesto').innerHTML = '<option value="">— cualquiera —</option>'
+    + puestosConocidos().sort().map(q => `<option value="${esc(q)}">${esc(q)}</option>`).join('');
+
+  $('#tnColacion').innerHTML = COLACIONES.map(m =>
+    `<option value="${m}"${turno && Math.round(turno.colacion * 60) === m ? ' selected' : ''}>${m} min</option>`).join('');
+  if (!turno) $('#tnColacion').value = '30';
+
+  $('#tnHasta').innerHTML = HASTAS.map(([v, t]) => `<option value="${v}">${t}</option>`).join('');
+  $('#tnHasta').value = 'inf';
+  $('#tnCajaHasta').hidden = true;
+
+  $('#tnPersonas').innerHTML = S.personas.map(p =>
+    `<label class="tnper"><input type="checkbox" data-pid="${p.id}">
+       <span>${esc(p.nombre.split(' ')[0])}</span><span class="av" data-av="${p.id}" hidden></span></label>`).join('')
+    || '<p class="hint">No hay nadie en el equipo todavía.</p>';
+  const rNadie = document.querySelector('input[name="tnQuien"][value="nadie"]');
+  if (rNadie) rNadie.checked = true;
+  $('#tnPersonas').hidden = true; $('#tnCajaCupos').hidden = true;
+  $('#tnCupos').value = '1';
+
+  pintarTNCal(); pintarTNHoras(); pintarTNResumen();
+  $('#dlgTN').showModal();
+  $('#tnNombre').focus();
+}
+
+function pintarTNCal() {
+  const caja = $('#tnCal'); if (!caja) return;
+  const a = TN.mes.getFullYear(), m = TN.mes.getMonth();
+  const primero = new Date(a, m, 1), ultimo = new Date(a, m + 1, 0);
+  const hoy = iso(new Date());
+  const hueco = (primero.getDay() + 6) % 7;
+
+  let celdas = '';
+  for (let i = 0; i < hueco; i++) celdas += '<td class="vacio"></td>';
+  for (let d = 1; d <= ultimo.getDate(); d++) {
+    const f = iso(new Date(a, m, d));
+    const marcado = TN.dias.has(f);
+    // El eco: cae en el patron aceptado pero no lo marco el. Es lo que deja VER
+    // que entendio la pantalla, sin tener que creerle a la frase de abajo.
+    const eco = !marcado && TN.patron && TN.patron.includes(dowDe(f));
+    celdas += `<td><button type="button" data-f="${f}"
+      class="${marcado ? 'on' : eco ? 'eco' : ''}${f === hoy ? ' hoy' : ''}">${d}</button></td>`;
+    if ((hueco + d) % 7 === 0) celdas += '</tr><tr>';
+  }
+
+  caja.innerHTML =
+      `<div class="cab"><button type="button" data-mes="-1" aria-label="Mes anterior">‹</button>`
+    + `<span>${primero.toLocaleDateString('es-CL', { month: 'long', year: 'numeric' })}</span>`
+    + `<button type="button" data-mes="1" aria-label="Mes siguiente">›</button></div>`
+    + '<table><tr><th>L</th><th>M</th><th>M</th><th>J</th><th>V</th><th>S</th><th>D</th></tr><tr>'
+    + celdas + '</tr></table>';
+  pintarTNOferta();
+}
+
+/* La oferta. NO asume el patron: lo propone. Si no se acepta, el turno existe
+   solo los dias marcados. Era al reves en mi primera maqueta y Pedro lo
+   corrigio: «si marco un dia, es solo ese dia». */
+function pintarTNOferta() {
+  const caja = $('#tnOferta'); if (!caja) return;
+  const n = TN.dias.size;
+  if (!n && !TN.patron) { caja.hidden = true; $('#tnCajaHasta').hidden = true; return; }
+  caja.hidden = false;
+
+  if (TN.patron) {
+    caja.innerHTML = `<p>Se repite <b>cada semana</b>: ${esc(nombraDias(TN.patron))}.</p>`
+      + `<div class="acciones"><button type="button" class="act" data-tn="norepetir">`
+      + `No, solo los días que marqué</button></div>`;
+    $('#tnCajaHasta').hidden = false;
+    return;
+  }
+  const dows = patronDeDias(TN.dias);
+  caja.innerHTML = `<p>Marcaste <b>${n}</b> ${n === 1 ? 'día' : 'días'}`
+    + ` · ${esc(nombraDias(dows))}.</p>`
+    + `<div class="acciones"><button type="button" class="act" data-tn="repetir">`
+    + `¿Que se repita cada semana?</button></div>`;
+  $('#tnCajaHasta').hidden = true;
+}
+
+function duraTN() {
+  const i = aDec($('#tnEntra').value), f0 = aDec($('#tnSale').value);
+  if (!$('#tnEntra').value || !$('#tnSale').value) return null;
+  const f = f0 <= i ? f0 + 24 : f0;
+  const col = (Number($('#tnColacion').value) || 0) / 60;
+  return { inicio: i, fin: f, colacion: col, horas: f - i - col, cruza: f0 <= i };
+}
+
+function pintarTNHoras() {
+  const d = duraTN();
+  $('#tnMedia').hidden = !(d && d.cruza);
+  $('#tnHoras').textContent = d && d.horas > 0 ? hfmt(d.horas) + ' h por turno' : '';
+  pintarTNAvisos();
+}
+
+/* El aviso de «ya tiene turno ese dia» va AL LADO DEL NOMBRE y mientras eliges,
+   no al final. Avisar despues de apretar Crear obliga a deshacer el camino.
+   Es la decision 3, y es la que respeta el principio de Pedro: avisar, nunca
+   bloquear — el turno partido existe y a veces es lo que quiere. */
+function pintarTNAvisos() {
+  const d = duraTN();
+  $('#tnPersonas').querySelectorAll('[data-av]').forEach(sp => {
+    const pid = sp.dataset.av;
+    let choque = null;
+    if (d) for (const f of TN.dias) {
+      const c = chocaCon(pid, f, d.inicio, d.fin);
+      if (c) { choque = { f, c }; break; }
+    }
+    sp.hidden = !choque;
+    if (choque) sp.textContent = `ya tiene ${hhmm(choque.c.inicio)}–${hhmm(choque.c.fin)} el ${ddmm(choque.f)}`;
+  });
+}
+
+function quienTN() {
+  const r = document.querySelector('input[name="tnQuien"]:checked');
+  return r ? r.value : 'nadie';
+}
+
+function pintarTNResumen() {
+  const d = duraTN();
+  const n = TN.dias.size;
+  const q = quienTN();
+  const marcados = [...$('#tnPersonas').querySelectorAll('input[data-pid]:checked')].length;
+  const hasta = $('#tnCajaHasta').hidden ? null : $('#tnHasta').value;
+
+  if (!n && !TN.patron) {
+    $('#tnResumen').innerHTML = 'Marca en el calendario los días que trabaja este turno.'; return; }
+  const partes = [];
+  partes.push(TN.patron ? `<b>${esc(nombraDias(TN.patron))}</b> de cada semana`
+                        : `<b>${n}</b> ${n === 1 ? 'día' : 'días'} marcados`);
+  if (d && d.horas > 0) partes.push(`<b>${hhmm(d.inicio)}–${hhmm(d.fin)}</b>, ${hfmt(d.horas)} h`);
+  if (hasta === 'inf') partes.push('<b>indefinido</b>');
+  else if (hasta) partes.push(`<b>${hasta}</b> ${hasta === '1' ? 'semana' : 'semanas'}`);
+  if (q === 'personas') partes.push(marcados ? `para <b>${marcados}</b> ${marcados === 1 ? 'persona' : 'personas'}`
+                                             : 'sin nadie marcado todavía');
+  if (q === 'abierto') partes.push(`<b>${$('#tnCupos').value}</b> cupos abiertos por día`);
+  $('#tnResumen').innerHTML = partes.join(' · ') + '.';
+}
+
+
+/* ---------- las fechas que se van a escribir ----------
+   Sin patron: exactamente lo que marco, ni un dia mas. Es lo que pidio Pedro
+   —«si marco un dia, es solo ese dia»— y por eso aqui no hay nada mas que
+   devolver lo marcado.
+
+   Con patron: desde el lunes de la semana del primer dia marcado, tantas
+   semanas como diga «hasta cuando». «Indefinido» escribe HORIZONTE_SEMANAS y
+   se estira solo mas adelante: es la opcion A que eligio Pedro, y la eleccion
+   se puede cambiar por dentro sin que el usuario vea nada distinto. */
+function fechasTN() {
+  if (!TN.patron) return [...TN.dias].sort();
+  const marcados = [...TN.dias].sort();
+  const base = marcados.length ? new Date(marcados[0] + 'T00:00:00') : new Date(S.lunes);
+  const lunes = lunesDe(base);
+  const v = $('#tnHasta').value;
+  const semanas = v === 'inf' ? HORIZONTE_SEMANAS : (Number(v) || 1);
+  const out = [];
+  for (let w = 0; w < semanas; w++)
+    TN.patron.forEach(dow => out.push(iso(masDias(lunes, w * 7 + dow))));
+  // Lo marcado a mano entra siempre, aunque caiga fuera de la ventana: el
+  // usuario lo toco a proposito y pisarselo seria lo contrario del principio.
+  marcados.forEach(f => { if (!out.includes(f)) out.push(f); });
+  return [...new Set(out)].sort();
+}
+
+async function guardarTN() {
+  const m = $('#tnMsg');
+  const aviso = (t, c) => { m.textContent = t; m.className = 'msg ' + (c || ''); };
+  const nombre = $('#tnNombre').value.trim();
+  if (!nombre) return aviso('Ponle un nombre al turno.', 'bad');
+  const d = duraTN();
+  if (!d) return aviso('Faltan las horas: a qué hora entra y a qué hora sale.', 'bad');
+  if (d.horas <= 0) return aviso('La colación se come el turno entero.', 'bad');
+
+  const quien = quienTN();
+  const personas = [...$('#tnPersonas').querySelectorAll('input[data-pid]:checked')]
+                     .map(x => x.dataset.pid);
+  if (quien === 'personas' && !personas.length)
+    return aviso('Marca a quién le toca, o elige «Nadie por ahora».', 'bad');
+  const cupos = Math.max(1, Number($('#tnCupos').value) || 1);
+
+  const fechas = fechasTN();
+  if (quien !== 'nadie' && !fechas.length)
+    return aviso('Marca en el calendario qué días trabaja este turno.', 'bad');
+
+  const campos = { nombre, inicio: d.inicio, fin: d.fin, colacion: d.colacion,
+                   dias: TN.patron ? TN.patron.join('') : '' };
+  const puesto = $('#tnPuesto').value;
+
+  $('#tnCrear').disabled = true;
+  aviso('Guardando…');
+  try {
+    // 1. el turno (la plantilla)
+    let turno;
+    if (TN.turno) turno = Object.assign(TN.turno, await DATOS.guardarTurno(TN.turno.id, campos));
+    else turno = await DATOS.crearTurno(S.local.id,
+                   Object.assign({ orden: S.turnos.length }, campos));
+
+    // 2. lo que va a la malla. La foto para Deshacer se toma DE LA BASE y sobre
+    //    todo el rango: las semanas de mas alla no estan cargadas en `S.asign`,
+    //    asi que `recordar()` guardaria una foto vacia y deshacer BORRARIA lo
+    //    que hubiera ahi. Es el mismo golpe que ya se arreglo hoy en «aplicar
+    //    un modelo».
+    let creados = 0, saltados = 0;
+    if (quien !== 'nadie' && fechas.length) {
+      await recordarDeLaBase('crear el turno ' + nombre, fechas[0], fechas[fechas.length - 1]);
+      const filas = [];
+      fechas.forEach(f => {
+        const base = { fecha: f, turno_id: turno.id, inicio: d.inicio, fin: d.fin,
+                       colacion: d.colacion, puesto, nota: '' };
+        if (quien === 'abierto') {
+          for (let i = 0; i < cupos; i++) filas.push(Object.assign({ persona_id: null }, base));
+        } else {
+          personas.forEach(pid => {
+            // Las ausencias no se pisan: es la misma regla que en copiar/pegar.
+            if (ausenciaDe(pid, f)) { saltados++; return; }
+            filas.push(Object.assign({ persona_id: pid }, base));
+          });
+        }
+      });
+      if (filas.length) await DATOS.crearAsignacionesLote(S.local.id, filas);
+      creados = filas.length;
+    }
+
+    await refrescar();
+    $('#dlgTN').close();
+    const ms = $('#msgSem');
+    if (ms) {
+      ms.textContent = TN.turno
+        ? `Turno «${nombre}» guardado.`
+        : `Turno «${nombre}» creado`
+          + (creados ? ` · ${creados} ${creados === 1 ? 'turno puesto' : 'turnos puestos'} en la malla` : '')
+          + (saltados ? ` · ${saltados} saltados por ausencia` : '')
+          + (creados ? '. Si fue sin querer, aprieta Deshacer.' : '.');
+      ms.className = 'msg ok';
+      setTimeout(() => { const x = $('#msgSem'); if (x) x.textContent = ''; }, 8000);
+    }
+  } catch (e) {
+    aviso(e.message, 'bad');
+  } finally { $('#tnCrear').disabled = false; }
+}
+
+async function borrarTN() {
+  if (!TN.turno) return;
+  const usados = Object.values(S.asign).flat().filter(a => a.turno_id === TN.turno.id).length;
+  if (!confirm(`¿Quitar el turno «${TN.turno.nombre}»?\n\n`
+    + (usados ? `Hay ${usados} ${usados === 1 ? 'turno puesto' : 'turnos puestos'} en la malla que `
+              + 'salieron de él. NO se borran: se quedan con sus horas, solo pierden el nombre.\n\n'
+              : '')
+    + 'Esto no se puede deshacer.')) return;
+  try {
+    await DATOS.quitarTurno(TN.turno.id);
+    await refrescar();
+    $('#dlgTN').close();
+  } catch (e) { $('#tnMsg').textContent = e.message; $('#tnMsg').className = 'msg bad'; }
+}
+
+function conectarTN() {
+  const dlg = $('#dlgTN'); if (!dlg || dlg.dataset.listo) return;
+  dlg.dataset.listo = '1';
+
+  // Un solo escuchador para el calendario: se repinta entero en cada cambio.
+  $('#tnCal').addEventListener('click', ev => {
+    const mes = ev.target.closest('button[data-mes]');
+    if (mes) {
+      TN.mes = new Date(TN.mes.getFullYear(), TN.mes.getMonth() + Number(mes.dataset.mes), 1);
+      return pintarTNCal();
+    }
+    const b = ev.target.closest('button[data-f]'); if (!b) return;
+    const f = b.dataset.f;
+    if (TN.dias.has(f)) TN.dias.delete(f); else TN.dias.add(f);
+    // Cambiar lo marcado invalida un patron ya aceptado: lo que manda es lo que
+    // el marco, asi que se vuelve a ofrecer sobre lo nuevo.
+    TN.patron = null;
+    pintarTNCal(); pintarTNAvisos(); pintarTNResumen();
+  });
+
+  $('#tnOferta').addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-tn]'); if (!b) return;
+    TN.patron = b.dataset.tn === 'repetir' ? patronDeDias(TN.dias) : null;
+    pintarTNCal(); pintarTNResumen();
+  });
+
+  ['#tnEntra', '#tnSale'].forEach(sel => on(sel, 'input', pintarTNHoras));
+  ['#tnEntra', '#tnSale'].forEach(sel => on(sel, 'blur', () => {
+    const e = $(sel); e.value = normalizarHora(e.value); pintarTNHoras(); pintarTNResumen();
+  }));
+  on('#tnColacion', 'change', () => { pintarTNHoras(); pintarTNResumen(); });
+  on('#tnHasta', 'change', pintarTNResumen);
+  on('#tnCupos', 'input', pintarTNResumen);
+
+  // Copiar de otro turno: trae horas, colacion y puesto. NO trae los dias:
+  // el calendario es de este turno y copiar fechas de otro no significa nada.
+  on('#tnCopiar', 'change', () => {
+    const t = turnoDe($('#tnCopiar').value); if (!t) return;
+    $('#tnEntra').value = hhmm(t.inicio);
+    $('#tnSale').value  = hhmm(t.fin);
+    $('#tnColacion').value = String(Math.round((t.colacion || 0) * 60));
+    if (!$('#tnNombre').value.trim()) $('#tnNombre').value = t.nombre + ' (copia)';
+    pintarTNHoras(); pintarTNResumen();
+  });
+
+  document.querySelectorAll('input[name="tnQuien"]').forEach(r =>
+    r.addEventListener('change', () => {
+      const q = quienTN();
+      $('#tnPersonas').hidden   = q !== 'personas';
+      $('#tnCajaCupos').hidden  = q !== 'abierto';
+      pintarTNResumen();
+    }));
+  $('#tnPersonas').addEventListener('change', pintarTNResumen);
+
+  on('#tnCancelar', 'click', () => $('#dlgTN').close());
+  on('#tnCrear', 'click', guardarTN);
+  on('#tnBorrar', 'click', borrarTN);
+}
+
 function conectarApp() {
   // Pestañas. Se filtran las que existen de verdad: al sacar «Turnos abiertos»
   // esta lista quedó nombrando una que ya no está, y como aquí se llamaba a
@@ -5145,6 +5535,7 @@ function conectarApp() {
     setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerDot', 'click', deshacerDot);
+  conectarTN();
 
   // sacar a todo el equipo de la lista. No borra: los deja inactivos, igual que
   // el Quitar de cada fila, asi que sus turnos y sus marcas quedan intactos.
@@ -5351,10 +5742,10 @@ function conectarApp() {
       mostrarRecien();
     } catch (e) { error(e); }
   });
-  on('#btnTurno', 'click', async () => {
-    try { await DATOS.crearTurno(S.local.id, { nombre:'Turno '+(S.turnos.length+1), inicio:9, fin:17,
-            colacion:0.5, orden:S.turnos.length+1 }); await refrescar(); } catch (e) { error(e); }
-  });
+  // Antes creaba «Turno 4» de 9:00 a 17:00 sin preguntar nada y te dejaba
+  // corrigiendo campos sueltos. Es la decision 6: el mismo boton en los dos
+  // sitios donde uno lo busca, Equipo y «Cuanta gente necesito».
+  on('#btnTurno', 'click', () => abrirTN(null));
   on('#bloqTope', 'change', async ev => {
     try { S.local = await DATOS.guardarLocal(S.local.id, { bloquear_sobre_tope: ev.target.checked }); }
     catch (e) { error(e); }
