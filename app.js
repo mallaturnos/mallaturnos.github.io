@@ -841,9 +841,18 @@ async function guardarDlg() {
   if (esAus) {
     if (!p) { m.textContent = 'Una ausencia es de alguien: elige la persona.'; m.className = 'msg bad'; return; }
     recordar('la ausencia de ' + p.nombre + ' del ' + ddmm(fecha));
+    // Poner una ausencia BORRA los turnos de ese dia: una ausencia es una por
+    // dia y manda sobre lo planificado. Deshacer lo repone —`recordar()` esta
+    // arriba— pero hasta el 06-10 no se decia NADA, y los turnos desaparecian
+    // en silencio. Decir lo que se hizo es la mitad del principio que fijo
+    // Pedro ese dia: la app puede actuar, pero no a escondidas.
+    const seVan = turnosDe(p.id, fecha).length;
     try {
       await DATOS.ponerAusencia(S.local.id, p.id, fecha, $('#dAusencia').value);
       await refrescar();
+      if (seVan) decir(`Se ${seVan === 1 ? 'quitó 1 turno' : 'quitaron ' + seVan + ' turnos'}`
+        + ` de ${p.nombre.split(' ')[0]} el ${ddmm(fecha)}: una ausencia manda sobre lo planificado.`
+        + ' Si fue sin querer, aprieta Deshacer.', 'ok');
     // Con choques el diálogo se queda abierto: el aviso hay que leerlo, y
     // cerrarlo lo haría desaparecer junto con la explicación.
     if (!(m.className || '').includes('bad') && !m.textContent.includes('se pisaban')
