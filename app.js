@@ -253,17 +253,31 @@ const necesita = (perfil, puesto, turnoId) => ((S.dotacion[perfil] || {})[puesto
    Mientras no se aplique `arreglo-tramos.sql` no hay tramos, y entonces se
    deduce de la dotacion vieja sumando los turnos que pasan por esa hora: es
    como se leia hasta hoy, asi que la pantalla no cambia de un dia para otro. */
+/* ¿El bloque [ini, fin) cubre algo de la hora h? UNA sola implementación, y
+   por un motivo concreto: había OCHO copias de esta prueba escritas como
+   `ini <= h && h < fin`, y esa versión **se come la primera media hora y regala
+   la última**. Un turno de 20:30 a 01:00 no contaba la hora 20 —porque 20,5 no
+   es <= 20— pero uno que termina a las 16:30 sí contaba la hora 16 entera. Lo
+   vio Pedro: «toma el turno de cena y baja en otro horario» (msg 4158).
+
+   Peor: el SQL de la migración usaba `hora >= floor(inicio)`, que SÍ es la
+   prueba de solape. O sea que la base y la pantalla contaban distinto.
+
+   La prueba correcta es la de solape de intervalos, y trata los dos extremos
+   igual: la hora h va de h a h+1, así que hay solape si `ini < h+1` y `h < fin`. */
+const cubreHora = (ini, fin, h) => Number(ini) < h + 1 && h < Number(fin);
+
 function necesitaHora(perfil, puesto, h) {
   const lista = (S.tramos[perfil] || {})[puesto];
   if (lista && lista.length) {
     let n = 0;
     lista.forEach(t => {
-      if (Number(t.desde) <= h && h < Number(t.hasta)) n = Math.max(n, Number(t.cantidad) || 0);
+      if (cubreHora(t.desde, t.hasta, h)) n = Math.max(n, Number(t.cantidad) || 0);
     });
     return n;
   }
   return S.turnos.reduce((n, t) =>
-    n + ((Number(t.inicio) <= h && h < Number(t.fin)) ? necesita(perfil, puesto, t.id) : 0), 0);
+    n + (cubreHora(t.inicio, t.fin, h) ? necesita(perfil, puesto, t.id) : 0), 0);
 }
 const hayTramos = () => Object.keys(S.tramos || {}).length > 0;
 
@@ -284,7 +298,7 @@ const asignados = (fecha, turnoId, puesto) => {
 // `necesitaHora`: los dos miran la hora, no el turno, que es lo unico que no
 // miente cuando los turnos se pisan.
 const asignadosHora = (fecha, puesto, h) => S.personas.reduce((n, p) =>
-  n + (turnosDe(p.id, fecha).some(a => Number(a.inicio) <= h && h < Number(a.fin)
+  n + (turnosDe(p.id, fecha).some(a => cubreHora(a.inicio, a.fin, h)
        && (!puesto || puestoRot(a, p) === puesto)) ? 1 : 0), 0);
 
 // Dos bloques se pisan si comparten aunque sea un minuto. Se compara por horas
@@ -1346,7 +1360,7 @@ function necesidadPorHora(fe) {
     // Cuenta PERSONAS. Un turno sin dueño esta planificado pero no hay nadie,
     // que es justamente el hueco que esta pantalla tiene que mostrar.
     const hay = S.personas.reduce((n, p) => n + (turnosDe(p.id, fe).some(a =>
-      Number(a.inicio) <= h && h < Number(a.fin)) ? 1 : 0), 0);
+      cubreHora(a.inicio, a.fin, h)) ? 1 : 0), 0);
     horas.push({ h, req, hay });
   }
   return horas;
@@ -2528,12 +2542,12 @@ function proponer(ent) {
     if (lista.length) {
       let n = 0;
       lista.forEach(t => {
-        if (Number(t.desde) <= h && h < Number(t.hasta)) n = Math.max(n, Number(t.cantidad) || 0);
+        if (cubreHora(t.desde, t.hasta, h)) n = Math.max(n, Number(t.cantidad) || 0);
       });
       return n;
     }
     return turnos.reduce((n, t) =>
-      n + ((Number(t.inicio) <= h && h < Number(t.fin))
+      n + (cubreHora(t.inicio, t.fin, h)
         ? ((((dot[String(d)] || {})[puesto] || {})[t.id]) || 0) : 0), 0);
   };
 
@@ -2550,11 +2564,11 @@ function proponer(ent) {
     let n = 0;
     ent.personas.forEach(p => {
       if ((est[p.id].bloques[fe] || []).some(b =>
-        b.inicio <= h && h < b.fin && norm(b.puesto) === norm(puesto))) n++;
+        cubreHora(b.inicio, b.fin, h) && norm(b.puesto) === norm(puesto))) n++;
     });
     (ent.sinDueno || []).forEach(a => {
       if (a.fecha === fe && norm(a.puesto) === norm(puesto)
-        && Number(a.inicio) <= h && h < Number(a.fin)) n++;
+        && cubreHora(a.inicio, a.fin, h)) n++;
     });
     return n;
   };
@@ -2922,12 +2936,18 @@ function pintarNecesidadPorTurno(box, ps, ts) {
         <td><button type="button" class="act ntx" title="Quitar esta línea">quitar</button></td>
       </tr>`).join('');
     const q = puestoCat(puesto);
+    const lleno = usados.length >= ts.length;
+    const btnMas = `<button type="button" class="act ntmas"${lleno
+      ? ' disabled title="Ya están todos los turnos de este puesto"' : ''}>+ turno</button>`;
+    // La fila del «+ turno» cierra la tabla y deja el boton justo bajo los
+    // «quitar». Si ya estan todos los turnos puestos no se dibuja: un boton
+    // apagado al final de la lista se lee como una fila rota.
+    const filaMas = lleno ? '' :
+      `<tr class="ntmasfila"><td></td><td></td><td>${btnMas}</td></tr>`;
     const caja = el('div', 'trpuesto', `
-      <div class="trtit"><b>${esc(puesto)}</b>
-        <button type="button" class="act ntmas"${usados.length >= ts.length
-          ? ' disabled title="Ya están todos los turnos de este puesto"' : ''}>+ turno</button></div>
-      ${usados.length ? `<table class="tramos nt"><tbody>${filas}</tbody></table>`
-        : '<p class="hint">Este día no se pide a nadie de este puesto. Agrega un turno.</p>'}
+      <div class="trtit"><b>${esc(puesto)}</b></div>
+      ${usados.length ? `<table class="tramos nt"><tbody>${filas}${filaMas}</tbody></table>`
+        : `<p class="hint">Este día no se pide a nadie de este puesto.</p>${btnMas}`}
       ${usados.length ? barrasNecesidad(S.cobDia, puesto) : ''}`);
     box.appendChild(caja);
     if (q) caja.querySelector('.trtit b').dataset.puesto = q.id;
@@ -2979,7 +2999,8 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     caja.querySelectorAll('.ntx').forEach(b => b.addEventListener('click', () =>
       poner(b.closest('tr').dataset.t, 0, 'quitar una línea')));
 
-    caja.querySelector('.ntmas').addEventListener('click', () => {
+    const mas = caja.querySelector('.ntmas');
+    if (mas) mas.addEventListener('click', () => {
       // El primer turno que este puesto todavia no usa, con 1 persona: es lo
       // que uno quiere casi siempre, y si no, se cambia en el desplegable.
       const libre = ts.find(t => !usados.some(u => u.id === t.id));

@@ -728,6 +728,13 @@ table.tramos.nt td:first-child{width:auto}
 /* El numero es de uno o dos digitos: con el ancho suelto se estiraba a 175 px
    y parecia un campo de texto. Visto al renderizar, no deducido. */
 table.tramos.nt .ntn{width:72px}
+/* La fila del «+ turno» no lleva el filete de separacion: no es una linea de
+   datos, es el final de la lista. */
+table.tramos.nt tr.ntmasfila td{border:0;padding-top:4px}
+/* El boton se partia en dos lineas («+ / turno») porque la celda mide 92 px.
+   Visto al renderizar. */
+table.tramos.nt .ntmas{white-space:nowrap}
+table.tramos.nt td:last-child{width:104px}
 table.tramos.nt td:nth-child(2){width:84px}
 table.tramos.nt td:last-child{width:92px}
 @media (max-width:640px){
