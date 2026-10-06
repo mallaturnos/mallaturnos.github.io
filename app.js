@@ -1064,6 +1064,8 @@ function pintarSemanaPorPuesto() {
     abrirTurno(null, cel.dataset.fecha, null, cel.dataset.puesto);
   };
   engancharArrastre($('#tablaSem'));
+  engancharSeleccion($('#tablaSem'));
+  pintarSeleccion();
   pintarResumenSemana();
 }
 
@@ -1238,36 +1240,64 @@ function engancharArrastre(tabla) {
    abre el dialogo, asi que no hay gesto libre que tomar. */
 
 const SEL = { claves: new Set(), ancla: null, pintando: false, suma: false,
-              rellenando: null };
+              rellenando: null, arrastro: false, tragarClic: false };
 let PORTA = null;   // lo copiado: { ancho, alto, celdas: [[ [turnos...] ]] }
 
-const claveCel = cel => (cel.dataset.p || '') + '|' + cel.dataset.fecha;
+/* La clave lleva de que TIPO de casilla es, y no solo a que apunta. Las tres
+   rejillas se parecen —persona x dia en Semana y en Mes, puesto x dia en
+   Puestos— y sin el prefijo, lo copiado en una vista se podria pegar en otra
+   donde significa algo distinto.
 
-/* La geometria se saca del DOM EN EL MOMENTO del gesto. Las filas de la malla
-   no son una grilla regular —hay titulos de grupo, la fila «Sin asignar» y el
-   pie— asi que numerar <tr> no sirve: se numeran solo las filas que TIENEN
-   casillas, que son las que se pueden seleccionar. */
+     p|<personaId>|<fecha>   Semana por personas, y el Mes (misma cosa)
+     q|<puesto>|<fecha>      Semana por puestos
+
+   El Mes no necesita tipo propio: su casilla es exactamente persona x dia. */
+function claveCel(cel) {
+  if ('puesto' in cel.dataset) return 'q|' + cel.dataset.puesto + '|' + cel.dataset.fecha;
+  return 'p|' + (cel.dataset.p || '') + '|' + cel.dataset.fecha;
+}
+const tipoClave = k => k.slice(0, 1);
+// La fecha es el ULTIMO trozo, no el tercero: un puesto puede llamarse «Barra|2».
+const parteClave = k => { const i = k.indexOf('|'), j = k.lastIndexOf('|');
+                          return { tipo: k.slice(0, i), que: k.slice(i + 1, j), fecha: k.slice(j + 1) }; };
+
+/* Cual es la rejilla que se esta viendo. Son tres y solo una esta visible:
+   el cuerpo de la semana —que sirve tanto para personas como para puestos— y
+   el del mes. El dia no es una rejilla: es una linea de tiempo. */
+function cuerpoVisible() {
+  if (S.modo === 'mes')    return $('#mesCuerpo');
+  if (S.modo === 'semana') return $('#semCuerpo');
+  return null;
+}
+const SELECTOR_CEL = 'td.cell[data-fecha], td.mcel[data-fecha]';
+
+/* La geometria se saca del DOM EN EL MOMENTO del gesto. Las filas no son una
+   grilla regular —hay titulos de grupo, la fila «Sin asignar» y el pie— asi
+   que numerar <tr> no sirve: se numeran solo las filas que TIENEN casillas. */
 function geometria() {
-  if (S.agrupar === 'puestos') return null;   // comparte #tablaSem, pero sus filas no son gente
-  const tabla = $('#tablaSem'); if (!tabla) return null;
-  const filas = [...tabla.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('td.cell[data-fecha]'));
+  const cuerpo = cuerpoVisible(); if (!cuerpo) return null;
+  const filas = [...cuerpo.querySelectorAll('tr')].filter(tr => tr.querySelector(SELECTOR_CEL));
   const mapa = new Map(); const rejilla = [];
-  filas.forEach((tr, f) => {
-    const cels = [...tr.querySelectorAll('td.cell[data-fecha]')];
+  filas.forEach(tr => {
+    const cels = [...tr.querySelectorAll(SELECTOR_CEL)];
+    if (!cels.length) return;
     rejilla.push(cels);
+    const f = rejilla.length - 1;
     cels.forEach((cel, c) => mapa.set(claveCel(cel), { f, c, cel }));
   });
   return { rejilla, mapa };
 }
 
 function pintarSeleccion() {
-  const tabla = $('#tablaSem'); if (!tabla) return;
-  tabla.querySelectorAll('td.cell.sel').forEach(x => x.classList.remove('sel', 'ancla'));
-  if (!SEL.claves.size) { avisarSeleccion(); pintarTirador(); return; }
-  tabla.querySelectorAll('td.cell[data-fecha]').forEach(cel => {
+  const cuerpo = cuerpoVisible();
+  // Se limpia en TODAS las rejillas, no solo en la visible: al cambiar de vista
+  // la otra se queda con casillas pintadas de verde que ya no estan marcadas.
+  document.querySelectorAll('td.sel').forEach(x => x.classList.remove('sel', 'ancla'));
+  if (!cuerpo || !SEL.claves.size) { avisarSeleccion(); pintarTirador(); return; }
+  cuerpo.querySelectorAll(SELECTOR_CEL).forEach(cel => {
     if (SEL.claves.has(claveCel(cel))) cel.classList.add('sel');
   });
-  const a = SEL.ancla && [...tabla.querySelectorAll('td.cell[data-fecha]')]
+  const a = SEL.ancla && [...cuerpo.querySelectorAll(SELECTOR_CEL)]
               .find(c => claveCel(c) === SEL.ancla);
   if (a) a.classList.add('ancla');
   avisarSeleccion();
@@ -1286,15 +1316,45 @@ function avisarSeleccion() {
   caja.innerHTML = `<b>${n}</b> ${n === 1 ? 'casilla' : 'casillas'}`
     + ` · <b>${turnos}</b> ${turnos === 1 ? 'turno' : 'turnos'}`
     + `<span>Ctrl+C copiar · Ctrl+V pegar · Supr borrar · Esc soltar</span>`
-    + (PORTA ? `<em>en el portapapeles: ${PORTA.alto}×${PORTA.ancho}`
-               + ` (${PORTA.celdas.flat().reduce((t,c)=>t+c.length,0)} turnos)</em>` : '');
+    + (PORTA ? (() => { const n = PORTA.celdas.flat().reduce((t,c)=>t+c.length,0);
+        return `<em>en el portapapeles: ${PORTA.alto}×${PORTA.ancho}`
+             + ` (${n} ${n === 1 ? 'turno' : 'turnos'})</em>`; })() : '');
 }
 
+/* Que turnos hay en una casilla. Depende del tipo: en la rejilla de personas
+   la casilla es «lo de Ana el lunes»; en la de puestos, «todo lo de Barra el
+   lunes», que puede ser de varias personas a la vez y tambien sin dueño. */
 function turnosDeClave(k) {
-  const [pid, fecha] = k.split('|');
-  if (!pid) return S.abiertos.filter(a => a.fecha === fecha && !a.persona_id);
-  if (ausenciaDe(pid, fecha)) return [];     // un dia de ausencia no se copia
-  return turnosDe(pid, fecha);
+  const { tipo, que, fecha } = parteClave(k);
+  if (tipo === 'q') {
+    const dentro = [];
+    S.personas.forEach(p => turnosDe(p.id, fecha).forEach(a => {
+      if (puestoRot(a, p) === que) dentro.push(a);
+    }));
+    S.abiertos.forEach(a => {
+      if (a.fecha === fecha && !a.persona_id && puestoRot(a, null) === que) dentro.push(a);
+    });
+    return dentro.sort((u, v) => Number(u.inicio) - Number(v.inicio));
+  }
+  if (!que) return S.abiertos.filter(a => a.fecha === fecha && !a.persona_id);
+  if (ausenciaDe(que, fecha)) return [];     // un dia de ausencia no se copia
+  return turnosDe(que, fecha);
+}
+
+/* Como nace un turno pegado en una casilla. La diferencia entre las dos
+   rejillas esta justo aca, y es la que Pedro describio: en la de PERSONAS
+   manda la fila —el turno pasa a ser de esa persona y conserva su puesto—; en
+   la de PUESTOS manda la columna de la izquierda —el turno pasa a ese puesto y
+   CONSERVA A SU PERSONA, o se queda sin asignar si no tenia—. */
+function nacerEn(k, t) {
+  const { tipo, que, fecha } = parteClave(k);
+  if (tipo === 'q') return { persona_id: t.persona_id || null, fecha,
+                             puesto: que === 'Sin puesto' ? '' : que,
+                             turno_id: t.turno_id || null, inicio: t.inicio, fin: t.fin,
+                             colacion: t.colacion || 0, nota: t.nota || '' };
+  return { persona_id: que || null, fecha, puesto: t.puesto || '',
+           turno_id: t.turno_id || null, inicio: t.inicio, fin: t.fin,
+           colacion: t.colacion || 0, nota: t.nota || '' };
 }
 
 function seleccionar(cel, modo) {
@@ -1328,8 +1388,7 @@ function engancharSeleccion(tabla) {
 
   tabla.addEventListener('mousedown', ev => {
     if (ev.button !== 0) return;              // el derecho es de la etapa 2
-    if (S.agrupar === 'puestos') return;
-    const cel = ev.target.closest('td.cell[data-fecha]'); if (!cel) return;
+    const cel = ev.target.closest(SELECTOR_CEL); if (!cel) return;
     const enBloque = !!ev.target.closest('[data-asig]');
 
     if (ev.shiftKey) { ev.preventDefault(); return seleccionar(cel, 'rango'); }
@@ -1338,12 +1397,32 @@ function engancharSeleccion(tabla) {
     seleccionar(cel, 'uno');
     // Arrastrar desde un bloque ya significa MOVER el turno. Desde el resto de
     // la casilla —el «+ turno» incluido, que ocupa casi toda— pinta el rango.
-    if (!enBloque) SEL.pintando = true;
+    if (!enBloque) { SEL.pintando = true; SEL.arrastro = false; }
   });
+
+  /* Si hubo arrastre, el clic que viene despues NO llega a la casilla.
+     Sin esto, en la rejilla de PUESTOS y en el MES —donde apretar el hueco ya
+     abre el dialogo de crear— marcar un rango te abria una ventana al soltar.
+     Va en fase de captura para adelantarse a los escuchadores de la tabla.
+
+     El permiso lo arma el `mouseup` y se desarma SOLO (ver mas abajo). La
+     primera version usaba la bandera del arrastre directamente y se quedaba
+     armada cuando el clic no llegaba —soltar fuera de la tabla, o arrastrar el
+     tirador—: el siguiente clic en un turno no abria el dialogo. Lo cazo la
+     prueba de que el clic sigue funcionando, que para eso esta. */
+  tabla.addEventListener('click', ev => {
+    if (!SEL.tragarClic) return;
+    SEL.tragarClic = false;
+    ev.preventDefault(); ev.stopPropagation();
+  }, true);
 
   tabla.addEventListener('mouseover', ev => {
     if (!SEL.pintando && !SEL.rellenando) return;
-    const cel = ev.target.closest('td.cell[data-fecha]'); if (!cel) return;
+    const cel = ev.target.closest(SELECTOR_CEL); if (!cel) return;
+    // Solo cuenta como arrastre si se SALIO de la casilla donde empezo. Moverse
+    // por dentro —de un bloque al boton, por ejemplo— tambien dispara
+    // `mouseover`, y tragarse ese clic dejaria muerto el clic normal.
+    if (claveCel(cel) !== SEL.ancla) SEL.arrastro = true;
     seleccionar(cel, 'rango');
   });
 }
@@ -1353,6 +1432,12 @@ function engancharSeleccion(tabla) {
 document.addEventListener('mouseup', () => {
   SEL.pintando = false;
   if (SEL.rellenando) soltarRelleno();
+  /* El navegador manda `click` justo despues de `mouseup`, antes de cualquier
+     temporizador. Asi que armar aqui y desarmar en un `setTimeout(0)` se come
+     exactamente UN clic —el de este arrastre— y ninguno mas, aunque ese clic
+     nunca llegue porque se solto fuera de la tabla. */
+  if (SEL.arrastro) { SEL.tragarClic = true; setTimeout(() => { SEL.tragarClic = false; }, 0); }
+  SEL.arrastro = false;
 });
 
 /* ---------- copiar, pegar, borrar ---------- */
@@ -1375,20 +1460,30 @@ function copiarSeleccion(cortar) {
     for (let c = c0; c <= c1; c++) {
       const cel = g.rejilla[f] && g.rejilla[f][c];
       const dentro = cel && SEL.claves.has(claveCel(cel));
+      // Se guarda tambien `persona_id`: en la rejilla de PUESTOS es lo que
+      // hace que el turno pegado siga siendo de quien era, y que uno sin dueño
+      // siga sin dueño. En la de personas se ignora, porque manda la fila.
       fila.push(dentro ? turnosDeClave(claveCel(cel)).map(a => ({
+        persona_id: a.persona_id || null,
         turno_id: a.turno_id || null, inicio: a.inicio, fin: a.fin,
         colacion: a.colacion || 0, puesto: a.puesto || '', nota: a.nota || '',
       })) : []);
     }
     celdas.push(fila);
   }
-  PORTA = { ancho: c1 - c0 + 1, alto: f1 - f0 + 1, celdas };
+  // Se anota de que rejilla salio: pegar lo de una fila de persona dentro de
+  // una fila de puesto significa otra cosa, y mezclarlas en silencio dejaria
+  // turnos donde nadie los puso.
+  PORTA = { ancho: c1 - c0 + 1, alto: f1 - f0 + 1, celdas,
+            tipo: tipoClave(claveCel(pts[0].cel)) };
 
   // Ademas al portapapeles del sistema, en texto, para que se pueda pegar en
   // un correo o en un Excel de verdad. Es best-effort: sin https o sin permiso
   // tira, y eso no debe romper el copiado de adentro, que es el que importa.
   const txt = celdas.map(fila => fila.map(cel =>
-    cel.map(t => hhmm(t.inicio) + '-' + hhmm(t.fin) + (t.puesto ? ' ' + t.puesto : '')).join(' / ')
+    cel.map(t => { const q = t.persona_id && S.personas.find(x => x.id === t.persona_id);
+      return hhmm(t.inicio) + '-' + hhmm(t.fin)
+        + (t.puesto ? ' ' + t.puesto : '') + (q ? ' ' + q.nombre : ''); }).join(' / ')
   ).join('\t')).join('\n');
   try { navigator.clipboard && navigator.clipboard.writeText(txt); } catch (e) {}
 
@@ -1412,6 +1507,12 @@ async function pegarSeleccion() {
     return decir('Marca primero dónde quieres pegar.', 'bad');
 
   const pts = [...SEL.claves].map(k => g.mapa.get(k)).filter(Boolean);
+  if (!pts.length) return decir('Marca primero dónde quieres pegar.', 'bad');
+  const tipoAqui = tipoClave(claveCel(pts[0].cel));
+  if (PORTA.tipo && PORTA.tipo !== tipoAqui)
+    return decir(PORTA.tipo === 'q'
+      ? 'Eso lo copiaste de la vista por puestos. Vuelve a Puestos para pegarlo.'
+      : 'Eso lo copiaste de la vista por personas. Vuelve a Personas para pegarlo.', 'bad');
   const f0 = Math.min(...pts.map(p => p.f)), c0 = Math.min(...pts.map(p => p.c));
   const unaSola = PORTA.alto === 1 && PORTA.ancho === 1;
 
@@ -1430,8 +1531,8 @@ async function pegarSeleccion() {
   // encima es lo contrario de lo que uno quiso hacer. Se saltan y se avisa.
   const saltadas = [];
   const utiles = destinos.filter(d => {
-    const [pid, fecha] = claveCel(d.cel).split('|');
-    if (pid && ausenciaDe(pid, fecha)) { saltadas.push(d.cel); return false; }
+    const { tipo, que, fecha } = parteClave(claveCel(d.cel));
+    if (tipo === 'p' && que && ausenciaDe(que, fecha)) { saltadas.push(d.cel); return false; }
     return true;
   });
   if (!utiles.length) return decir('Todas las casillas marcadas son días de ausencia. No se pegó nada.', 'bad');
@@ -1439,11 +1540,9 @@ async function pegarSeleccion() {
   const borrar = [];
   const crear = [];
   utiles.forEach(({ cel, turnos }) => {
-    const k = claveCel(cel); const [pid, fecha] = k.split('|');
+    const k = claveCel(cel);
     turnosDeClave(k).forEach(a => borrar.push(a.id));
-    turnos.forEach(t => crear.push({ persona_id: pid || null, fecha, turno_id: t.turno_id,
-                                     inicio: t.inicio, fin: t.fin, colacion: t.colacion,
-                                     puesto: t.puesto, nota: t.nota }));
+    turnos.forEach(t => crear.push(nacerEn(k, t)));
   });
   if (!borrar.length && !crear.length) return decir('No había nada que pegar.', 'bad');
 
@@ -1602,8 +1701,8 @@ function abrirMenu(cel, x, y) {
 }
 
 document.addEventListener('contextmenu', ev => {
-  const cel = ev.target.closest('#tablaSem td.cell[data-fecha]');
-  if (!cel || S.agrupar === 'puestos') return;      // fuera de la malla, el menu del navegador
+  const cel = ev.target.closest(SELECTOR_CEL);
+  if (!cel || !cuerpoVisible() || !cuerpoVisible().contains(cel)) return;  // fuera, el menu del navegador
   ev.preventDefault();
   // Apretar fuera de lo marcado selecciona eso primero: un menu que opera
   // sobre otra cosa es la forma mas rapida de borrar lo que no era.
@@ -1639,7 +1738,7 @@ window.addEventListener('resize', cerrarMenu);
 
 let ACTIVA = null;   // la casilla que se mueve con las flechas, por clave
 
-function irA(df, dc, estirando) {
+function moverActiva(df, dc, estirando) {
   const g = geometria(); if (!g) return false;
   const base = ACTIVA && g.mapa.has(ACTIVA) ? ACTIVA : SEL.ancla;
   if (!base || !g.mapa.has(base)) return false;
@@ -1694,9 +1793,9 @@ function pintarTirador() {
       SEL.rellenando = { desde: new Set(SEL.claves) };
     });
   }
-  const caja = $('#cajaSemana');
+  const caja = S.modo === 'mes' ? $('#cajaMes') : $('#cajaSemana');
   const g = geometria();
-  if (!g || SEL.claves.size < 1 || !caja || S.agrupar === 'puestos') { t.hidden = true; return; }
+  if (!g || SEL.claves.size < 1 || !caja) { t.hidden = true; return; }
   const pts = [...SEL.claves].map(k => g.mapa.get(k)).filter(Boolean);
   if (!pts.length) { t.hidden = true; return; }
   const f1 = Math.max(...pts.map(p => p.f)), c1 = Math.max(...pts.map(p => p.c));
@@ -1746,13 +1845,10 @@ async function soltarRelleno() {
   let saltadas = 0;
   nuevas.forEach(k => {
     const p = g.mapa.get(k); if (!p) return;
-    const [pid, fecha] = k.split('|');
-    if (pid && ausenciaDe(pid, fecha)) { saltadas++; return; }
+    const { tipo, que, fecha } = parteClave(k);
+    if (tipo === 'p' && que && ausenciaDe(que, fecha)) { saltadas++; return; }
     turnosDeClave(k).forEach(a => borrar.push(a.id));
-    molde(p.f, p.c).forEach(t => crear.push({
-      persona_id: pid || null, fecha, turno_id: t.turno_id || null,
-      inicio: t.inicio, fin: t.fin, colacion: t.colacion || 0,
-      puesto: t.puesto || '', nota: t.nota || '' }));
+    molde(p.f, p.c).forEach(t => crear.push(nacerEn(k, t)));
   });
   if (!borrar.length && !crear.length)
     return decir('No había turnos que repetir en lo marcado.', 'bad');
@@ -1773,7 +1869,6 @@ const FLECHAS = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], Arrow
 
 document.addEventListener('keydown', ev => {
   if (enCampo()) return;
-  if (S.agrupar === 'puestos') return;
   const ctrl = ev.ctrlKey || ev.metaKey;
 
   if (ctrl && (ev.key === 'z' || ev.key === 'Z')) {
@@ -1784,9 +1879,9 @@ document.addEventListener('keydown', ev => {
   if (!SEL.claves.size) return;
   if (FLECHAS[ev.key]) {
     const [df, dc] = FLECHAS[ev.key];
-    if (irA(df, dc, ev.shiftKey)) ev.preventDefault();
+    if (moverActiva(df, dc, ev.shiftKey)) ev.preventDefault();
   } else if (ev.key === 'Home' || ev.key === 'End') {
-    if (irA(0, ev.key === 'Home' ? 'inicio' : 'fin', ev.shiftKey)) ev.preventDefault();
+    if (moverActiva(0, ev.key === 'Home' ? 'inicio' : 'fin', ev.shiftKey)) ev.preventDefault();
   } else if (ev.key === 'Enter') {
     ev.preventDefault(); abrirLaActiva();
   }
@@ -2511,6 +2606,7 @@ function pintarMes() {
   cuerpo.innerHTML += `<tr class="piemes"><th class="r" scope="row">Horas del día</th>${pie}<td class="tot">${hfmt(totMes)} h</td></tr>`;
 
   engancharArrastre(cuerpo.closest('table') || cuerpo);
+  engancharSeleccion(cuerpo.closest('table') || cuerpo);
 
   // Un solo escuchador para toda la tabla. En el mes también se edita: Pedro
   // lo pidió y Skello lo hace («si veo algún desajuste puedo rectificarlo
@@ -2534,6 +2630,7 @@ function pintarMes() {
   };
 
   $('#semPersonas').innerHTML = ''; $('#semPie').innerHTML = '';
+  pintarSeleccion();
 }
 
 async function nuevoTurnoRapido() {
@@ -4436,7 +4533,7 @@ function conectarApp() {
   const irA = modo => {
     // al entrar al mes, se posa en el mes del día en que estabas parado
     if (modo === 'mes') S.mes = new Date(S.modo === 'dia' ? S.dia : S.lunes.getTime() + 3 * 86400000);
-    S.modo = modo; refrescar().catch(error);
+    S.modo = modo; soltarSeleccion(); refrescar().catch(error);
   };
   /* ---------- sub-pestañas de Planificación ----------
      Lo que hace 7shifts y nosotros no: arriba poquisimo, y el detalle adentro
@@ -4485,7 +4582,7 @@ function conectarApp() {
   on('#semAnt', 'click', () => mover(-1));
   on('#semSig', 'click', () => mover(1));
   const agrupar = modo => {
-    S.agrupar = modo;
+    S.agrupar = modo; soltarSeleccion();
     $('#agrPersonas').classList.toggle('primary', modo === 'personas');
     $('#agrPuestos').classList.toggle('primary', modo === 'puestos');
     pintarPlan();

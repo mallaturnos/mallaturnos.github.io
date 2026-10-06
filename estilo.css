@@ -822,10 +822,17 @@ td.semcol span.mas{color:#a3402a}
    los taparia justo cuando uno quiere ver QUE esta marcando.
    El borde es `inset`, no `outline`: un outline se dibuja por fuera y en una
    tabla con `border-collapse` se le monta a la casilla de al lado. */
-td.cell.sel{background:color-mix(in srgb, var(--accent) 14%, transparent);
+/* Vale para las tres rejillas: semana por personas, semana por puestos y mes.
+   El mes usa `td.mcel`, que ademas trae color propio por turno — por eso el
+   verde va con `color-mix` sobre el acento y no opaco: tiene que dejar ver lo
+   que hay debajo. La prueba solo mira la clase; que se VEA hay que mirarlo. */
+td.cell.sel, td.mcel.sel{background:color-mix(in srgb, var(--accent) 14%, transparent);
   box-shadow:inset 0 0 0 1px var(--accent)}
-td.cell.sel.ancla{box-shadow:inset 0 0 0 2px var(--accent)}
-td.cell.sel .bloque{border-color:var(--accent)}
+td.cell.sel.ancla, td.mcel.sel.ancla{box-shadow:inset 0 0 0 2px var(--accent)}
+td.cell.sel .bloque, td.mcel.sel .mbl{border-color:var(--accent)}
+/* En el mes las casillas son chicas y el fondo del turno ya es un color: sin
+   esto, el verde de la seleccion se pierde contra un turno pintado. */
+td.mcel.sel{outline:1px solid var(--accent);outline-offset:-1px}
 
 /* La barrita que aparece al marcar. Sin ella nadie descubre que existe el
    Ctrl+C: la funcion estaria y no la encontraria ni Pedro. */
