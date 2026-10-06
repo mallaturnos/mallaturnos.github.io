@@ -735,6 +735,14 @@ table.tramos.nt tr.ntmasfila td{border:0;padding-top:4px}
    Visto al renderizar. */
 table.tramos.nt .ntmas{white-space:nowrap}
 table.tramos.nt td:last-child{width:104px}
+/* El nombre del puesto se puede pinchar para renombrarlo: hay que verlo. El
+   subrayado punteado es la convencion de «esto se edita» sin gritar «boton». */
+.trtit .pnom{cursor:pointer;border-bottom:1px dashed var(--line);padding-bottom:1px}
+.trtit .pnom:hover{border-bottom-color:var(--acento);color:var(--acento)}
+.trtit .pnom[data-fijo]{cursor:default;border-bottom:0}
+.trtit .pnom[data-fijo]:hover{color:inherit}
+.trtit .pedit{font:inherit;font-weight:700;padding:3px 7px;border:1px solid var(--acento);
+  border-radius:6px;background:var(--surface);color:inherit;min-width:160px}
 table.tramos.nt td:nth-child(2){width:84px}
 table.tramos.nt td:last-child{width:92px}
 @media (max-width:640px){

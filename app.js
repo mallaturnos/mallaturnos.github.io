@@ -2945,12 +2945,38 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     const filaMas = lleno ? '' :
       `<tr class="ntmasfila"><td></td><td></td><td>${btnMas}</td></tr>`;
     const caja = el('div', 'trpuesto', `
-      <div class="trtit"><b>${esc(puesto)}</b></div>
+      <div class="trtit"><b class="pnom"${q ? ' title="Pincha para cambiarle el nombre"'
+        : ' data-fijo="1" title="Este puesto no está en el catálogo, así que no se puede renombrar desde aquí"'
+        }>${esc(puesto)}</b></div>
       ${usados.length ? `<table class="tramos nt"><tbody>${filas}${filaMas}</tbody></table>`
         : `<p class="hint">Este día no se pide a nadie de este puesto.</p>${btnMas}`}
       ${usados.length ? barrasNecesidad(S.cobDia, puesto) : ''}`);
     box.appendChild(caja);
-    if (q) caja.querySelector('.trtit b').dataset.puesto = q.id;
+
+    /* Renombrar el puesto DESDE AQUI. Pedro: «por ejemplo pinchar aseo y
+       cambiarle el nombre a otra cosa como limpieza, o caja, o estacionamiento»
+       (msg 4165). El cambio lo propaga la base con `renombrar_puesto`, que toca
+       de una vez el catalogo, el rol de la gente, los turnos ya asignados y la
+       dotacion. Hacerlo a mano seria editar ficha por ficha. */
+    const nom = caja.querySelector('.pnom');
+    if (q) nom.addEventListener('click', () => {
+      if (caja.querySelector('.pedit')) return;
+      const inp = el('input', 'pedit');
+      inp.value = puesto; inp.maxLength = 40;
+      nom.replaceWith(inp); inp.focus(); inp.select();
+      let listo = false;
+      const cerrar = (guardar) => {
+        if (listo) return; listo = true;
+        const v = inp.value.trim();
+        if (!guardar || !v || v === puesto) { pintarCobertura(); return; }
+        DATOS.renombrarPuesto(q.id, v).then(refrescar).catch(e => { error(e); pintarCobertura(); });
+      };
+      inp.addEventListener('keydown', ev => {
+        if (ev.key === 'Enter') { ev.preventDefault(); cerrar(true); }
+        if (ev.key === 'Escape') { ev.preventDefault(); cerrar(false); }
+      });
+      inp.addEventListener('blur', () => cerrar(true));
+    });
 
     /* Guardar es siempre lo mismo: el numero de un turno, y de paso fuera los
        tramos a mano de este puesto. Si quedaran, `necesitaHora()` los preferiria
