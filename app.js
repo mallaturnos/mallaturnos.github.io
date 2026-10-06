@@ -2750,6 +2750,24 @@ const tramosDe = (perfil, puesto) => ((S.tramos[perfil] || {})[puesto] || []);
    Va de nivel superior y con nombre a proposito, para poder probarla en node
    sin navegador — la misma razon por la que `proponer()` entra y sale por
    parametro. */
+/* Un tramo tecleado, llevado a horas del DIA DE TRABAJO (que puede pasar de 24).
+
+   `hhmm(24)` escribe «00:00» y `deHora('00:00')` devuelve 0: la ida y la vuelta
+   no son la misma hora. Un tramo guardado como 20,5 → 25 se dibuja
+   «20:30 – 01:00», pero al releer la fila vuelve como 20,5 → 1 y
+   `normalizarTramos` lo tira, con razon. Tocabas un numero y la fila
+   desaparecia. Lo vio Pedro dos veces seguidas (msgs 4170 y 4171).
+
+   La regla es la que ya usan los turnos, que guardan la 01:00 como 25: una hora
+   anterior a la apertura, o un fin que no supera a su inicio, es del dia
+   siguiente. Vive aqui arriba y no dentro del editor para que se pueda probar:
+   el bug duro porque estaba enterrada en un closure. */
+function tramoDelDia(desde, hasta, h0) {
+  if (desde != null && desde < h0) desde += 24;
+  if (desde != null && hasta != null && hasta <= desde) hasta += 24;
+  return { desde, hasta };
+}
+
 function normalizarTramos(lista) {
   const ok = (lista || [])
     .filter(t => t.desde != null && t.hasta != null
@@ -2793,18 +2811,36 @@ function pintarNecesidad(box) {
         <td><button type="button" class="act trx" title="Quitar este tramo">quitar</button></td>
       </tr>`).join('');
     const caja = el('div', 'trpuesto', `
-      <div class="trtit"><b>${esc(puesto)}</b>
-        <button type="button" class="act trmas">+ tramo</button></div>
-      ${lista.length ? `<table class="tramos"><tbody>${filas}</tbody></table>`
-                     : '<p class="hint">Sin tramos: este día no se pide a nadie de este puesto.</p>'}
+      <div class="trtit"><b>${esc(puesto)}</b></div>
+      ${lista.length
+        ? `<table class="tramos"><tbody>${filas}` +
+          `<tr class="ntmasfila"><td></td><td></td><td></td><td></td>` +
+          `<td><button type="button" class="act trmas">+ tramo</button></td></tr></tbody></table>`
+        : '<p class="hint">Sin tramos: este día no se pide a nadie de este puesto.</p>' +
+          '<button type="button" class="act trmas">+ tramo</button>'}
       ${lista.length ? barrasNecesidad(S.cobDia, puesto) : ''}`);
     box.appendChild(caja);
 
-    const leer = () => [...caja.querySelectorAll('tbody tr')].map(tr => ({
-      desde: deHora(tr.querySelector('.trh').value),
-      hasta: deHora(tr.querySelectorAll('.trh')[1].value),
-      cantidad: Number(tr.querySelector('.trn').value) || 0,
-    }));
+/* MEDIANOCHE. `hhmm(24)` escribe «00:00» y `deHora('00:00')` devuelve 0: la
+   ida y la vuelta NO son la misma hora. Un tramo guardado como 20,5 → 25 se
+   dibuja «20:30 – 01:00», pero en cuanto se toca cualquier campo de esa fila
+   se relee como 20,5 → 1, y `normalizarTramos` lo tira —con razon, porque
+   `hasta` no es mayor que `desde`—. Resultado: tocas un numero y la fila
+   desaparece.
+
+   Lo vio Pedro dos veces seguidas: un tramo raro de «00:00 – 16:00» en Aseo
+   (msg 4170) y «aumento o disminuyo el numero y aparecen y desaparecen cosas»
+   (msg 4171). Es el mismo bug las dos veces.
+
+   La regla, que es la que ya usan los turnos al guardar 01:00 como 25: una hora
+   que cae ANTES de la apertura, o un fin que no es mayor que su inicio,
+   pertenece al dia siguiente y se le suman 24. */
+    const leer = () => [...caja.querySelectorAll('tbody tr')].map(tr => {
+      const t = tramoDelDia(deHora(tr.querySelector('.trh').value),
+                            deHora(tr.querySelectorAll('.trh')[1].value), franja().h0);
+      return { desde: t.desde, hasta: t.hasta,
+               cantidad: Number(tr.querySelector('.trn').value) || 0 };
+    });
 
     const guardar = async (que) => {
       const m = $('#msgDot');
