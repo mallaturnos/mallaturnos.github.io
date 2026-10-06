@@ -2023,7 +2023,18 @@ function pintarResumenSemana() {
     const h = $('#h-' + p.id);
     if (h) {
       // horas y, debajo, cuánto le falta o le sobra contra su contrato
+      /* El «− 42,0 h» no se entiende solo: parece que esa persona tiene horas
+         negativas. Dice otra cosa —cuánto le falta para llegar a su contrato—
+         y hasta el 06-10 no había forma de averiguarlo desde la pantalla.
+         Es el mismo principio que escribió Pedro: decir por qué, no solo qué. */
       const dif = a.dif;
+      const tope = Number(p.horas_contrato) || 0;
+      h.title = tope
+        ? `${hfmt(a.horas)} h planificadas · su contrato es de ${hfmt(tope)} h\n`
+          + (Math.abs(dif) < 0.25 ? 'Va justo.'
+             : dif > 0 ? `Le sobran ${hfmt(dif)} h sobre el contrato.`
+                       : `Le faltan ${hfmt(-dif)} h para completarlo.`)
+        : `${hfmt(a.horas)} h planificadas · no tiene horas de contrato escritas en su ficha`;
       h.innerHTML = hfmt(a.horas) + ' h' + (Math.abs(dif) >= 0.25
         ? `<span class="dif ${dif > 0 ? 'mas' : 'menos'}">${dif > 0 ? '+' : '−'} ${hfmt(Math.abs(dif))} h</span>`
         : '<span class="dif justo">al día</span>');
@@ -2032,8 +2043,12 @@ function pintarResumenSemana() {
     lista.appendChild(el('li', '', `
       <div class="prow"><span class="pname">${esc(p.nombre)}</span>
         <span class="pstat">${hfmt(a.horas)} h · ${a.trabajados} d · ${clp(a.costo)}${
-          Math.abs(a.dif) >= 0.5 ? ` · <b style="color:${a.dif>0?'var(--warn)':'var(--fg-dim)'}">${a.dif>0?'+':''}${hfmt(a.dif)} h</b>` : ''}${
-          Number(p.saldo_horas) ? ` · saldo ${Number(p.saldo_horas)>0?'+':''}${hfmt(Number(p.saldo_horas))} h` : ''}</span></div>
+          Math.abs(a.dif) >= 0.5 ? ` · <b style="color:${a.dif>0?'var(--warn)':'var(--fg-dim)'}"
+            title="${esc(a.dif > 0 ? 'Le sobran ' + hfmt(a.dif) + ' h sobre su contrato de ' + hfmt(a.tope) + ' h'
+                                   : 'Le faltan ' + hfmt(-a.dif) + ' h para su contrato de ' + hfmt(a.tope) + ' h')}"
+            >${a.dif>0?'+':''}${hfmt(a.dif)} h</b>` : ''}${
+          Number(p.saldo_horas) ? ` · <span title="Saldo acumulado de semanas anteriores, de «Cerrar la semana al saldo». No es de esta semana."
+            >saldo ${Number(p.saldo_horas)>0?'+':''}${hfmt(Number(p.saldo_horas))} h</span>` : ''}</span></div>
       <div class="bar"><i class="${a.horas>a.tope?'over':''}" style="width:${Math.min(100,(a.horas/a.tope)*100)}%"></i></div>
       <div class="flags">${a.alertas.map(x => `<span class="flag ${x.n}">${esc(x.t)}</span>`).join('')}</div>`));
   });
@@ -4534,84 +4549,18 @@ function verSub(cual) {
   if (cual === 'plant') pintarModelos();
 }
 
-function conectarApp() {
-  // Pestañas. Se filtran las que existen de verdad: al sacar «Turnos abiertos»
-  // esta lista quedó nombrando una que ya no está, y como aquí se llamaba a
-  // addEventListener sin red, reventaba y SE CAÍA TODO LO DEMÁS de conectarApp.
-  // Es la segunda vez hoy que un elemento que falta se lleva por delante a los
-  // que venían después; que no vuelva a pasar por esta vía.
-  const TABS = ['sem','eq','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
-  TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
-    TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
-  }));
+/* ---------- modelos de semana ----------
+   ESTAS CINCO VIVIAN DENTRO DE `conectarApp()`. Sacadas al modulo el
+   06-10-2026 porque eso rompia la pantalla: `verSub()` es global y llama a
+   `pintarModelos()`, que al estar anidada no existe fuera de conectarApp.
+   Resultado: abrir «Plantillas» tiraba un ReferenceError que se tragaba el
+   escuchador del clic, el panel se mostraba IGUAL —verSub lo destapa antes
+   de pintar— y quedaba completamente vacio: sin modelos, sin semanas y sin
+   gente. Se veia como una pantalla sin datos, no como un error.
 
-  // modos de vista
-  const irA = modo => {
-    // al entrar al mes, se posa en el mes del día en que estabas parado
-    if (modo === 'mes') S.mes = new Date(S.modo === 'dia' ? S.dia : S.lunes.getTime() + 3 * 86400000);
-    S.modo = modo; soltarSeleccion(); refrescar().catch(error);
-  };
-  /* ---------- sub-pestañas de Planificación ----------
-     Lo que hace 7shifts y nosotros no: arriba poquisimo, y el detalle adentro
-     de su propia pagina. «Plantillas» y «Objetivo de costo» eran un boton en la
-     barra y un campo perdido en Propinas; ahora cada uno tiene su lugar.
+   Solo usan cosas globales, asi que mudarlas no cambia nada mas.
+   El resto del comentario original va mas abajo, con cada funcion. */
 
-     `pintarModelos()` se llama al ENTRAR a Plantillas, que es cuando hace falta:
-     antes se llamaba al abrir el dialogo. */
-  SUBS.forEach(x => on('#sub-' + x, 'click', () => verSub(x)));
-
-  /* ---------- el menú «···» ----------
-     Se traga los filtros, Imprimir y Limpiar. No son malos botones: son los que
-     NO se usan todas las semanas, y por estar al mismo nivel que los que sí
-     hacian que la barra se partiera en dos filas. */
-  const cerrarMas = () => {
-    const pop = $('#masPop'); if (!pop) return;
-    pop.hidden = true;
-    const b = $('#btnMas'); if (b) b.setAttribute('aria-expanded', 'false');
-  };
-  on('#btnMas', 'click', ev => {
-    ev.stopPropagation();
-    const pop = $('#masPop'); if (!pop) return;
-    const abrir = pop.hidden;
-    pop.hidden = !abrir;
-    $('#btnMas').setAttribute('aria-expanded', abrir ? 'true' : 'false');
-  });
-  // Un menu que no se cierra solo es una trampa: se cierra al tocar fuera o con
-  // Escape, que es lo que todo el mundo intenta.
-  document.addEventListener('click', ev => {
-    const pop = $('#masPop');
-    if (pop && !pop.hidden && !ev.target.closest('.masmenu')) cerrarMas();
-  });
-  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') cerrarMas(); });
-
-  on('#modoDia', 'click', () => irA('dia'));
-  on('#modoSemana', 'click', () => irA('semana'));
-  on('#modoMes', 'click', () => irA('mes'));
-
-  // navegar: el paso depende de la vista en la que estés
-  const mover = n => {
-    if (S.modo === 'dia') S.dia = masDias(S.dia, n);
-    else if (S.modo === 'mes') S.mes = new Date(S.mes.getFullYear(), S.mes.getMonth() + n, 1);
-    else S.lunes = masDias(S.lunes, n * 7);
-    refrescar().catch(error);
-  };
-  on('#semAnt', 'click', () => mover(-1));
-  on('#semSig', 'click', () => mover(1));
-  const agrupar = modo => {
-    S.agrupar = modo; soltarSeleccion();
-    $('#agrPersonas').classList.toggle('primary', modo === 'personas');
-    $('#agrPuestos').classList.toggle('primary', modo === 'puestos');
-    pintarPlan();
-  };
-  on('#agrPersonas', 'click', () => agrupar('personas'));
-  on('#agrPuestos',  'click', () => agrupar('puestos'));
-
-  on('#semHoy', 'click', () => {
-    S.dia = new Date(); S.lunes = lunesDe(new Date()); S.mes = new Date();
-    refrescar().catch(error);
-  });
-
-  // copiar la semana anterior sobre esta
 /* ---------- modelos de semana ----------
    Lo que mas ahorra tiempo de toda la lista: una semana de local se parece a la
    anterior, pero hoy se arma turno por turno.
@@ -4709,6 +4658,85 @@ function opcionesModelo() {
     semanas: Number(semBtn ? semBtn.dataset.sem : 1) || 1,
   };
 }
+
+function conectarApp() {
+  // Pestañas. Se filtran las que existen de verdad: al sacar «Turnos abiertos»
+  // esta lista quedó nombrando una que ya no está, y como aquí se llamaba a
+  // addEventListener sin red, reventaba y SE CAÍA TODO LO DEMÁS de conectarApp.
+  // Es la segunda vez hoy que un elemento que falta se lleva por delante a los
+  // que venían después; que no vuelva a pasar por esta vía.
+  const TABS = ['sem','eq','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
+  TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
+    TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
+  }));
+
+  // modos de vista
+  const irA = modo => {
+    // al entrar al mes, se posa en el mes del día en que estabas parado
+    if (modo === 'mes') S.mes = new Date(S.modo === 'dia' ? S.dia : S.lunes.getTime() + 3 * 86400000);
+    S.modo = modo; soltarSeleccion(); refrescar().catch(error);
+  };
+  /* ---------- sub-pestañas de Planificación ----------
+     Lo que hace 7shifts y nosotros no: arriba poquisimo, y el detalle adentro
+     de su propia pagina. «Plantillas» y «Objetivo de costo» eran un boton en la
+     barra y un campo perdido en Propinas; ahora cada uno tiene su lugar.
+
+     `pintarModelos()` se llama al ENTRAR a Plantillas, que es cuando hace falta:
+     antes se llamaba al abrir el dialogo. */
+  SUBS.forEach(x => on('#sub-' + x, 'click', () => verSub(x)));
+
+  /* ---------- el menú «···» ----------
+     Se traga los filtros, Imprimir y Limpiar. No son malos botones: son los que
+     NO se usan todas las semanas, y por estar al mismo nivel que los que sí
+     hacian que la barra se partiera en dos filas. */
+  const cerrarMas = () => {
+    const pop = $('#masPop'); if (!pop) return;
+    pop.hidden = true;
+    const b = $('#btnMas'); if (b) b.setAttribute('aria-expanded', 'false');
+  };
+  on('#btnMas', 'click', ev => {
+    ev.stopPropagation();
+    const pop = $('#masPop'); if (!pop) return;
+    const abrir = pop.hidden;
+    pop.hidden = !abrir;
+    $('#btnMas').setAttribute('aria-expanded', abrir ? 'true' : 'false');
+  });
+  // Un menu que no se cierra solo es una trampa: se cierra al tocar fuera o con
+  // Escape, que es lo que todo el mundo intenta.
+  document.addEventListener('click', ev => {
+    const pop = $('#masPop');
+    if (pop && !pop.hidden && !ev.target.closest('.masmenu')) cerrarMas();
+  });
+  document.addEventListener('keydown', ev => { if (ev.key === 'Escape') cerrarMas(); });
+
+  on('#modoDia', 'click', () => irA('dia'));
+  on('#modoSemana', 'click', () => irA('semana'));
+  on('#modoMes', 'click', () => irA('mes'));
+
+  // navegar: el paso depende de la vista en la que estés
+  const mover = n => {
+    if (S.modo === 'dia') S.dia = masDias(S.dia, n);
+    else if (S.modo === 'mes') S.mes = new Date(S.mes.getFullYear(), S.mes.getMonth() + n, 1);
+    else S.lunes = masDias(S.lunes, n * 7);
+    refrescar().catch(error);
+  };
+  on('#semAnt', 'click', () => mover(-1));
+  on('#semSig', 'click', () => mover(1));
+  const agrupar = modo => {
+    S.agrupar = modo; soltarSeleccion();
+    $('#agrPersonas').classList.toggle('primary', modo === 'personas');
+    $('#agrPuestos').classList.toggle('primary', modo === 'puestos');
+    pintarPlan();
+  };
+  on('#agrPersonas', 'click', () => agrupar('personas'));
+  on('#agrPuestos',  'click', () => agrupar('puestos'));
+
+  on('#semHoy', 'click', () => {
+    S.dia = new Date(); S.lunes = lunesDe(new Date()); S.mes = new Date();
+    refrescar().catch(error);
+  });
+
+  // copiar la semana anterior sobre esta
 
   /* ---------- Copiar: un boton para los dos sentidos ----------
      Antes habia «Copiar la anterior» suelto en la barra y NINGUNA forma de
@@ -4904,7 +4932,18 @@ function opcionesModelo() {
                + 'Se pisan los turnos que ya haya. Las ausencias se respetan.')) return;
     m.textContent = 'Aplicando…'; m.className = 'msg';
     try {
-      recordar('aplicar un modelo de semana');
+      /* `recordar()` fotografia SOLO el rango que se esta viendo —una semana—,
+         pero esto aplica a `o.semanas` seguidas. Con 4 semanas, Deshacer
+         reponia la primera y dejaba las otras tres con el modelo puesto, sin
+         decir nada: una promesa de deshacer que no se cumplia.
+
+         Lo mismo que ya hacen «copiar el día» y «copiar la semana a N», que
+         usan `recordarDeLaBase()` justamente porque las semanas de mas alla no
+         estan cargadas en `S.asign` y la foto saldria vacia. Encontrado el
+         06-10 revisando que Deshacer cumpla donde se promete. */
+      const f = fechas();
+      await recordarDeLaBase('aplicar un modelo de semana',
+                             f[0], iso(masDias(S.lunes, o.semanas * 7 - 1)));
       const r = await DATOS.aplicarModelo(S.local.id, id, iso(S.lunes), o);
       await refrescar();
       if (r.turnos)
