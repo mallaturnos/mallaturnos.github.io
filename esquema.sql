@@ -287,3 +287,22 @@ revoke all on all tables in schema public from anon;
 grant execute on function mi_semana(text,date)            to anon;
 grant execute on function marcar(text,date,text,boolean)  to anon;
 grant execute on function tomar_turno(text,uuid)          to anon;
+
+-- =====================================================================
+-- CORRECCION 02-10-2026: faltaban los permisos del DUEÑO.
+-- Con "Automatically expose new tables" desactivado (que es lo correcto),
+-- las tablas nuevas no reciben permisos para NINGUN rol de la API, ni
+-- siquiera para las cuentas con sesion. Resultado: la app cargaba en
+-- blanco porque hasta el dueño recibia "permission denied".
+-- El cierre al visitante estaba bien; faltaba abrirle la puerta al dueño.
+-- Esto no afloja nada: las reglas por fila siguen mandando, y el anonimo
+-- vuelve a quedar solo con las tres funciones del trabajador.
+-- =====================================================================
+grant usage on schema public to authenticated;
+grant select, insert, update, delete on all tables in schema public to authenticated;
+grant usage, select on all sequences in schema public to authenticated;
+
+revoke all on all tables in schema public from anon;
+grant execute on function mi_semana(text,date)            to anon;
+grant execute on function marcar(text,date,text,boolean)  to anon;
+grant execute on function tomar_turno(text,uuid)          to anon;

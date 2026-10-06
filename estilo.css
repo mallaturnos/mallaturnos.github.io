@@ -709,9 +709,15 @@ input.trn{width:4.2em;text-align:center;font-weight:700}
 .trx{font-size:.82rem;padding:3px 8px;color:#8a5050}
 /* El dibujo no lleva eje ni números: no es un gráfico para leer, es la forma
    del día de un vistazo. Los números exactos están en la tabla de arriba. */
-.grn{display:flex;align-items:flex-end;gap:2px;height:60px;margin-top:8px}
+/* El alto lo pone app.js: una persona mide siempre lo mismo y es el grafico el
+   que crece. Aqui no va `height` fijo, o la barra alta se corta. */
+.grn{display:flex;align-items:flex-end;gap:3px;margin-top:8px}
 .grb{flex:1;display:flex;flex-direction:column;align-items:center;justify-content:flex-end}
-.grb i{display:block;width:100%;background:#bcd9c8;border-radius:3px 3px 0 0;min-height:2px}
+.grb i{display:block;width:100%;background:#8fc0a3;border-radius:3px 3px 0 0}
+/* Las horas sin nadie no se pintan verdes: asi el bloque tiene principio y fin
+   en vez de ser una sola mancha que sube y baja. */
+.grb i.cero{background:#eceeed;height:2px!important}
+.grb b{font-size:.64rem;color:#4a5a50;font-weight:700;line-height:1;margin-bottom:3px;min-height:.64rem}
 .grb span{font-size:.62rem;color:#9aa29d;margin-top:2px}
 /* Las casillas de turno dicen un hecho, no un veredicto: el color se fue de
    ahí y el juicio bajó a esta línea, que se calcula por hora. */
@@ -803,3 +809,9 @@ td.semcol b{display:block;font-size:.75rem;font-family:var(--font-mono)}
 td.semcol span{display:block;font-size:.625rem;font-family:var(--font-mono)}
 td.semcol span.menos{color:#b4701c}
 td.semcol span.mas{color:#a3402a}
+
+/* La fila de HORARIO LIBRE se distingue de la de turno sin gritar: un filete a
+   la izquierda. Las dos son lo mismo para la cuenta, pero se teclean distinto y
+   el ojo tiene que saber cual esta mirando. 06-10-2026. */
+.nt tr[data-i] > td:first-child { border-left:2.5px solid #c9b07a; padding-left:6px; }
+.nt tr[data-i] .gui { color:#9a9a9a; }
