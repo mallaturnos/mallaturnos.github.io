@@ -1475,3 +1475,317 @@ create policy modelo_turnos_tocar on modelo_turnos for all
 -- ---------------------------------------------------------------------
 grant select, insert, update, delete on modelos_semana to authenticated;
 grant select, insert, update, delete on modelo_turnos  to authenticated;
+
+
+-- =====================================================================
+-- FALTABAN EN ESTE ARCHIVO. 06-10-2026.
+--
+-- La regla de la casa dice que cada migracion nueva se agrega aqui ademas de
+-- publicarse suelta. Con los tramos no se hizo: este acumulado no mencionaba
+-- `dotacion_tramos` ni una vez, asi que quien lo pegara «por si acaso» se
+-- quedaba SIN la tabla de horarios libres y la app caia en su modo degradado
+-- sin decir por que. Se agregan aqui las tres que faltaban, en orden.
+-- =====================================================================
+
+
+-- ---------- arreglo-tramos.sql ----------
+-- =====================================================================
+-- LA NECESIDAD DE GENTE PASA DE «POR TURNO» A «POR TRAMO HORARIO». 05-10-2026.
+--
+-- Pedro, con el caso que lo explica todo (msg 3892):
+--   «no se ve bien si tengo turnos corridos de 8 horas y turnos de refuerzos
+--    partidos de 4 horas»
+--
+-- Y tiene razon. Con un corrido 08:00-16:30 y un refuerzo 12:00-16:00, la
+-- tabla de hoy obliga a poner un numero en cada turno, y ese numero NO
+-- significa lo mismo en los dos:
+--   * en el corrido es «cuanta gente quiero»
+--   * en el refuerzo es «cuanta gente MAS»
+-- La tabla no lo dice en ninguna parte, y entre una lectura y la otra hay seis
+-- personas de diferencia en la semana. Un solo numero no alcanza para decir
+-- dos cosas distintas.
+--
+-- Con tramos, un numero tiene UN significado: cuanta gente quiero a esa hora.
+--   08:00-12:00  2
+--   12:00-16:00  4     <- entra el refuerzo
+--   16:00-01:00  2
+--
+-- De paso desaparece el error que el mismo encontro el 05-10 (msg 3772): con
+-- turnos que se pisan, contar por turno daba por cubierto lo que no lo estaba.
+-- Por hora eso no puede pasar.
+--
+-- ---------------------------------------------------------------------
+-- POR QUE UNA TABLA NUEVA Y NO CAMBIAR LA QUE HAY
+--
+-- El Prototipo 2 (mallaturnos.github.io/p2/) y el 3 comparten esta base. Si se
+-- cambiara `dotacion`, el panel «¿Te alcanza la gente?» del 2 dejaria de
+-- funcionar de un momento a otro, y Pedro lo esta usando EN VIVO. Asi que:
+--   * `dotacion` NO se toca. El /p2/ sigue leyendola y funciona igual.
+--   * `dotacion_tramos` es nueva y la usa el 3.
+--   * Lo ya tecleado se CONVIERTE, no se pierde.
+--
+-- NO BORRA NADA. Se puede pegar las veces que haga falta.
+-- =====================================================================
+
+create table if not exists dotacion_tramos (
+  local_id uuid not null references locales(id) on delete cascade,
+  perfil   text not null,                       -- '0'..'6', 0 = lunes
+  puesto   text not null,
+  desde    numeric(4,2) not null,               -- horas decimales: 8.5 = 08:30
+  hasta    numeric(4,2) not null,               -- > 24 cruza la medianoche (25 = 01:00)
+  cantidad integer not null default 0,
+  primary key (local_id, perfil, puesto, desde),
+  check (hasta > desde)
+);
+create index if not exists dotacion_tramos_local_idx on dotacion_tramos(local_id);
+
+alter table dotacion_tramos enable row level security;
+
+drop policy if exists dotacion_tramos_ver on dotacion_tramos;
+create policy dotacion_tramos_ver on dotacion_tramos for select using (es_mi_local(local_id));
+drop policy if exists dotacion_tramos_tocar on dotacion_tramos;
+create policy dotacion_tramos_tocar on dotacion_tramos for all using (es_mi_local(local_id))
+  with check (es_mi_local(local_id));
+
+-- Toda tabla nueva necesita su GRANT: las policies dicen QUE filas se pueden
+-- tocar, no SI la tabla se puede tocar. Esto ya costo un rato el 03-10.
+grant select, insert, update, delete on dotacion_tramos to authenticated;
+revoke all on dotacion_tramos from anon;
+
+-- ---------------------------------------------------------------------
+-- CONVERTIR LO QUE YA ESTA TECLEADO
+--
+-- Se hace hora por hora y despues se juntan las horas seguidas que piden lo
+-- mismo. Es exactamente la cuenta que ya hace la vista de Dia: a cada hora, la
+-- necesidad es la SUMA de los turnos que pasan por esa hora — si de 13 a 16:30
+-- corren la mañana y la tarde, a esa hora se necesita la gente de las dos.
+--
+-- Solo se siembra lo que falta: si ya hay tramos para ese local, perfil y
+-- puesto, no se toca. Asi esto se puede repetir sin pisar lo que Pedro ajuste
+-- despues a mano.
+-- ---------------------------------------------------------------------
+insert into dotacion_tramos (local_id, perfil, puesto, desde, hasta, cantidad)
+with horas as (
+  -- una fila por local, perfil, puesto y HORA, con lo que piden los turnos
+  -- que pasan por ahi
+  select d.local_id, d.perfil, d.puesto, h.hora,
+         sum(d.cantidad)::int as cantidad
+    from dotacion d
+    join turnos t on t.id = d.turno_id
+    cross join generate_series(0, 47) as h(hora)
+   where d.cantidad > 0
+     and h.hora >= floor(t.inicio) and h.hora < t.fin
+     -- lo que ya tenga tramos no se vuelve a sembrar: asi esto se puede pegar
+     -- de nuevo sin pisar lo que Pedro ajuste despues a mano
+     and not exists (
+       select 1 from dotacion_tramos x
+        where x.local_id = d.local_id and x.perfil = d.perfil and x.puesto = d.puesto)
+   group by d.local_id, d.perfil, d.puesto, h.hora
+),
+marcadas as (
+  -- se marca donde EMPIEZA un tramo: cuando la hora anterior no existe o pedia
+  -- otra cantidad
+  select *,
+         case when lag(hora)     over w = hora - 1
+               and lag(cantidad) over w = cantidad then 0 else 1 end as corte
+    from horas
+  window w as (partition by local_id, perfil, puesto order by hora)
+),
+grupos as (
+  select *, sum(corte) over (partition by local_id, perfil, puesto order by hora) as grupo
+    from marcadas
+)
+select local_id, perfil, puesto,
+       min(hora)::numeric      as desde,
+       (max(hora) + 1)::numeric as hasta,
+       max(cantidad)           as cantidad
+  from grupos
+ group by local_id, perfil, puesto, grupo
+having max(cantidad) > 0
+on conflict do nothing;
+
+-- Comprobar que quedo: deberia salir una fila por tramo, con horas corridas.
+--   select perfil, puesto, desde, hasta, cantidad
+--     from dotacion_tramos order by perfil, puesto, desde;
+
+
+-- ---------- arreglo-renombrar-tramos.sql ----------
+-- =====================================================================
+-- RENOMBRAR UN PUESTO TAMBIEN TIENE QUE MOVER SUS TRAMOS. 05-10-2026.
+--
+-- Pedro pidio poder renombrar el puesto desde «Cuanta gente necesito»
+-- (msg 4165): «pinchar aseo y cambiarle el nombre a otra cosa como limpieza,
+-- o caja, o estacionamiento».
+--
+-- La funcion `renombrar_puesto` ya existia y hacia bien su trabajo: cambiaba el
+-- catalogo, el rol de la gente, los turnos ya asignados y la dotacion, todo de
+-- una vez. Pero se escribio ANTES que `dotacion_tramos`, asi que esa tabla se
+-- quedaba con el nombre viejo.
+--
+-- Que pasaria sin esto: renombras «Aseo» a «Limpieza», y los tramos horarios
+-- que ajustaste a mano quedan colgando de un puesto que ya no existe. No se
+-- borran — es peor, siguen ahi y no se ven. La pantalla mostraria «Limpieza»
+-- sin sus ajustes, y si algun dia vuelves a crear un puesto llamado «Aseo»
+-- reaparecerian solos.
+--
+-- Es la misma trampa de siempre: una tabla nueva que no se agrego a una
+-- operacion vieja. Se arregla aqui, no en la pantalla.
+--
+-- NO BORRA NADA. Se puede pegar las veces que haga falta.
+-- =====================================================================
+
+create or replace function renombrar_puesto(p_puesto uuid, p_nombre text)
+returns void language plpgsql security definer set search_path = public as $$
+declare v_viejo text; v_local uuid;
+begin
+  select nombre, local_id into v_viejo, v_local from puestos where id = p_puesto;
+  if not found then raise exception 'ese puesto no existe'; end if;
+  if not es_mi_local(v_local) then raise exception 'ese puesto no es de tu local'; end if;
+  if btrim(coalesce(p_nombre,'')) = '' then raise exception 'el nombre no puede ir vacio'; end if;
+
+  update puestos     set nombre = btrim(p_nombre) where id = p_puesto;
+  update personas    set rol    = btrim(p_nombre)
+   where local_id = v_local and lower(btrim(rol))    = lower(btrim(v_viejo));
+  update asignaciones set puesto = btrim(p_nombre)
+   where local_id = v_local and lower(btrim(puesto)) = lower(btrim(v_viejo));
+  update dotacion    set puesto = btrim(p_nombre)
+   where local_id = v_local and lower(btrim(puesto)) = lower(btrim(v_viejo));
+
+  -- LO NUEVO. `if to_regclass` para que esto se pueda pegar aunque todavia no
+  -- se haya creado la tabla de tramos: asi el SQL no depende del orden en que
+  -- se peguen los arreglos.
+  if to_regclass('public.dotacion_tramos') is not null then
+    update dotacion_tramos set puesto = btrim(p_nombre)
+     where local_id = v_local and lower(btrim(puesto)) = lower(btrim(v_viejo));
+  end if;
+end $$;
+
+grant execute on function renombrar_puesto(uuid,text) to authenticated;
+
+-- Comprobar que quedo: deberia decir que la funcion menciona dotacion_tramos.
+--   select prosrc like '%dotacion_tramos%' as incluye_tramos
+--     from pg_proc where proname = 'renombrar_puesto';
+
+
+-- ---------- arreglo-dias-turno.sql ----------
+-- =====================================================================
+-- UN TURNO SABE EN QUE DIAS EXISTE.   06-10-2026
+--
+-- Pedro, msgs 4360-4361: al crear un turno quiere «definir las fechas,
+-- definir los horarios», y hoy la tabla `turnos` solo guarda nombre, inicio,
+-- fin, colacion y orden. En que dias existe un turno no se guardaba en ningun
+-- sitio: se deducia de donde hubiera gente puesta, que es otra cosa.
+--
+-- POR QUE IMPORTA. «La Cena existe de jueves a domingo» es una propiedad DEL
+-- TURNO, no de quien lo trabaja esta semana. Sin esto, el lunes aparece una
+-- Cena vacia en «Cuanta gente necesito» y el dueno tiene que acordarse de que
+-- ese dia no va.
+--
+-- COMO SE GUARDA. Una cadena con los indices de los dias, **0 = lunes** y
+-- **6 = domingo**, que es la misma convencion que ya usa la app para el perfil
+-- del dia (`(getDay() + 6) % 7`). Ejemplos:
+--     '0123456'  todos los dias          (es lo que traen los turnos de hoy)
+--     '3456'     de jueves a domingo
+--     '01234'    de lunes a viernes
+--
+-- Se eligio texto y no un array ni una mascara de bits por una razon practica:
+-- se lee de un vistazo en el editor de Supabase. Si algun dia hay que
+-- depurarlo, `select nombre, dias from turnos` lo dice todo.
+--
+-- EL DEFAULT ES TODOS LOS DIAS A PROPOSITO: los turnos que ya existen tienen
+-- que seguir comportandose exactamente igual despues de pegar esto. Una
+-- migracion que cambia lo que ya funcionaba no es una migracion, es un susto.
+--
+-- NO BORRA NADA. Se puede pegar las veces que haga falta.
+-- =====================================================================
+
+alter table turnos
+  add column if not exists dias text not null default '0123456';
+
+-- Que no entre basura: solo digitos del 0 al 6, sin repetir y en orden no
+-- importa. La app los escribe ordenados; la comprobacion es por si alguien
+-- toca la tabla a mano.
+do $$
+begin
+  if not exists (select 1 from pg_constraint where conname = 'turnos_dias_validos') then
+    alter table turnos
+      add constraint turnos_dias_validos check (dias ~ '^[0-6]*$');
+  end if;
+end $$;
+
+-- Comprobar que quedo:
+--   select nombre, dias from turnos order by orden;
+-- Deberia salir '0123456' en todos los que ya existian.
+
+
+-- =====================================================================
+-- ---------- arreglo-marcar-sin-plantilla.sql ----------
+-- =====================================================================
+
+-- =====================================================================
+-- QUIEN TIENE UN TURNO CON HORAS ESCRITAS A MANO TAMBIEN PUEDE MARCAR
+-- 06-10-2026
+--
+-- EL FALLO. `marcar()` exige `turno_id is not null`: o sea, que el turno haya
+-- salido de una PLANTILLA. Eso era cierto el 02-10, cuando un turno no era mas
+-- que un puntero a una plantilla.
+--
+-- El 03-10 `arreglo-turno-con-horas.sql` le dio a cada asignacion sus propias
+-- horas, y el dialogo de la malla abre con «— escribir las horas —», que guarda
+-- `turno_id = null`. Desde ese dia, a quien le pongan un turno escrito a mano:
+--
+--   · no puede apretar «confirmo» en su link
+--   · no puede marcar «llegue»
+--   · y no recibe ningun error: la funcion devuelve false y la pantalla se
+--     queda igual, como si el boton no hiciera nada
+--
+-- Lo que lo hace feo es que no se cae nada. Falla en silencio, y en la pantalla
+-- del jefe esa persona aparece simplemente como que no confirmo.
+--
+-- COMO SE ENCONTRO. No por un reporte: `arreglo-tope.sql` resulto estar
+-- caducado —redefinia una funcion que otro arreglo posterior ya habia
+-- reescrito— y al revisar si le pasaba lo mismo al resto aparecio que `marcar`
+-- esta definida en tres archivos. La que manda es la de `arreglo-marcaje-libre`
+-- del 02-10, anterior al cambio que creo los turnos sin plantilla.
+--
+-- EL ARREGLO. Pedir que el turno TENGA HORAS, que es lo que de verdad lo hace
+-- un turno, en vez de pedir que venga de una plantilla. Es la misma condicion
+-- que ya usa `tomar_turno()` desde `arreglo-sin-asignar.sql`: `inicio is not
+-- null`. Las ausencias siguen fuera, que es lo correcto: no se marca llegada
+-- un dia de vacaciones.
+--
+-- Se puede pegar dos veces. No borra nada.
+-- =====================================================================
+
+create or replace function marcar(p_token text, p_fecha date, p_campo text, p_valor boolean)
+returns boolean language plpgsql security definer set search_path = public as $$
+declare v_id uuid;
+begin
+  select id into v_id from personas where token = p_token and activo;
+  if v_id is null then return false; end if;
+  if p_campo not in ('confirmo','llego') then return false; end if;
+  -- Aca estaba la condicion vieja, la que pedia plantilla. NO se escribe
+  -- textual ni en comentario: `comprobar.sql` mira este mismo cuerpo con un
+  -- LIKE, y un comentario le miente igual que al de al lado. Ya paso el 06-10
+  -- y costo una pegada de mas.
+  if not exists (select 1 from asignaciones
+                 where persona_id = v_id and fecha = p_fecha and inicio is not null) then
+    return false;
+  end if;
+  insert into marcas (persona_id, fecha) values (v_id, p_fecha) on conflict do nothing;
+  if p_campo = 'confirmo' then
+    update marcas set confirmo = p_valor, marcado_por = 'trabajador'
+     where persona_id = v_id and fecha = p_fecha;
+  else
+    update marcas set llego = p_valor, marcado_por = 'trabajador',
+                      hora_llego = case when p_valor then now() else null end
+     where persona_id = v_id and fecha = p_fecha;
+  end if;
+  return true;
+end $$;
+
+grant execute on function marcar(text,date,text,boolean) to anon;
+
+-- Nota de alcance, heredada de `arreglo-marcaje-libre.sql`: sigue sin exigirse
+-- que `p_fecha` sea HOY. Es a proposito mientras esto sea un prototipo que se
+-- muestra. Para un piloto de verdad hay que reponer ese limite.

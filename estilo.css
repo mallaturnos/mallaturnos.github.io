@@ -815,3 +815,56 @@ td.semcol span.mas{color:#a3402a}
    el ojo tiene que saber cual esta mirando. 06-10-2026. */
 .nt tr[data-i] > td:first-child { border-left:2.5px solid #c9b07a; padding-left:6px; }
 .nt tr[data-i] .gui { color:#9a9a9a; }
+
+/* ---------- la malla como planilla: seleccionar casillas (06-10-2026) ----------
+   El fondo va con `color-mix` sobre el acento en vez de un azul fijo: las
+   casillas tienen color propio —cada turno pinta el suyo— y un relleno opaco
+   los taparia justo cuando uno quiere ver QUE esta marcando.
+   El borde es `inset`, no `outline`: un outline se dibuja por fuera y en una
+   tabla con `border-collapse` se le monta a la casilla de al lado. */
+td.cell.sel{background:color-mix(in srgb, var(--accent) 14%, transparent);
+  box-shadow:inset 0 0 0 1px var(--accent)}
+td.cell.sel.ancla{box-shadow:inset 0 0 0 2px var(--accent)}
+td.cell.sel .bloque{border-color:var(--accent)}
+
+/* La barrita que aparece al marcar. Sin ella nadie descubre que existe el
+   Ctrl+C: la funcion estaria y no la encontraria ni Pedro. */
+.selaviso{display:flex;flex-wrap:wrap;gap:4px 14px;
+  align-items:baseline;margin:0 0 8px;padding:7px 11px;border:1px solid var(--accent);
+  border-radius:7px;background:var(--surface-2);font-size:.75rem;
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.selaviso span{color:var(--fg-dim);font-family:var(--font-body);font-size:.6875rem}
+.selaviso em{color:var(--fg-faint);font-style:normal;font-size:.6875rem}
+.selaviso b{color:var(--accent)}
+
+/* ---------- el menu del boton derecho (06-10-2026) ----------
+   `position:fixed` y no `absolute`: se posiciona con las coordenadas del clic,
+   que son de la ventana. Con `absolute` dentro de un contenedor con scroll
+   —y la malla vive en uno— aparece corrido justo cuando hay scroll, que es
+   siempre que la tabla es mas ancha que la pantalla. */
+.menucel{position:fixed;z-index:50;min-width:230px;padding:5px;
+  border:1px solid var(--line);border-radius:9px;background:var(--surface);
+  box-shadow:0 8px 28px rgba(0,0,0,.22)}
+.menucel .cab{margin:2px 8px 5px;font-size:.6875rem;color:var(--fg-faint);
+  font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.menucel hr{margin:4px 6px;border:0;border-top:1px solid var(--line)}
+.menucel button{display:flex;width:100%;gap:14px;align-items:baseline;
+  justify-content:space-between;padding:7px 9px;border:0;border-radius:6px;
+  background:transparent;color:var(--fg);font-family:var(--font-body);
+  font-size:.8125rem;text-align:left;cursor:pointer}
+.menucel button:hover:not(:disabled),
+.menucel button:focus-visible{background:var(--surface-3);outline:none}
+.menucel button:disabled{color:var(--fg-faint);cursor:default}
+/* El atajo se muestra siempre, tambien en las opciones apagadas: un «Pegar»
+   gris con su Ctrl+V al lado ENSEÑA que el atajo existe. Esconderlas no. */
+.menucel kbd{font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-faint);
+  border:1px solid var(--line);border-radius:4px;padding:1px 5px;white-space:nowrap}
+.menucel button:disabled kbd{opacity:.55}
+
+/* El tirador de relleno: el cuadradito de la esquina de la seleccion.
+   `fixed` y colgado del <body>, no dentro del <td>: dentro lo cortaria el
+   borde de la casilla, y habria que redibujarlo en cada repintado de la fila.
+   Se posiciona centrado sobre la esquina de abajo a la derecha. */
+.tirador{position:fixed;z-index:20;width:9px;height:9px;border-radius:2px;
+  background:var(--accent);border:1.5px solid var(--surface);cursor:crosshair}
+.tirador:hover{transform:scale(1.35)}

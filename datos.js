@@ -208,6 +208,12 @@
   const borrarAsignacion = (id) =>
     pedir(sb.from('asignaciones').delete().eq('id', id));
 
+  // Varias de una vez, para la tecla Supr sobre una seleccion. Una llamada por
+  // id tardaria lo suyo con media semana marcada, y ademas podria quedar a
+  // medias: esta se va entera o no se va.
+  const borrarVarias = (ids) =>
+    pedir(sb.from('asignaciones').delete().in('id', ids));
+
   // La ausencia es UNA por dia y manda sobre los turnos: si alguien esta de
   // vacaciones, no puede tener turnos ese dia. Por eso se borra lo que haya.
   const ponerAusencia = async (localId, personaId, fecha, ausencia) => {
@@ -621,6 +627,7 @@
     baseAlDia,
     puestos, crearPuesto, guardarPuesto, quitarPuesto, renombrarPuesto,
     asignaciones, crearAsignacion, crearAsignacionesLote, editarAsignacion, borrarAsignacion,
+    borrarVarias,
     ponerAusencia, limpiarDia,
     marcas, marcarComoJefe, horasPagadas, cerrarDia, copiarSemana, copiarDiaA, copiarSemanaA,
     borrarAsignaciones, reponerAsignaciones,

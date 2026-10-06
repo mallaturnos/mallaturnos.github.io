@@ -1209,6 +1209,589 @@ function engancharArrastre(tabla) {
   });
 }
 
+
+/* ================== LA MALLA COMO UNA PLANILLA ==================
+   Pedido por Pedro el 06-10-2026: «la planilla deberia aceptar enegrecer,
+   copiar pegar... se deberia poder navegar en la planilla como si fuera una
+   planilla excel».
+
+   ETAPA 1: seleccionar, copiar, pegar y borrar. El menu del boton derecho y
+   las flechas del teclado vienen despues.
+
+   LA DECISION QUE ORDENA EL RESTO. Nada de lo que ya funciona cambia de
+   gesto. Un clic en un bloque sigue abriendo el dialogo, y un clic en
+   «+ turno» sigue agregando. Lo unico que se suma es que CUALQUIER clic
+   ademas SELECCIONA esa casilla, y que arrastrar desde el fondo de la casilla
+   —no desde un bloque, que eso ya es mover el turno— pinta un rango.
+
+   Por que asi y no «un clic selecciona, dos clics editan», que es lo de Excel:
+   porque el clic que abre el dialogo es el gesto mas repetido de la pantalla
+   y cambiarlo de significado le romperia la mano a Pedro por una funcion que
+   todavia no sabe que existe. Se puede revisar cuando la use.
+
+   La seleccion vive por CLAVE (persona + fecha), no por elemento del DOM: la
+   tabla se repinta entera en cada cambio y una referencia a un <td> se queda
+   apuntando a algo que ya no esta en la pagina.
+
+   SOLO en la vista por personas. En la de puestos una fila no es gente, y
+   «pegar aca» no quiere decir nada claro; en el mes, el clic en el hueco YA
+   abre el dialogo, asi que no hay gesto libre que tomar. */
+
+const SEL = { claves: new Set(), ancla: null, pintando: false, suma: false,
+              rellenando: null };
+let PORTA = null;   // lo copiado: { ancho, alto, celdas: [[ [turnos...] ]] }
+
+const claveCel = cel => (cel.dataset.p || '') + '|' + cel.dataset.fecha;
+
+/* La geometria se saca del DOM EN EL MOMENTO del gesto. Las filas de la malla
+   no son una grilla regular —hay titulos de grupo, la fila «Sin asignar» y el
+   pie— asi que numerar <tr> no sirve: se numeran solo las filas que TIENEN
+   casillas, que son las que se pueden seleccionar. */
+function geometria() {
+  if (S.agrupar === 'puestos') return null;   // comparte #tablaSem, pero sus filas no son gente
+  const tabla = $('#tablaSem'); if (!tabla) return null;
+  const filas = [...tabla.querySelectorAll('tbody tr')].filter(tr => tr.querySelector('td.cell[data-fecha]'));
+  const mapa = new Map(); const rejilla = [];
+  filas.forEach((tr, f) => {
+    const cels = [...tr.querySelectorAll('td.cell[data-fecha]')];
+    rejilla.push(cels);
+    cels.forEach((cel, c) => mapa.set(claveCel(cel), { f, c, cel }));
+  });
+  return { rejilla, mapa };
+}
+
+function pintarSeleccion() {
+  const tabla = $('#tablaSem'); if (!tabla) return;
+  tabla.querySelectorAll('td.cell.sel').forEach(x => x.classList.remove('sel', 'ancla'));
+  if (!SEL.claves.size) { avisarSeleccion(); pintarTirador(); return; }
+  tabla.querySelectorAll('td.cell[data-fecha]').forEach(cel => {
+    if (SEL.claves.has(claveCel(cel))) cel.classList.add('sel');
+  });
+  const a = SEL.ancla && [...tabla.querySelectorAll('td.cell[data-fecha]')]
+              .find(c => claveCel(c) === SEL.ancla);
+  if (a) a.classList.add('ancla');
+  avisarSeleccion();
+  pintarTirador();
+}
+
+/* La barrita de abajo. Sin esto, la seleccion es un recuadro azul que no le
+   dice a nadie que ahora puede apretar Ctrl+C: la funcion existiria y nadie la
+   encontraria. Es el mismo problema que tenia «Horario libre…» escondido. */
+function avisarSeleccion() {
+  const caja = $('#selAviso'); if (!caja) return;
+  const n = SEL.claves.size;
+  if (!n) { caja.hidden = true; return; }
+  const turnos = [...SEL.claves].reduce((t, k) => t + turnosDeClave(k).length, 0);
+  caja.hidden = false;
+  caja.innerHTML = `<b>${n}</b> ${n === 1 ? 'casilla' : 'casillas'}`
+    + ` · <b>${turnos}</b> ${turnos === 1 ? 'turno' : 'turnos'}`
+    + `<span>Ctrl+C copiar · Ctrl+V pegar · Supr borrar · Esc soltar</span>`
+    + (PORTA ? `<em>en el portapapeles: ${PORTA.alto}×${PORTA.ancho}`
+               + ` (${PORTA.celdas.flat().reduce((t,c)=>t+c.length,0)} turnos)</em>` : '');
+}
+
+function turnosDeClave(k) {
+  const [pid, fecha] = k.split('|');
+  if (!pid) return S.abiertos.filter(a => a.fecha === fecha && !a.persona_id);
+  if (ausenciaDe(pid, fecha)) return [];     // un dia de ausencia no se copia
+  return turnosDe(pid, fecha);
+}
+
+function seleccionar(cel, modo) {
+  const g = geometria(); if (!g) return;
+  const k = claveCel(cel);
+  if (modo === 'suma') {                      // Ctrl+clic: sumar o quitar una
+    if (SEL.claves.has(k)) SEL.claves.delete(k); else SEL.claves.add(k);
+    SEL.ancla = k;
+  } else if (modo === 'rango' && SEL.ancla && g.mapa.has(SEL.ancla)) {
+    const a = g.mapa.get(SEL.ancla), b = g.mapa.get(k); if (!b) return;
+    SEL.claves.clear();
+    for (let f = Math.min(a.f, b.f); f <= Math.max(a.f, b.f); f++)
+      for (let c = Math.min(a.c, b.c); c <= Math.max(a.c, b.c); c++)
+        if (g.rejilla[f] && g.rejilla[f][c]) SEL.claves.add(claveCel(g.rejilla[f][c]));
+  } else {
+    SEL.claves.clear(); SEL.claves.add(k); SEL.ancla = k;
+  }
+  // Un clic tambien manda sobre la casilla ACTIVA: si no, apretar con el raton
+  // y seguir con las flechas arrancaria desde donde quedo el teclado, que no
+  // es donde el usuario esta mirando.
+  if (modo !== 'rango') ACTIVA = k;
+  pintarSeleccion();
+}
+
+function soltarSeleccion() { SEL.claves.clear(); SEL.ancla = null; ACTIVA = null; pintarSeleccion(); }
+
+/* Idempotente, igual que `engancharArrastre`: se llama en cada repintado. */
+function engancharSeleccion(tabla) {
+  if (!tabla || tabla.dataset.selec) return;
+  tabla.dataset.selec = '1';
+
+  tabla.addEventListener('mousedown', ev => {
+    if (ev.button !== 0) return;              // el derecho es de la etapa 2
+    if (S.agrupar === 'puestos') return;
+    const cel = ev.target.closest('td.cell[data-fecha]'); if (!cel) return;
+    const enBloque = !!ev.target.closest('[data-asig]');
+
+    if (ev.shiftKey) { ev.preventDefault(); return seleccionar(cel, 'rango'); }
+    if (ev.ctrlKey || ev.metaKey) { ev.preventDefault(); return seleccionar(cel, 'suma'); }
+
+    seleccionar(cel, 'uno');
+    // Arrastrar desde un bloque ya significa MOVER el turno. Desde el resto de
+    // la casilla —el «+ turno» incluido, que ocupa casi toda— pinta el rango.
+    if (!enBloque) SEL.pintando = true;
+  });
+
+  tabla.addEventListener('mouseover', ev => {
+    if (!SEL.pintando && !SEL.rellenando) return;
+    const cel = ev.target.closest('td.cell[data-fecha]'); if (!cel) return;
+    seleccionar(cel, 'rango');
+  });
+}
+
+// El mouseup va en el documento: soltar el boton fuera de la tabla tiene que
+// terminar el arrastre igual, o la seleccion sigue pintandose sola despues.
+document.addEventListener('mouseup', () => {
+  SEL.pintando = false;
+  if (SEL.rellenando) soltarRelleno();
+});
+
+/* ---------- copiar, pegar, borrar ---------- */
+
+function enCampo() {
+  const a = document.activeElement;
+  return !!a && (/^(INPUT|TEXTAREA|SELECT)$/.test(a.tagName) || a.isContentEditable
+                 || a.closest('dialog[open]'));
+}
+
+function copiarSeleccion(cortar) {
+  const g = geometria(); if (!g || !SEL.claves.size) return;
+  const pts = [...SEL.claves].map(k => g.mapa.get(k)).filter(Boolean);
+  if (!pts.length) return;
+  const f0 = Math.min(...pts.map(p => p.f)), f1 = Math.max(...pts.map(p => p.f));
+  const c0 = Math.min(...pts.map(p => p.c)), c1 = Math.max(...pts.map(p => p.c));
+  const celdas = [];
+  for (let f = f0; f <= f1; f++) {
+    const fila = [];
+    for (let c = c0; c <= c1; c++) {
+      const cel = g.rejilla[f] && g.rejilla[f][c];
+      const dentro = cel && SEL.claves.has(claveCel(cel));
+      fila.push(dentro ? turnosDeClave(claveCel(cel)).map(a => ({
+        turno_id: a.turno_id || null, inicio: a.inicio, fin: a.fin,
+        colacion: a.colacion || 0, puesto: a.puesto || '', nota: a.nota || '',
+      })) : []);
+    }
+    celdas.push(fila);
+  }
+  PORTA = { ancho: c1 - c0 + 1, alto: f1 - f0 + 1, celdas };
+
+  // Ademas al portapapeles del sistema, en texto, para que se pueda pegar en
+  // un correo o en un Excel de verdad. Es best-effort: sin https o sin permiso
+  // tira, y eso no debe romper el copiado de adentro, que es el que importa.
+  const txt = celdas.map(fila => fila.map(cel =>
+    cel.map(t => hhmm(t.inicio) + '-' + hhmm(t.fin) + (t.puesto ? ' ' + t.puesto : '')).join(' / ')
+  ).join('\t')).join('\n');
+  try { navigator.clipboard && navigator.clipboard.writeText(txt); } catch (e) {}
+
+  const n = celdas.flat().reduce((t, c) => t + c.length, 0);
+  if (cortar) return borrarSeleccion('cortar');
+  decir(`Copiadas ${PORTA.alto}×${PORTA.ancho} casillas con ${n} ${n === 1 ? 'turno' : 'turnos'}. `
+        + 'Marca donde quieras ponerlos y aprieta Ctrl+V.', 'ok');
+  avisarSeleccion();
+}
+
+/* Pegar REEMPLAZA lo que haya en la casilla de destino, como en Excel: copiar
+   el lunes sobre el martes tiene que dejar el martes igual al lunes, no con el
+   doble de turnos. Deshacer lo repone si fue sin querer.
+
+   Dos formas, las dos de Excel:
+     · una sola casilla copiada  → se repite en TODAS las marcadas
+     · un rectangulo             → se pega anclado arriba a la izquierda */
+async function pegarSeleccion() {
+  if (!PORTA) return decir('No hay nada copiado. Marca casillas y aprieta Ctrl+C.', 'bad');
+  const g = geometria(); if (!g || !SEL.claves.size)
+    return decir('Marca primero dónde quieres pegar.', 'bad');
+
+  const pts = [...SEL.claves].map(k => g.mapa.get(k)).filter(Boolean);
+  const f0 = Math.min(...pts.map(p => p.f)), c0 = Math.min(...pts.map(p => p.c));
+  const unaSola = PORTA.alto === 1 && PORTA.ancho === 1;
+
+  const destinos = [];   // { cel, turnos }
+  if (unaSola) {
+    pts.forEach(p => destinos.push({ cel: p.cel, turnos: PORTA.celdas[0][0] }));
+  } else {
+    for (let f = 0; f < PORTA.alto; f++)
+      for (let c = 0; c < PORTA.ancho; c++) {
+        const cel = g.rejilla[f0 + f] && g.rejilla[f0 + f][c0 + c];
+        if (cel) destinos.push({ cel, turnos: PORTA.celdas[f][c] });
+      }
+  }
+
+  // Las ausencias no se pisan: si alguien esta de vacaciones, pegarle un turno
+  // encima es lo contrario de lo que uno quiso hacer. Se saltan y se avisa.
+  const saltadas = [];
+  const utiles = destinos.filter(d => {
+    const [pid, fecha] = claveCel(d.cel).split('|');
+    if (pid && ausenciaDe(pid, fecha)) { saltadas.push(d.cel); return false; }
+    return true;
+  });
+  if (!utiles.length) return decir('Todas las casillas marcadas son días de ausencia. No se pegó nada.', 'bad');
+
+  const borrar = [];
+  const crear = [];
+  utiles.forEach(({ cel, turnos }) => {
+    const k = claveCel(cel); const [pid, fecha] = k.split('|');
+    turnosDeClave(k).forEach(a => borrar.push(a.id));
+    turnos.forEach(t => crear.push({ persona_id: pid || null, fecha, turno_id: t.turno_id,
+                                     inicio: t.inicio, fin: t.fin, colacion: t.colacion,
+                                     puesto: t.puesto, nota: t.nota }));
+  });
+  if (!borrar.length && !crear.length) return decir('No había nada que pegar.', 'bad');
+
+  recordar('pegar en ' + utiles.length + (utiles.length === 1 ? ' casilla' : ' casillas'));
+  try {
+    if (borrar.length) await DATOS.borrarVarias(borrar);
+    if (crear.length)  await DATOS.crearAsignacionesLote(S.local.id, crear);
+    await refrescar();
+    decir(`Pegados ${crear.length} ${crear.length === 1 ? 'turno' : 'turnos'} en `
+      + `${utiles.length} ${utiles.length === 1 ? 'casilla' : 'casillas'}.`
+      + (saltadas.length ? ` Se saltaron ${saltadas.length} por ausencia.` : '')
+      + ' Si fue sin querer, aprieta Deshacer.', 'ok');
+  } catch (e) { S.hist.pop(); pintarDeshacer(); decir(e.message, 'bad'); }
+}
+
+async function borrarSeleccion(porCorte) {
+  const ids = [...SEL.claves].flatMap(k => turnosDeClave(k).map(a => a.id));
+  if (!ids.length) return decir('En lo marcado no hay ningún turno que borrar.', 'bad');
+  recordar((porCorte ? 'cortar ' : 'borrar ') + ids.length
+           + (ids.length === 1 ? ' turno' : ' turnos'));
+  try {
+    await DATOS.borrarVarias(ids);
+    await refrescar();
+    decir(`${porCorte ? 'Cortados' : 'Borrados'} ${ids.length} `
+      + `${ids.length === 1 ? 'turno' : 'turnos'}. Si fue sin querer, aprieta Deshacer.`, 'ok');
+  } catch (e) { S.hist.pop(); pintarDeshacer(); decir(e.message, 'bad'); }
+}
+
+function decir(txt, clase) {
+  const m = $('#msgSem'); if (!m) return;
+  m.textContent = txt; m.className = 'msg ' + (clase || '');
+  clearTimeout(decir.t);
+  decir.t = setTimeout(() => { const x = $('#msgSem'); if (x) { x.textContent = ''; x.className = 'msg'; } }, 7000);
+}
+
+/* El teclado va en el DOCUMENTO, no en la tabla: para que la tabla reciba
+   teclas tendria que tener el foco, y aca el foco lo tienen los bloques y los
+   botones de adentro. Se sale si el foco esta en un campo o en un dialogo, que
+   es donde Ctrl+C tiene que seguir copiando texto. */
+document.addEventListener('keydown', ev => {
+  if (enCampo()) return;
+  if (!SEL.claves.size && ev.key !== 'Escape') return;
+  const ctrl = ev.ctrlKey || ev.metaKey;
+  if (ctrl && (ev.key === 'c' || ev.key === 'C')) { ev.preventDefault(); copiarSeleccion(false); }
+  else if (ctrl && (ev.key === 'x' || ev.key === 'X')) { ev.preventDefault(); copiarSeleccion(true); }
+  else if (ctrl && (ev.key === 'v' || ev.key === 'V')) { ev.preventDefault(); pegarSeleccion(); }
+  else if (ev.key === 'Delete' || ev.key === 'Backspace') { ev.preventDefault(); borrarSeleccion(false); }
+  else if (ev.key === 'Escape') {
+    const m = $('#menuCel');
+    if (m && !m.hidden) cerrarMenu(); else soltarSeleccion();
+  }
+});
+
+
+/* ---------- ETAPA 2: el menu del boton derecho ----------
+   Pedro, 06-10-2026: «faltan las opciones del boton derecho».
+
+   Lo que hace que valga la pena no es tener las mismas acciones del teclado en
+   un menu: es que **se vean**. Los atajos de la etapa 1 solo los encuentra
+   quien ya sabe que existen; el boton derecho es donde la gente va a BUSCAR
+   que se puede hacer con lo que tiene marcado.
+
+   Dos reglas que se siguieron:
+
+   · Si lo que se aprieta esta fuera de la seleccion, se selecciona eso primero
+     —como Excel, y como cualquier explorador de archivos—. Abrir un menu que
+     opera sobre otra cosa es la forma mas rapida de borrar lo que no era.
+   · Las opciones que no se pueden hacer salen APAGADAS, no escondidas. Un menu
+     que cambia de largo segun el caso no se aprende nunca; uno que siempre
+     tiene las mismas filas, si. Y «Pegar» apagado ademas ENSEÑA que existe. */
+
+const MENU = { cel: null };
+
+function menuCel() {
+  let m = $('#menuCel');
+  if (m) return m;
+  m = el('div', 'menucel');
+  m.id = 'menuCel'; m.hidden = true; m.setAttribute('role', 'menu');
+  document.body.appendChild(m);
+  // Un solo escuchador, con la accion en el propio boton: el menu se vuelve a
+  // dibujar entero cada vez que se abre.
+  m.addEventListener('click', ev => {
+    const b = ev.target.closest('button[data-acc]'); if (!b || b.disabled) return;
+    // La casilla se guarda ANTES de cerrar: `cerrarMenu()` deja `MENU.cel` en
+    // null, y las dos opciones de abajo la necesitan. Con esto en el orden
+    // contrario, «Marcar toda la fila» cerraba el menu y no marcaba nada.
+    const cel = MENU.cel;
+    cerrarMenu();
+    const acc = b.dataset.acc;
+    if (acc === 'copiar')  return copiarSeleccion(false);
+    if (acc === 'cortar')  return copiarSeleccion(true);
+    if (acc === 'pegar')   return pegarSeleccion();
+    if (acc === 'borrar')  return borrarSeleccion(false);
+    if (acc === 'agregar') {
+      const [pid, fecha] = claveCel(cel).split('|');
+      return abrirTurno(pid ? S.personas.find(x => x.id === pid) : null, fecha, null);
+    }
+    if (acc === 'fila')    return seleccionarLinea('fila', cel);
+    if (acc === 'columna') return seleccionarLinea('columna', cel);
+  });
+  return m;
+}
+
+/* Toda la fila de una persona, o todo un dia de todos. Es lo que uno quiere
+   cuando piensa «copiale la semana a Benja» o «el lunes igual que el martes»,
+   y a mano son siete u ocho clics con el Shift apretado. */
+function seleccionarLinea(que, cel) {
+  const g = geometria(); if (!g || !cel) return;
+  const p = g.mapa.get(claveCel(cel)); if (!p) return;
+  SEL.claves.clear();
+  if (que === 'fila') g.rejilla[p.f].forEach(c => SEL.claves.add(claveCel(c)));
+  else g.rejilla.forEach(fila => { if (fila[p.c]) SEL.claves.add(claveCel(fila[p.c])); });
+  SEL.ancla = claveCel(cel);
+  pintarSeleccion();
+}
+
+function cerrarMenu() { const m = $('#menuCel'); if (m) m.hidden = true; MENU.cel = null; }
+
+function abrirMenu(cel, x, y) {
+  MENU.cel = cel;
+  const m = menuCel();
+  const nCel = SEL.claves.size;
+  const nTur = [...SEL.claves].reduce((t, k) => t + turnosDeClave(k).length, 0);
+  const plural = (n, u, v) => n + ' ' + (n === 1 ? u : v);
+
+  const fila = (acc, txt, atajo, activo) =>
+    `<button type="button" role="menuitem" data-acc="${acc}"${activo ? '' : ' disabled'}>`
+    // Sin atajo no va <kbd>: un recuadro vacio al lado de «Marcar toda la fila»
+    // parece un control roto. Se vio en la captura, no en las pruebas.
+    + `<span>${txt}</span>${atajo ? `<kbd>${atajo}</kbd>` : ''}</button>`;
+
+  m.innerHTML =
+      `<p class="cab">${plural(nCel, 'casilla marcada', 'casillas marcadas')}`
+    + `${nTur ? ' · ' + plural(nTur, 'turno', 'turnos') : ''}</p>`
+    + fila('copiar',  'Copiar',        'Ctrl+C', nTur > 0)
+    + fila('cortar',  'Cortar',        'Ctrl+X', nTur > 0)
+    + fila('pegar',   PORTA ? `Pegar (${PORTA.alto}×${PORTA.ancho})` : 'Pegar', 'Ctrl+V', !!PORTA)
+    + fila('borrar',  'Borrar los turnos', 'Supr', nTur > 0)
+    + '<hr>'
+    + fila('agregar', 'Agregar un turno acá', '', true)
+    + '<hr>'
+    + fila('fila',    'Marcar toda la fila',    '', true)
+    + fila('columna', 'Marcar todo el día',     '', true);
+
+  // Se dibuja primero y se mide despues: sin medirlo, un menu abierto abajo a
+  // la derecha se sale de la pantalla y la mitad queda donde no se alcanza.
+  m.hidden = false;
+  m.style.left = '0px'; m.style.top = '0px';
+  const r = m.getBoundingClientRect();
+  const mx = Math.min(x, window.innerWidth  - r.width  - 8);
+  const my = Math.min(y, window.innerHeight - r.height - 8);
+  m.style.left = Math.max(8, mx) + 'px';
+  m.style.top  = Math.max(8, my) + 'px';
+  const primero = m.querySelector('button:not([disabled])');
+  if (primero) primero.focus();
+}
+
+document.addEventListener('contextmenu', ev => {
+  const cel = ev.target.closest('#tablaSem td.cell[data-fecha]');
+  if (!cel || S.agrupar === 'puestos') return;      // fuera de la malla, el menu del navegador
+  ev.preventDefault();
+  // Apretar fuera de lo marcado selecciona eso primero: un menu que opera
+  // sobre otra cosa es la forma mas rapida de borrar lo que no era.
+  if (!SEL.claves.has(claveCel(cel))) seleccionar(cel, 'uno');
+  abrirMenu(cel, ev.clientX, ev.clientY);
+});
+
+document.addEventListener('mousedown', ev => {
+  const m = $('#menuCel');
+  if (m && !m.hidden && !ev.target.closest('#menuCel')) cerrarMenu();
+}, true);
+window.addEventListener('scroll', cerrarMenu, true);
+window.addEventListener('scroll', () => { if (typeof pintarTirador === 'function') pintarTirador(); }, true);
+window.addEventListener('resize', () => { if (typeof pintarTirador === 'function') pintarTirador(); });
+window.addEventListener('resize', cerrarMenu);
+
+
+/* ---------- ETAPA 3: moverse con el teclado, Ctrl+Z, y el tirador ----------
+   Pedro pidio «navegar en la planilla como si fuera una planilla excel». Las
+   etapas 1 y 2 dieron marcar y operar; falta lo de MOVERSE sin soltar el
+   teclado, que es lo que hace que una planilla se sienta planilla.
+
+   · Flechas          mueven la casilla marcada
+   · Shift + flechas  estiran el rectangulo desde el ancla
+   · Inicio / Fin     al primer o ultimo dia de la fila
+   · Enter            abre el turno de la casilla (o crea uno si esta vacia)
+   · Ctrl + Z         deshacer, el mismo boton de arriba
+
+   El ANCLA es lo que hace que Shift+flecha funcione como en Excel: el
+   rectangulo siempre se mide entre el ancla —la casilla donde empezo la
+   seleccion— y la casilla «activa», que es la que se mueve. Sin guardar las
+   dos por separado, estirar y despues achicar no vuelve sobre sus pasos. */
+
+let ACTIVA = null;   // la casilla que se mueve con las flechas, por clave
+
+function irA(df, dc, estirando) {
+  const g = geometria(); if (!g) return false;
+  const base = ACTIVA && g.mapa.has(ACTIVA) ? ACTIVA : SEL.ancla;
+  if (!base || !g.mapa.has(base)) return false;
+  const p = g.mapa.get(base);
+  const f = Math.max(0, Math.min(g.rejilla.length - 1, p.f + df));
+  const fila = g.rejilla[f]; if (!fila || !fila.length) return false;
+  const c = dc === 'inicio' ? 0
+          : dc === 'fin'    ? fila.length - 1
+          : Math.max(0, Math.min(fila.length - 1, p.c + dc));
+  const destino = fila[c]; if (!destino) return false;
+
+  ACTIVA = claveCel(destino);
+  if (estirando) {
+    if (!SEL.ancla) SEL.ancla = base;
+    seleccionar(destino, 'rango');
+  } else {
+    SEL.ancla = ACTIVA;
+    seleccionar(destino, 'uno');
+  }
+  // Que la casilla a la que uno se movio este a la vista. `nearest` y no
+  // `center`: con `center` la tabla salta en cada flecha aunque la casilla ya
+  // se viera, y marea.
+  destino.scrollIntoView({ block: 'nearest', inline: 'nearest' });
+  return true;
+}
+
+function abrirLaActiva() {
+  const g = geometria(); if (!g) return;
+  const k = ACTIVA || SEL.ancla; if (!k || !g.mapa.has(k)) return;
+  const [pid, fecha] = k.split('|');
+  const p = pid ? S.personas.find(x => x.id === pid) : null;
+  const hay = turnosDeClave(k);
+  // Con un solo turno se abre ESE; con varios no hay forma de saber cual quiso,
+  // asi que se crea uno nuevo, que es lo unico que no destruye informacion.
+  abrirTurno(p, fecha, hay.length === 1 ? hay[0] : null);
+}
+
+/* El tirador de relleno: el cuadradito de la esquina de abajo a la derecha de
+   la seleccion. Se arrastra y repite lo marcado hacia donde se lleve.
+
+   Va en un elemento SUELTO, posicionado sobre la tabla, y no dentro de la
+   casilla: dentro de un <td> con `overflow` lo cortaria el borde, y ademas
+   habria que redibujarlo en cada repintado de la fila. Asi solo se mueve. */
+function pintarTirador() {
+  let t = $('#tirador');
+  if (!t) {
+    t = el('div', 'tirador'); t.id = 'tirador'; t.hidden = true;
+    t.title = 'Arrastra para repetir lo marcado';
+    document.body.appendChild(t);
+    t.addEventListener('mousedown', ev => {
+      ev.preventDefault(); ev.stopPropagation();
+      SEL.rellenando = { desde: new Set(SEL.claves) };
+    });
+  }
+  const caja = $('#cajaSemana');
+  const g = geometria();
+  if (!g || SEL.claves.size < 1 || !caja || S.agrupar === 'puestos') { t.hidden = true; return; }
+  const pts = [...SEL.claves].map(k => g.mapa.get(k)).filter(Boolean);
+  if (!pts.length) { t.hidden = true; return; }
+  const f1 = Math.max(...pts.map(p => p.f)), c1 = Math.max(...pts.map(p => p.c));
+  const esquina = g.rejilla[f1] && g.rejilla[f1][c1];
+  if (!esquina) { t.hidden = true; return; }
+  const r = esquina.getBoundingClientRect();
+  const rc = caja.getBoundingClientRect();
+  // Si la casilla todavia no tiene tamaño es que la tabla se esta repintando
+  // en este mismo instante: medir ahora da ceros y el tirador se escondria
+  // solo. Se vuelve a intentar en el cuadro siguiente en vez de ocultarlo.
+  // (Se descubrio porque la prueba del tirador fallaba una vez de cada dos.)
+  if (!r.width || !r.height) { requestAnimationFrame(pintarTirador); return; }
+  // Si la esquina quedo fuera de la parte visible de la tabla, el tirador no se
+  // dibuja: pegado al borde parece que marca otra casilla.
+  if (r.right < rc.left || r.right > rc.right + 2 || r.bottom < rc.top || r.bottom > rc.bottom + 2) {
+    t.hidden = true; return;
+  }
+  t.style.left = (r.right - 4) + 'px';
+  t.style.top  = (r.bottom - 4) + 'px';
+  t.hidden = false;
+}
+
+async function soltarRelleno() {
+  const origen = SEL.rellenando; SEL.rellenando = null;
+  if (!origen) return;
+  const g = geometria(); if (!g) return;
+  // Lo que se marco DESPUES de empezar a arrastrar, menos lo que ya estaba:
+  // eso es a donde hay que repetir.
+  const nuevas = [...SEL.claves].filter(k => !origen.desde.has(k));
+  if (!nuevas.length) return;
+
+  // El molde: lo que habia en las casillas de origen, por COLUMNA. Rellenar
+  // hacia abajo repite la columna; hacia el lado, repite la fila. Es lo que
+  // hace Excel y lo que uno espera al estirar una semana.
+  const pts = [...origen.desde].map(k => g.mapa.get(k)).filter(Boolean);
+  if (!pts.length) return;
+  const f0 = Math.min(...pts.map(p => p.f)), f1 = Math.max(...pts.map(p => p.f));
+  const c0 = Math.min(...pts.map(p => p.c)), c1 = Math.max(...pts.map(p => p.c));
+  const alto = f1 - f0 + 1, ancho = c1 - c0 + 1;
+  const molde = (f, c) => {
+    const cel = g.rejilla[f0 + ((f - f0) % alto + alto) % alto]
+             && g.rejilla[f0 + ((f - f0) % alto + alto) % alto][c0 + ((c - c0) % ancho + ancho) % ancho];
+    return cel ? turnosDeClave(claveCel(cel)) : [];
+  };
+
+  const borrar = [], crear = [];
+  let saltadas = 0;
+  nuevas.forEach(k => {
+    const p = g.mapa.get(k); if (!p) return;
+    const [pid, fecha] = k.split('|');
+    if (pid && ausenciaDe(pid, fecha)) { saltadas++; return; }
+    turnosDeClave(k).forEach(a => borrar.push(a.id));
+    molde(p.f, p.c).forEach(t => crear.push({
+      persona_id: pid || null, fecha, turno_id: t.turno_id || null,
+      inicio: t.inicio, fin: t.fin, colacion: t.colacion || 0,
+      puesto: t.puesto || '', nota: t.nota || '' }));
+  });
+  if (!borrar.length && !crear.length)
+    return decir('No había turnos que repetir en lo marcado.', 'bad');
+
+  recordar('rellenar ' + nuevas.length + (nuevas.length === 1 ? ' casilla' : ' casillas'));
+  try {
+    if (borrar.length) await DATOS.borrarVarias(borrar);
+    if (crear.length)  await DATOS.crearAsignacionesLote(S.local.id, crear);
+    await refrescar();
+    decir(`Repetidos ${crear.length} ${crear.length === 1 ? 'turno' : 'turnos'} en `
+      + `${nuevas.length} ${nuevas.length === 1 ? 'casilla' : 'casillas'}.`
+      + (saltadas ? ` Se saltaron ${saltadas} por ausencia.` : '')
+      + ' Si fue sin querer, aprieta Deshacer.', 'ok');
+  } catch (e) { S.hist.pop(); pintarDeshacer(); decir(e.message, 'bad'); }
+}
+
+const FLECHAS = { ArrowUp: [-1, 0], ArrowDown: [1, 0], ArrowLeft: [0, -1], ArrowRight: [0, 1] };
+
+document.addEventListener('keydown', ev => {
+  if (enCampo()) return;
+  if (S.agrupar === 'puestos') return;
+  const ctrl = ev.ctrlKey || ev.metaKey;
+
+  if (ctrl && (ev.key === 'z' || ev.key === 'Z')) {
+    const b = $('#btnDeshacer');
+    if (b && !b.disabled) { ev.preventDefault(); deshacer(); }
+    return;
+  }
+  if (!SEL.claves.size) return;
+  if (FLECHAS[ev.key]) {
+    const [df, dc] = FLECHAS[ev.key];
+    if (irA(df, dc, ev.shiftKey)) ev.preventDefault();
+  } else if (ev.key === 'Home' || ev.key === 'End') {
+    if (irA(0, ev.key === 'Home' ? 'inicio' : 'fin', ev.shiftKey)) ev.preventDefault();
+  } else if (ev.key === 'Enter') {
+    ev.preventDefault(); abrirLaActiva();
+  }
+});
+
 function pintarSemana() {
   if (S.agrupar === 'puestos') return pintarSemanaPorPuesto();
   const f = fechas();
@@ -1290,6 +1873,8 @@ function pintarSemana() {
     });
   });
   engancharArrastre($('#tablaSem'));
+  engancharSeleccion($('#tablaSem'));
+  pintarSeleccion();
   pintarResumenSemana();
 }
 
