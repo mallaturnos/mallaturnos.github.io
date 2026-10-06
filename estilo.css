@@ -743,11 +743,21 @@ table.tramos.nt .ntmas{white-space:nowrap}
 table.tramos.nt td:last-child{width:104px}
 /* El nombre del puesto se puede pinchar para renombrarlo: hay que verlo. El
    subrayado punteado es la convencion de «esto se edita» sin gritar «boton». */
-.trtit .pnom{cursor:pointer;border-bottom:1px dashed var(--line);padding-bottom:1px}
-.trtit .pnom:hover{border-bottom-color:var(--acento);color:var(--acento)}
+/* El subrayado punteado es la unica pista de que se puede renombrar, asi que
+   va con el color del acento y no con el de las lineas: con `var(--line)` se
+   confundia con un borde cualquiera. Y el lapiz lo dice sin depender del
+   hover, que en un telefono no existe. */
+.trtit .pnom{cursor:pointer;border-bottom:1px dashed var(--accent);padding-bottom:1px}
+/* Con texto y no con un icono: el ✎ (U+270E) salia como un cuadrado vacio
+   —la fuente del sitio no lo trae— y un simbolo roto se ve peor que no poner
+   nada. Esto no depende de que haya fuente de iconos ni de que exista el
+   hover, que en un telefono no existe. */
+.trtit .pnom:not([data-fijo])::after{content:' cambiar';font-family:var(--font-body);
+  font-size:.625rem;font-weight:500;letter-spacing:.02em;color:var(--accent);opacity:.75}
+.trtit .pnom:hover{border-bottom-color:var(--accent);color:var(--accent)}
 .trtit .pnom[data-fijo]{cursor:default;border-bottom:0}
 .trtit .pnom[data-fijo]:hover{color:inherit}
-.trtit .pedit{font:inherit;font-weight:700;padding:3px 7px;border:1px solid var(--acento);
+.trtit .pedit{font:inherit;font-weight:700;padding:3px 7px;border:1px solid var(--accent);
   border-radius:6px;background:var(--surface);color:inherit;min-width:160px}
 table.tramos.nt td:nth-child(2){width:84px}
 table.tramos.nt td:last-child{width:92px}
@@ -969,3 +979,7 @@ td.mcel.sel{outline:1px solid var(--accent);outline-offset:-1px}
   .tnfila{flex-wrap:wrap;gap:4px 10px}
   .tnf-dias{flex-basis:100%}
 }
+
+/* Titulo y accion en la misma linea, la accion a la derecha. */
+.cabcard{display:flex;align-items:baseline;justify-content:space-between;gap:12px;flex-wrap:wrap}
+.cabcard h2{margin:0}

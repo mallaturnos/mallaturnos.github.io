@@ -3627,7 +3627,13 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     const opciones = (sel) => ts.map(t =>
       `<option value="${t.id}"${t.id === sel ? ' selected' : ''}>${esc(t.nombre)} · `
       + `${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('')
-      + `<option value="__libre">Horario libre…</option>`;
+      + `<option value="__libre">Horario libre…</option>`
+      // Pedro, msg 4548: «no deberia quedar limitado a los turnos de almuerzo,
+      // cena, etc. deberia poder elejirse ahi todas las cosas». Si el turno que
+      // necesitas no existe todavia, el desplegable era un callejon sin salida:
+      // habia que cerrarlo, subir a crear el turno y volver. Ahora se crea
+      // desde aqui mismo.
+      + `<option value="__nuevo">+ Turno nuevo…</option>`;
 
     const filaTurno = (t) => `<tr data-t="${t.id}">
         <td colspan="3"><select class="ntsel" aria-label="turno">${opciones(t.id)}</select></td>
@@ -3754,6 +3760,16 @@ function pintarNecesidadPorTurno(box, ps, ts) {
         if (antes === ahora) return;
         const v = Number(tr.querySelector('.ntn').value) || 0;
 
+        if (ahora === '__nuevo') {
+          /* El desplegable era un callejon sin salida cuando el turno que hacia
+             falta no existia: tocaba cerrar, ir a crearlo y volver. Se abre el
+             dialogo y el desplegable se devuelve a lo que estaba, porque
+             todavia no hay turno nuevo que poner. Si lo crea, `refrescar()`
+             repinta esta lista con el turno ya dentro. */
+          sel.value = antes;
+          return abrirTN(null);
+        }
+
         if (ahora === '__libre') {
           /* El turno se apaga y nace un horario libre CON SUS MISMAS HORAS: el
              dueno eligio «libre» para poder correrlas, no para empezar de cero. */
@@ -3812,13 +3828,11 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     });
   });
 
-  // Crear un turno NUEVO del local es otra cosa que agregar una linea, asi que
-  // va aparte y abajo, no mezclado con los «+ linea» de cada puesto.
-  const pie = el('p', 'hint', '');
-  const b = el('button', 'act', '+ turno nuevo del local');
-  b.addEventListener('click', () => abrirTN(null));
-  pie.appendChild(b);
-  box.appendChild(pie);
+  /* El boton de crear un turno estaba AQUI, al final de todo, debajo de las
+     barras de cada puesto. Pedro lo pidio arriba a la derecha (msg 4547) y
+     tiene razon: crear un turno es a lo que uno viene a esta pantalla, no lo
+     ultimo que encuentra despues de bajar. Ahora vive en la cabecera de la
+     tarjeta, en `#btnTurnoNuevoNec`. */
 }
 
 /* ================= COBERTURA Y COSTO ================= */
@@ -5535,6 +5549,7 @@ function conectarApp() {
     setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerDot', 'click', deshacerDot);
+  on('#btnTurnoNuevoNec', 'click', () => abrirTN(null));
   conectarTN();
 
   // sacar a todo el equipo de la lista. No borra: los deja inactivos, igual que
