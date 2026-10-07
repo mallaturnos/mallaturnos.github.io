@@ -795,6 +795,14 @@ table.tramos.nt td:last-child{width:104px}
 .trtit .pnom:hover{border-bottom-color:var(--accent);color:var(--accent)}
 .trtit .pnom[data-fijo]{cursor:default;border-bottom:0}
 .trtit .pnom[data-fijo]:hover{color:inherit}
+/* «quitar puesto» en la cabecera del bloque. Apagado a proposito: es
+   destructivo y vive al lado de «cambiar», que no lo es. Se enciende al
+   acercarse, para que no compita con el nombre. */
+.trtit .pquit{margin-left:auto;font:inherit;font-size:.6875rem;color:var(--fg-faint);
+  background:none;border:0;padding:2px 4px;border-radius:5px;cursor:pointer}
+.trtit .pquit:hover,.trtit .pquit:focus{color:var(--bad);background:var(--surface-2)}
+.trtit{display:flex;align-items:baseline;gap:8px}
+
 .trtit .pedit{font:inherit;font-weight:700;padding:3px 7px;border:1px solid var(--accent);
   border-radius:6px;background:var(--surface);color:inherit;min-width:160px}
 table.tramos.nt td:nth-child(2){width:84px}

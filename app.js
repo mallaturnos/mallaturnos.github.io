@@ -3229,14 +3229,26 @@ async function guardarPQ() {
   }
 }
 
-async function borrarPQ() {
-  const q = S.pqEdit; if (!q) return;
+/* Quitar un puesto del catalogo, con su aviso. Vive aqui y no dentro del
+   dialogo porque desde el 07-10 se puede pedir desde DOS sitios —el dialogo de
+   «Puestos del local» y el atajo del bloque en «Cuanta gente necesito»— y la
+   advertencia de cuanta gente lo tiene no puede existir en dos versiones.
+   Devuelve true si de verdad se quito. */
+async function quitarPuestoDelCatalogo(q) {
+  if (!q) return false;
   const usan = S.personas.filter(p => normal(p.rol) === normal(q.nombre)).length;
   if (!confirm(`¿Quitar el puesto «${q.nombre}»?\n\n`
     + (usan ? `Lo tienen ${usan} ${usan === 1 ? 'persona' : 'personas'}. No se les borra: `
             + 'siguen con ese puesto escrito, pero deja de ofrecerse en las listas.\n\n' : '')
-    + 'No se borra nada de lo ya planificado.')) return;
-  try { await DATOS.quitarPuesto(q.id); await refrescar(); $('#dlgPQ').close(); }
+    + 'No se borra nada de lo ya planificado.')) return false;
+  await DATOS.quitarPuesto(q.id);
+  await refrescar();
+  return true;
+}
+
+async function borrarPQ() {
+  const q = S.pqEdit; if (!q) return;
+  try { if (await quitarPuestoDelCatalogo(q)) $('#dlgPQ').close(); }
   catch (e) { const m = $('#pqMsg'); m.textContent = e.message; m.className = 'msg bad'; }
 }
 
@@ -3868,7 +3880,8 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     const caja = el('div', 'trpuesto', `
       <div class="trtit"><b class="pnom"${q ? ' title="Pincha para cambiarle el nombre"'
         : ' data-fijo="1" title="Este puesto no está en el catálogo, así que no se puede renombrar desde aquí"'
-        }>${esc(puesto)}</b></div>
+        }>${esc(puesto)}</b>${q ? `<button type="button" class="pquit"
+          title="Sacar «${esc(puesto)}» de tu lista de puestos">quitar puesto</button>` : ''}</div>
       ${hay ? `<table class="tramos nt"><tbody>${filas}${filaMas}</tbody></table>`
         : `<p class="hint">Este día no se pide a nadie de este puesto.</p>${btnMas}`}
       ${hay ? barrasNecesidad(S.cobDia, puesto) : ''}`);
@@ -3877,6 +3890,17 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     /* Renombrar el puesto DESDE AQUI (Pedro, msg 4165). Lo propaga la base con
        `renombrar_puesto`, que toca de una vez el catalogo, el rol de la gente,
        los turnos ya asignados y la dotacion. */
+    /* Atajo para sacar el puesto desde aqui. Pedro, 07-10 (msg 4809): se topo
+       con el bloque de «Mesera» vacio —«si no tengo meseros?»— y no tenia que
+       hacer con el sin irse a otra pantalla. Llama a la MISMA funcion que el
+       dialogo de «Puestos del local», con su mismo aviso. */
+    const btnQuit = caja.querySelector('.pquit');
+    if (btnQuit && q) btnQuit.addEventListener('click', async (ev) => {
+      ev.stopPropagation();
+      try { await quitarPuestoDelCatalogo(q); }
+      catch (e) { error(e); }
+    });
+
     const nom = caja.querySelector('.pnom');
     if (q) nom.addEventListener('click', () => {
       if (caja.querySelector('.pedit')) return;
