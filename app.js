@@ -145,7 +145,8 @@ async function deshacerDot() {
   try {
     // Un mismo boton para los dos modelos: mientras el SQL de tramos no este
     // aplicado se sigue deshaciendo la dotacion vieja.
-    if (h.tramos) await reponerTramos(h.tramos);
+    if (h.renombre) await DATOS.renombrarPuesto(h.renombre.id, h.renombre.de);
+    else if (h.tramos) await reponerTramos(h.tramos);
     else await DATOS.reponerDotacion(S.local.id, h.filas);
     await refrescar();
     verSub('nec');
@@ -187,6 +188,23 @@ async function reponerTramos(filas) {
     const [perfil, puesto] = k.split('|');
     await DATOS.guardarTramos(S.local.id, perfil, puesto, porClave[k]);
   }
+}
+
+/* ---------- deshacer de un RENOMBRE ----------
+   Pedro eligio dejar el renombrado como esta -la palabra «cambiar» al lado del
+   nombre- y pidio que tuviera Deshacer (msg 4650, «A»).
+
+   No lleva foto, y la razon importa: `fotoDotacion()` y `fotoTramos()` guardan
+   las filas POR NOMBRE de puesto. Una foto tomada ANTES del renombre repondria
+   filas colgando de un nombre que ya no existe — exactamente el defecto que
+   `arreglo-renombrar-tramos.sql` vino a tapar. El paso atras de un renombre es
+   el renombre al reves: `renombrar_puesto` con el nombre viejo, que propaga la
+   vuelta por el catalogo, el rol de la gente, los turnos y la dotacion igual
+   que propago la ida. */
+function recordarRen(id, de, a) {
+  S.histDot.push({ renombre: { id, de }, que: 'cambiar \u00ab' + de + '\u00bb por \u00ab' + a + '\u00bb' });
+  if (S.histDot.length > MAX_HIST) S.histDot.shift();
+  pintarDeshacerDot();
 }
 
 /* ---------- deshacer del EQUIPO ----------
@@ -1033,15 +1051,38 @@ function pintarSemanaPorPuesto() {
         const aqui = todas.filter(x => x.a.fecha === fe && puestoRot(x.a, x.p) === q)
                           .sort((u,v) => Number(u.a.inicio) - Number(v.a.inicio));
         const hs = aqui.reduce((n,x) => n + horasAsig(x.a), 0);
-        const bloques = aqui.map(({ p, a }) => {
-          const t = a.turno_id ? turnoDe(a.turno_id) : null;
+        /* Los que comparten MISMO HORARIO en el mismo puesto se ven juntos, en vez
+           de dos bloques que repiten la hora. Pedro, msg 4666: «si la otra persona
+           va a trabajar en el mismo horario, mismo aseo, etc se puedan vizualizar
+           juntos».
+
+           Cada persona sigue siendo su PROPIO bloque: su fila en la base, su
+           click y su arrastre. Lo unico que cambia es que la hora se escribe una
+           vez y los nombres van debajo. Agrupar de verdad —un bloque para varios—
+           habria roto el arrastre, que mueve UNA asignacion. */
+        const pedazo = ({ p, a }, conHora) => {
           const ci = colorDe(a);
           return `<span class="bloque${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
             data-fecha="${fe}" data-p="${p ? p.id : ''}" draggable="true" role="button" tabindex="0"
             title="${esc((p ? p.nombre : 'Sin asignar') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
               + ' · arrástralo a otro puesto o día')}">
-            <b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>
+            ${conHora ? `<b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>` : ''}
             <em>${esc(p ? p.nombre.split(' ')[0] : 'sin asignar')}</em></span>`;
+        };
+        const porHorario = new Map();
+        aqui.forEach(x => {
+          const k = hhmm(x.a.inicio) + '\u2013' + hhmm(x.a.fin);
+          if (!porHorario.has(k)) porHorario.set(k, []);
+          porHorario.get(k).push(x);
+        });
+        const bloques = [...porHorario].map(([horas, grupo]) => {
+          if (grupo.length === 1) return pedazo(grupo[0], true);
+          // «falta N» sale de los que NO tienen persona: no es una estimacion,
+          // es la cuenta de los turnos sin dueño que ya estan en la base.
+          const faltan = grupo.filter(x => !x.p).length;
+          return `<div class="grupo"><b class="ghoras">${horas}`
+            + (faltan ? ` <i>falta ${faltan}</i>` : '') + `</b>`
+            + grupo.map(x => pedazo(x, false)).join('') + `</div>`;
         }).join('');
         // debajo de cada día, cuánta gente y cuántas horas: es la cobertura
         // metida en la misma pantalla, como la de Skello
@@ -3624,19 +3665,31 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     const calco  = !S.sinTablaTramos && tramosSonCopiaDeTurnos(S.cobDia, puesto);
     const libres = (S.sinTablaTramos || calco) ? [] : tramosDe(S.cobDia, puesto);
 
-    const opciones = (sel) => ts.map(t =>
-      `<option value="${t.id}"${t.id === sel ? ' selected' : ''}>${esc(t.nombre)} · `
-      + `${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('')
-      + `<option value="__libre">Horario libre…</option>`
-      // Pedro, msg 4548: «no deberia quedar limitado a los turnos de almuerzo,
-      // cena, etc. deberia poder elejirse ahi todas las cosas». Si el turno que
-      // necesitas no existe todavia, el desplegable era un callejon sin salida:
-      // habia que cerrarlo, subir a crear el turno y volver. Ahora se crea
-      // desde aqui mismo.
-      + `<option value="__nuevo">+ Turno nuevo…</option>`;
+    /* ---- UNA SOLA FORMA DE LINEA: HORAS ----
+       Pedro, msg 4569: «dejemos todo en hora sin turnos... por el momento».
 
+       Antes habia dos clases de linea: una atada a un turno con nombre
+       —elegido en un desplegable— y otra de horas sueltas. El desplegable
+       hacia leer la pantalla como si hubiera que elegir una plantilla
+       (msg 4561), cuando lo que el quiere decir es «el lunes necesito 5
+       garzones entre 12:00 y 16:00».
+
+       Ahora TODAS las lineas se ven igual: desde, hasta y cuanta gente.
+       Por debajo siguen siendo dos cosas distintas, y eso es a proposito: la
+       linea que venia de un turno sigue guardada en `dotacion` con su
+       `turno_id`, que es lo que usa el repartidor automatico. Solo se despega
+       —y pasa a ser horas sueltas— si el usuario CAMBIA sus horas, porque
+       mover «08:00» a «09:00» aqui no puede mover la Apertura de todo el local
+       sin avisar.
+
+       Ese «por el momento» es la razon de no borrar nada: volver atras es
+       revertir este bloque, no rehacer la dotacion. */
     const filaTurno = (t) => `<tr data-t="${t.id}">
-        <td colspan="3"><select class="ntsel" aria-label="turno">${opciones(t.id)}</select></td>
+        <td><input class="hora nth" value="${hhmm(t.inicio)}" inputmode="numeric" maxlength="5"
+            aria-label="desde qué hora"></td>
+        <td class="gui">–</td>
+        <td><input class="hora nth" value="${hhmm(t.fin)}" inputmode="numeric" maxlength="5"
+            aria-label="hasta qué hora"></td>
         <td><input class="n ntn" type="number" min="0" max="99"
             value="${necesita(S.cobDia, puesto, t.id)}" aria-label="cuántas personas"></td>
         <td><button type="button" class="act ntx" title="Quitar esta línea">quitar</button></td>
@@ -3678,7 +3731,11 @@ function pintarNecesidadPorTurno(box, ps, ts) {
         if (listo) return; listo = true;
         const v = inp.value.trim();
         if (!guardar || !v || v === puesto) { pintarCobertura(); return; }
-        DATOS.renombrarPuesto(q.id, v).then(refrescar).catch(e => { error(e); pintarCobertura(); });
+        recordarRen(q.id, puesto, v);
+        DATOS.renombrarPuesto(q.id, v).then(refrescar).catch(e => {
+          S.histDot.pop(); pintarDeshacerDot();   // no se renombro: el paso atras sobra
+          error(e); pintarCobertura();
+        });
       };
       inp.addEventListener('keydown', ev => {
         if (ev.key === 'Enter') { ev.preventDefault(); cerrar(true); }
@@ -3753,60 +3810,40 @@ function pintarNecesidadPorTurno(box, ps, ts) {
       guardarLibres(leerLibres().filter((_, k) => k !== i), 'quitar una línea');
     }));
 
-    /* ---- cambiar de turno, o convertir la linea en horario libre ---- */
-    caja.querySelectorAll('.ntsel').forEach(sel => {
-      sel.addEventListener('change', async () => {
-        const tr = sel.closest('tr'), antes = tr.dataset.t, ahora = sel.value;
-        if (antes === ahora) return;
-        const v = Number(tr.querySelector('.ntn').value) || 0;
-
-        if (ahora === '__nuevo') {
-          /* El desplegable era un callejon sin salida cuando el turno que hacia
-             falta no existia: tocaba cerrar, ir a crearlo y volver. Se abre el
-             dialogo y el desplegable se devuelve a lo que estaba, porque
-             todavia no hay turno nuevo que poner. Si lo crea, `refrescar()`
-             repinta esta lista con el turno ya dentro. */
-          sel.value = antes;
-          return abrirTN(null);
-        }
-
-        if (ahora === '__libre') {
-          /* El turno se apaga y nace un horario libre CON SUS MISMAS HORAS: el
-             dueno eligio «libre» para poder correrlas, no para empezar de cero. */
-          const t = ts.find(x => x.id === antes);
-          recordarDot('pasar a horario libre');
+    /* ---- cambiar las HORAS de una linea que venia de un turno ----
+       Se despega del turno y pasa a ser horas sueltas, conservando su numero.
+       Es la misma operacion que el antiguo «pasar a horario libre» del
+       desplegable, pero ahora se dispara al editar la hora en vez de al elegir
+       una opcion escondida al final de una lista. */
+    caja.querySelectorAll('.nth').forEach(inp => {
+      let tm = null;
+      inp.addEventListener('input', () => {
+        clearTimeout(tm);
+        tm = setTimeout(async () => {
+          const tr = inp.closest('tr'), tid = tr.dataset.t;
+          const hs = tr.querySelectorAll('.nth');
+          const t = tramoDelDia(deHora(hs[0].value), deHora(hs[1].value), franja().h0);
+          if (!(t.hasta > t.desde)) return;      // a medio escribir: no se guarda nada
+          const v = Number(tr.querySelector('.ntn').value) || 1;
+          recordarDot('cambiar las horas de una línea');
           try {
-            await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, antes, 0);
+            await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, tid, 0);
             const base = (S.sinTablaTramos || tramosSonCopiaDeTurnos(S.cobDia, puesto))
               ? [] : tramosDe(S.cobDia, puesto).slice();
-            base.push({ desde: Number(t.inicio), hasta: Number(t.fin), cantidad: v || 1 });
+            base.push({ desde: t.desde, hasta: t.hasta, cantidad: v });
             await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(base));
             await refrescar(); verSub('nec');
           } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
-          return;
-        }
-
-        // Cambiar de turno son dos escrituras y la segunda recarga, asi que la
-        // primera no puede refrescar en medio.
-        recordarDot('cambiar de turno');
-        try {
-          await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, antes, 0);
-          await DATOS.guardarDotacion(S.local.id, S.cobDia, puesto, ahora, v);
-          if (!S.sinTablaTramos && tramosSonCopiaDeTurnos(S.cobDia, puesto))
-            await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, []);
-          await refrescar();
-        } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
+        }, 700);
       });
     });
 
     /* ---- «+ linea» ---- */
     const mas = caja.querySelector('.ntmas');
     if (mas) mas.addEventListener('click', () => {
-      const libre = ts.find(t => !usados.some(u => u.id === t.id));
-      if (libre) { poner(libre.id, 1, 'agregar una línea'); return; }
-      /* Sin turnos libres que ofrecer, la linea nueva nace como horario libre.
-         Antes el boton simplemente no hacia nada, que es lo peor de los dos
-         mundos: aprietas y no pasa nada ni te dicen por que. */
+      /* Toda linea nueva nace como HORAS. Antes buscaba primero un turno sin
+         usar y lo enchufaba, que era justo lo que hacia sentir la pantalla
+         como un catalogo cerrado. */
       if (S.sinTablaTramos) {
         const m = $('#msgDot');
         if (m) { m.textContent = 'Ya usaste todos los turnos de este puesto.'; m.className = 'msg bad'; }
@@ -4746,6 +4783,7 @@ function abrirTN(turno) {
   // caso que nadie pidio y que se presta a pisar sin querer.
   $('#tnCopiar').innerHTML = '<option value="">— empezar en blanco —</option>'
     + S.turnos.filter(t => !turno || t.id !== turno.id)
+        .slice().sort((a, b) => Number(a.inicio) - Number(b.inicio))   // por hora, como la otra lista
         .map(t => `<option value="${t.id}">${esc(t.nombre)} · ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
   $('#tnCopiar').closest('.fld').hidden = !!turno || !S.turnos.length;
 

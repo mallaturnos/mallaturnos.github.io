@@ -473,10 +473,16 @@
     }
   };
 
+  // Escriben en `asignaciones`, no en `turnos_abiertos`: un turno sin dueño es
+  // una asignacion con `persona_id` vacio. Apuntaban a la tabla vieja todavia
+  // el 07-10, cuando la LECTURA de aqui arriba ya se habia migrado. No se noto
+  // porque nadie las llama — y ese es justo el peligro: el dia que alguien las
+  // enganche a un boton, escribirian en una tabla que ya no lee nadie.
   const abrirTurno = (localId, a) =>
-    pedir(sb.from('turnos_abiertos').insert(Object.assign({ local_id: localId }, a)).select().single());
+    pedir(sb.from('asignaciones').insert(Object.assign({ local_id: localId, persona_id: null }, a))
+            .select().single());
 
-  const cerrarTurno = (id) => pedir(sb.from('turnos_abiertos').delete().eq('id', id));
+  const cerrarTurno = (id) => pedir(sb.from('asignaciones').delete().eq('id', id));
 
   /* ---------- la puerta del trabajador: solo estas tres ---------- */
   const miSemana = (token, desde) =>
@@ -500,7 +506,11 @@
   function escuchar(localId, alCambiar) {
     return sb.channel('local-' + localId)
       .on('postgres_changes', { event: '*', schema: 'public', table: 'marcas' }, alCambiar)
-      .on('postgres_changes', { event: '*', schema: 'public', table: 'turnos_abiertos',
+      // `asignaciones`, no `turnos_abiertos`. Desde que tomar un turno escribe en
+      // asignaciones, escuchar la tabla vieja dejaba la malla SIN ENTERARSE de
+      // que alguien habia tomado algo: habia que recargar a mano. Y eso es
+      // justamente «ver quien lo toma».
+      .on('postgres_changes', { event: '*', schema: 'public', table: 'asignaciones',
                                 filter: 'local_id=eq.' + localId }, alCambiar)
       .subscribe();
   }

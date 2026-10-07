@@ -634,6 +634,17 @@ table.reloj td.marcar .mini{margin-right:4px}
 
 /* Arrastrar un turno a otro día o persona. El bloque que viaja se atenúa y la
    casilla de destino se marca: sin las dos señales uno suelta a ciegas. */
+/* Varias personas en el mismo horario y el mismo puesto: la hora se escribe una
+   vez arriba y los nombres van debajo. Los bloques de adentro siguen siendo
+   independientes —se arrastran y se abren uno por uno—, asi que esto es
+   presentacion y nada mas. */
+.grupo{border:1px solid var(--line);border-radius:8px;padding:3px 4px 4px;margin-bottom:3px;
+  background:var(--surface-2)}
+.ghoras{display:block;font-family:var(--font-mono);font-size:.6875rem;color:var(--fg-dim);
+  padding:1px 3px 3px}
+.ghoras i{font-style:normal;color:var(--warn);font-weight:600}
+.grupo .bloque{display:inline-flex;margin:0 3px 0 0}
+
 .bloque[draggable="true"]{cursor:grab}
 .bloque.llevando{opacity:.4;cursor:grabbing}
 td.cell.encima,td.mcel.encima{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accent-soft)}
@@ -704,7 +715,9 @@ td.cell.encima,td.mcel.encima{outline:2px solid var(--accent);outline-offset:-2p
 table.tramos{border-collapse:collapse;width:auto}
 table.tramos td{padding:3px 6px 3px 0;vertical-align:middle}
 table.tramos td.gui{color:#9aa29d;padding:0 2px}
-input.trh{width:5.2em;text-align:center;font-variant-numeric:tabular-nums}
+/* Las dos clases de linea se ven IGUAL a proposito: por dentro una sigue
+   atada a un turno y la otra no, pero eso es cosa nuestra, no del usuario. */
+input.trh,input.nth{width:5.2em;text-align:center;font-variant-numeric:tabular-nums}
 input.trn{width:4.2em;text-align:center;font-weight:700}
 .trx{font-size:.82rem;padding:3px 8px;color:#8a5050}
 /* El dibujo no lleva eje ni números: no es un gráfico para leer, es la forma
