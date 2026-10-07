@@ -3625,6 +3625,95 @@ function diceMotivos(motivos) {
     : motivos[k] + ' ' + MOTIVOS[k]).join(', ');
 }
 
+/* ---------- pasar la necesidad a la malla ----------
+   El PASO 2 del recorrido que describio Pedro el 07-10 (msg 4816, confirmado
+   en el 4821): «acá decides cuánta gente necesita cada puesto, en horas · eso
+   pasa a la malla como turnos sin dueño · y recién ahí les pones gente».
+
+   Era el unico de los tres que no existia. «Repartir la semana» se saltaba el
+   medio: iba de la necesidad directo a la gente asignada, y el queria ver los
+   HUECOS puestos en la malla para llenarlos despues —a mano con el desplegable
+   o apretando Repartir—.
+
+   La pieza de fondo ya estaba: desde la mañana del 07-10 un turno sin dueño es
+   una asignacion con la persona vacia y vive en la misma malla, no en otra
+   pestaña. Esto solo los crea.
+
+   NO DUPLICA. Para cada dia, puesto y horario cuenta lo que YA hay —con dueño o
+   sin el— y crea solo la diferencia. Apretarlo dos veces no deja el doble, que
+   es el error que convierte un boton util en uno que da miedo. */
+function huecosQueFaltan() {
+  const f7 = fechas();
+  const crear = [];
+  f7.forEach((fe, dow) => {
+    const perfil = String(dow);
+    const lineas = [];                     // {puesto, inicio, fin, colacion, cuantas}
+
+    // las que se escribieron como horas sueltas
+    Object.keys(S.tramos[perfil] || {}).forEach(pu =>
+      (S.tramos[perfil][pu] || []).forEach(t => lineas.push({
+        puesto: pu, inicio: Number(t.desde), fin: Number(t.hasta),
+        colacion: 0, cuantas: Number(t.cantidad) || 0 })));
+
+    // y las que vienen de un turno del catalogo, que traen su colacion
+    const dot = S.dotacion[perfil] || {};
+    Object.keys(dot).forEach(pu => Object.keys(dot[pu]).forEach(tid => {
+      const t = turnoDe(tid); if (!t) return;
+      lineas.push({ puesto: pu, inicio: Number(t.inicio), fin: Number(t.fin),
+                    colacion: Number(t.colacion || 0),
+                    cuantas: Number(dot[pu][tid]) || 0 });
+    }));
+
+    // lo que ya hay ese dia, por puesto y horario exacto
+    const hay = {};
+    const clave = (pu, i, f) => normal(pu) + '|' + Number(i).toFixed(2) + '|' + Number(f).toFixed(2);
+    S.personas.forEach(p => turnosDe(p.id, fe).forEach(a =>
+      { const k = clave(puestoDe(a, p), a.inicio, a.fin); hay[k] = (hay[k] || 0) + 1; }));
+    S.abiertos.filter(a => a.fecha === fe && a.inicio != null).forEach(a =>
+      { const k = clave(a.puesto, a.inicio, a.fin); hay[k] = (hay[k] || 0) + 1; });
+
+    lineas.forEach(l => {
+      const k = clave(l.puesto, l.inicio, l.fin);
+      const faltan = l.cuantas - (hay[k] || 0);
+      for (let i = 0; i < faltan; i++)
+        crear.push({ persona_id: null, fecha: fe, turno_id: null,
+                     inicio: l.inicio, fin: l.fin, colacion: l.colacion,
+                     puesto: l.puesto, nota: '' });
+      if (faltan > 0) hay[k] = l.cuantas;        // no contarlos dos veces
+    });
+  });
+  return crear;
+}
+
+async function pasarALaMalla() {
+  const m = $('#msgDot');
+  const decir = (t, c) => { if (!m) return; m.textContent = t; m.className = 'msg ' + c;
+                            setTimeout(() => { if (m.textContent === t) m.textContent = ''; }, 9000); };
+  const crear = huecosQueFaltan();
+  if (!crear.length)
+    return decir('La malla ya tiene todo lo que pediste: no hay huecos que crear.', 'ok');
+
+  const porPuesto = {};
+  crear.forEach(x => { porPuesto[x.puesto] = (porPuesto[x.puesto] || 0) + 1; });
+  const detalle = Object.keys(porPuesto).sort()
+    .map(pu => `${porPuesto[pu]} de ${pu}`).join('\n· ');
+
+  if (!confirm(`Voy a poner ${crear.length} turnos SIN DUEÑO en la malla, `
+    + `según lo que pediste:\n\n· ${detalle}\n\n`
+    + 'Quedan vacíos para que les pongas gente. No se toca nada de lo que ya hay. ¿Lo hago?')) return;
+
+  try {
+    recordar('pasar la necesidad a la malla');
+    await DATOS.crearAsignacionesLote(S.local.id, crear);
+    await refrescar();
+    decir(`Puestos ${crear.length} turnos sin dueño. Ahora asígnales gente en la malla `
+        + '—o aprieta «Repartir la semana»—. Si fue sin querer, aprieta Deshacer.', 'ok');
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();
+    decir(e.message, 'bad');
+  }
+}
+
 /* ---------- el boton del repartidor ----------
    `proponer()` existia desde el 05-10, con 25 pruebas en verde, y **no la
    llamaba nadie**: logica escrita y enterrada. Pedro lo pidio el 07-10
@@ -5867,6 +5956,7 @@ function conectarApp() {
     setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerDot', 'click', deshacerDot);
+  on('#btnPasarMalla', 'click', pasarALaMalla);
   on('#btnRepartir', 'click', repartirSemana);
   conectarTN();
 
