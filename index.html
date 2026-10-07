@@ -102,8 +102,6 @@
            malla, no areas propias, y tienen razon: se usan planificando. -->
       <nav class="subtabs" role="tablist" aria-label="Planificación">
         <button role="tab" id="sub-malla" aria-selected="true"  aria-controls="s-malla">Malla</button>
-        <button role="tab" id="sub-plant" aria-selected="false" aria-controls="s-plant">Plantillas</button>
-        <button role="tab" id="sub-nec"   aria-selected="false" aria-controls="s-nec">Cuánta gente necesito</button>
         <button role="tab" id="sub-obj"   aria-selected="false" aria-controls="s-obj">Objetivo de costo</button>
       </nav>
 
@@ -148,6 +146,7 @@
               <label class="maslbl" for="filtroEquipo" id="lblEquipo" hidden>Filtrar por equipo</label>
               <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
               <hr>
+              <button class="act" id="btnPlantillas">Plantillas de semana…</button>
               <button class="act" id="btnImprimir">Imprimir</button>
               <button class="act" id="btnLimpiarSem">Limpiar la semana</button>
             </div>
@@ -162,79 +161,12 @@
         <p class="hint" style="margin-top:12px">Aprieta cualquier turno para abrirlo, o una casilla vacía para agregar uno. Las alertas aparecen al lado de cada persona.<br>También funciona como planilla: <b>arrastra</b> para marcar varias casillas (o <b>Shift+clic</b> para un rango), y después <b>Ctrl+C</b>, <b>Ctrl+V</b> o <b>Supr</b>. Todo se puede deshacer.</p>
       </div>
 
-      <div class="card" id="cardCobertura">
-        <h2>¿Te alcanza la gente?</h2>
-        <p class="hint">Hora por hora: arriba <b>la gente que hay</b>, abajo <b>la que necesitas</b>. Y debajo de cada día, lo que falta dicho en palabras — <i>«faltan 2 garzones de 17:00 a 22:00»</i>.
-          <br>Va por hora y no por turno a propósito: cuando dos turnos se pisan, contar por turno da por cubierto lo que no lo está.</p>
-        <div class="scroll" style="border:0;background:transparent">
-          <div class="cov" id="cobertura"></div>
-        </div>
-      </div>
-      <div class="card">
-        <h2>Por persona</h2>
-        <!-- Decidido con Pedro el 06-10-2026: mientras la app no tenga reglas del
-             Codigo del Trabajo de verdad, esto se llama por su nombre. Prometer
-             cumplimiento legal que no existe se lo cobran a el, no a la app. -->
-        <p class="hint">Son <b>avisos del local</b>, no reglas legales: salen de lo que
-          escribiste en cada ficha —las horas de contrato, los días que dijo que no puede— y
-          de un par de topes de sentido común. <b>Ninguno te bloquea</b>: decides tú.</p>
-        <p class="hint">Cada línea dice: <b>horas planificadas</b> · <b>días</b> que trabaja ·
-          <b>lo que cuesta</b> · y, si no va justo, <b>cuánto le falta o le sobra</b> contra las horas
-          de su contrato. <i>«−8,0 h» no son horas negativas: son las que le faltan para completarlo.</i></p>
-        <ul class="people" id="semPersonas"></ul>
-      </div>
-      </div>
+      <!-- La planificacion vive AQUI, debajo de la malla, desde el 07-10.
+           Pedro (msg 4819): «deberia quedar la malla (en dia, semana y mes) y
+           mas abajo la planificacion que estabamos viendo». Planificar es un
+           recorrido —ver la semana, decir cuanta gente falta, pasarla a la
+           malla, asignar— y no cuatro pantallas que hay que ir cambiando. -->
 
-      <div id="s-plant" role="tabpanel" aria-labelledby="sub-plant" hidden>
-        <div class="card">
-    <h2>Plantillas de semana</h2>
-    <p class="hint">Un modelo guarda <b>la forma</b> de una semana: qué días, a qué horas y en qué
-      puesto. Se guarda el día de la semana y no la fecha, así que sirve para cualquier semana.
-      <b>Las ausencias no entran</b>, para que no se dupliquen.</p>
-
-    <!-- Aplicar va PRIMERO: es lo que se hace todas las semanas. Guardar se hace
-         una vez y despues casi nunca, asi que va abajo. -->
-    <div class="fld">
-      <label for="pModelo">Aplicar un modelo</label>
-      <select id="pModelo"></select>
-    </div>
-    <div class="fld" id="cajaPPersonas">
-      <label>Quiénes entran <span class="hint" id="pTodos"></span></label>
-      <div class="acciones diapills" id="pPersonas"></div>
-    </div>
-    <div class="fld">
-      <label class="chk"><input type="checkbox" id="pSinAsignar"><span>Pegar
-        <b>solo la forma</b>, como turnos sin asignar</span></label>
-    </div>
-    <div class="fld">
-      <label>En cuántas semanas seguidas, desde la que estás viendo</label>
-      <div class="acciones diapills" id="pSemanas"></div>
-    </div>
-    <p class="hint">Al aplicar se <b>pisan los turnos</b> de esas semanas. Las ausencias que ya
-      estén puestas se respetan.</p>
-    <div class="acciones">
-      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
-      <button type="button" class="act" id="pBorrar" hidden>Eliminar este modelo</button>
-    </div>
-
-    <hr class="sepdlg">
-
-    <div class="fld">
-      <label for="pNombre">Guardar la semana que estás viendo como modelo nuevo</label>
-      <div class="acciones">
-        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
-        <button type="button" class="act" id="pGuardar">Guardar</button>
-      </div>
-    </div>
-
-    <p class="msg" id="pMsg"></p>
-    <div class="acciones dlgpie">
-      
-    </div>
-  </div>
-      </div>
-
-      <div id="s-nec" role="tabpanel" aria-labelledby="sub-nec" hidden>
         <div class="card">
           <!-- El boton de la cabecera: aqui vivio «+ Turno nuevo» hasta el 07-10,
                cuando salio por mezclar crear una plantilla con decir cuanta gente
@@ -263,6 +195,28 @@
           </div>
           <p class="msg" id="msgDot"></p>
                 </div>
+            <div class="card" id="cardCobertura">
+        <h2>¿Te alcanza la gente?</h2>
+        <p class="hint">Hora por hora: arriba <b>la gente que hay</b>, abajo <b>la que necesitas</b>. Y debajo de cada día, lo que falta dicho en palabras — <i>«faltan 2 garzones de 17:00 a 22:00»</i>.
+          <br>Va por hora y no por turno a propósito: cuando dos turnos se pisan, contar por turno da por cubierto lo que no lo está.</p>
+        <div class="scroll" style="border:0;background:transparent">
+          <div class="cov" id="cobertura"></div>
+        </div>
+      </div>
+      <div class="card">
+        <h2>Por persona</h2>
+        <!-- Decidido con Pedro el 06-10-2026: mientras la app no tenga reglas del
+             Codigo del Trabajo de verdad, esto se llama por su nombre. Prometer
+             cumplimiento legal que no existe se lo cobran a el, no a la app. -->
+        <p class="hint">Son <b>avisos del local</b>, no reglas legales: salen de lo que
+          escribiste en cada ficha —las horas de contrato, los días que dijo que no puede— y
+          de un par de topes de sentido común. <b>Ninguno te bloquea</b>: decides tú.</p>
+        <p class="hint">Cada línea dice: <b>horas planificadas</b> · <b>días</b> que trabaja ·
+          <b>lo que cuesta</b> · y, si no va justo, <b>cuánto le falta o le sobra</b> contra las horas
+          de su contrato. <i>«−8,0 h» no son horas negativas: son las que le faltan para completarlo.</i></p>
+        <ul class="people" id="semPersonas"></ul>
+      </div>
+
       </div>
 
       <div id="s-obj" role="tabpanel" aria-labelledby="sub-obj" hidden>
@@ -454,6 +408,65 @@
   </form>
 </dialog>
 
+<!-- «Plantillas» dejo de ser una sub-pestaña el 07-10 (Pedro, msg 4819: «primero
+     sacar plantilla»). La FUNCION no se borra —dijo que deberia ir en la malla y
+     que el donde lo vemos despues—, asi que se abre desde el menu «···» de la
+     malla. Sacar la pestaña sin reubicarla habria dejado los modelos guardados
+     sin forma de aplicarlos: es el mismo error del generador sin boton. -->
+<dialog id="dlgPlant" class="dlg dlgancho">
+  <form method="dialog">
+<div class="card">
+    <h2>Plantillas de semana</h2>
+    <p class="hint">Un modelo guarda <b>la forma</b> de una semana: qué días, a qué horas y en qué
+      puesto. Se guarda el día de la semana y no la fecha, así que sirve para cualquier semana.
+      <b>Las ausencias no entran</b>, para que no se dupliquen.</p>
+
+    <!-- Aplicar va PRIMERO: es lo que se hace todas las semanas. Guardar se hace
+         una vez y despues casi nunca, asi que va abajo. -->
+    <div class="fld">
+      <label for="pModelo">Aplicar un modelo</label>
+      <select id="pModelo"></select>
+    </div>
+    <div class="fld" id="cajaPPersonas">
+      <label>Quiénes entran <span class="hint" id="pTodos"></span></label>
+      <div class="acciones diapills" id="pPersonas"></div>
+    </div>
+    <div class="fld">
+      <label class="chk"><input type="checkbox" id="pSinAsignar"><span>Pegar
+        <b>solo la forma</b>, como turnos sin asignar</span></label>
+    </div>
+    <div class="fld">
+      <label>En cuántas semanas seguidas, desde la que estás viendo</label>
+      <div class="acciones diapills" id="pSemanas"></div>
+    </div>
+    <p class="hint">Al aplicar se <b>pisan los turnos</b> de esas semanas. Las ausencias que ya
+      estén puestas se respetan.</p>
+    <div class="acciones">
+      <button type="button" class="act primary" id="pAplicar">Aplicar</button>
+      <button type="button" class="act" id="pBorrar" hidden>Eliminar este modelo</button>
+    </div>
+
+    <hr class="sepdlg">
+
+    <div class="fld">
+      <label for="pNombre">Guardar la semana que estás viendo como modelo nuevo</label>
+      <div class="acciones">
+        <input type="text" id="pNombre" maxlength="40" placeholder="Semana tipo, Verano, Fin de mes…">
+        <button type="button" class="act" id="pGuardar">Guardar</button>
+      </div>
+    </div>
+
+    <p class="msg" id="pMsg"></p>
+    <div class="acciones dlgpie">
+      
+    </div>
+  </div>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="pCerrar">Cerrar</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlgCopiar" class="dlg">
   <form method="dialog" id="formCopiar">
     <h3 id="cTit">Copiar</h3>
@@ -628,7 +641,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=72"></script>
-<script src="app.js?v=122"></script>
+<script src="app.js?v=123"></script>
 
 
 </body>

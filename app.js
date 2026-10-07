@@ -155,7 +155,7 @@ async function deshacerDot() {
     else if (h.tramos) await reponerTramos(h.tramos);
     else await DATOS.reponerDotacion(S.local.id, h.filas);
     await refrescar();
-    verSub('nec');
+    verSub('malla');
     if (m) { m.textContent = 'Deshecho: ' + h.que + '.'; m.className = 'msg ok'; }
   } catch (e) {
     S.histDot.push(h);                   // no se pudo: el paso atras sigue ahi
@@ -4079,7 +4079,7 @@ function pintarNecesidadPorTurno(box, ps, ts) {
         recordarTr(que);
         await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(lista));
         await refrescar();
-        verSub('nec');
+        verSub('malla');
       } catch (e) {
         S.histDot.pop(); pintarDeshacerDot();
         const m = $('#msgDot');
@@ -4122,7 +4122,7 @@ function pintarNecesidadPorTurno(box, ps, ts) {
               ? [] : tramosDe(S.cobDia, puesto).slice();
             base.push({ desde: t.desde, hasta: t.hasta, cantidad: v });
             await DATOS.guardarTramos(S.local.id, S.cobDia, puesto, normalizarTramos(base));
-            await refrescar(); verSub('nec');
+            await refrescar(); verSub('malla');
           } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
         }, 700);
       });
@@ -4917,7 +4917,10 @@ async function verJefe() {
    otras nueve —quitar un tramo, guardarlo, copiarlo, volver de un dialogo—
    reventaban. `node --check` pasa igual y las pruebas tambien: esto solo se ve
    apretando el boton. */
-const SUBS = ['malla', 'plant', 'nec', 'obj'];
+// 'plant' salio el 07-10: ahora es un dialogo que se abre desde el menu «···».
+// 'nec' bajo DENTRO de 'malla' el 07-10: planificar es un recorrido, no
+// cuatro pantallas. Queda 'obj' aparte, que es lo que pidio Pedro.
+const SUBS = ['malla', 'obj'];
 function verSub(cual) {
   if (SUBS.indexOf(cual) < 0) cual = 'malla';
   S.sub = cual;
@@ -4926,7 +4929,7 @@ function verSub(cual) {
     if (b) b.setAttribute('aria-selected', x === cual ? 'true' : 'false');
     if (pnl) pnl.hidden = x !== cual;
   });
-  if (cual === 'plant') pintarModelos();
+
 }
 
 /* ---------- modelos de semana ----------
@@ -5782,7 +5785,7 @@ function conectarApp() {
           if (filas.length) await DATOS.guardarDotacionLote(filas);
         }
         await refrescar();
-        verSub('nec');
+        verSub('malla');
       } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
       bt.disabled = false;
       return;
@@ -5803,7 +5806,7 @@ function conectarApp() {
     try {
       await DATOS.guardarDotacionLote(filas);     // una sola llamada, no sesenta
       await refrescar();
-      verSub('nec');
+      verSub('malla');
     } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
     b.disabled = false;
   });
@@ -5932,7 +5935,7 @@ function conectarApp() {
         await DATOS.borrarTramos(S.local.id, S.cobDia);
         await DATOS.borrarDotacion(S.local.id, S.cobDia);
         await refrescar();
-        verSub('nec');
+        verSub('malla');
         msg.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; msg.className = 'msg ok';
       } catch (e) { S.histDot.pop(); pintarDeshacerDot(); msg.textContent = e.message; msg.className = 'msg bad'; }
       setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
@@ -5950,12 +5953,18 @@ function conectarApp() {
     try {
       await DATOS.borrarDotacion(S.local.id, S.cobDia);
       await refrescar();
-      verSub('nec');
+      verSub('malla');
       m.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; m.className = 'msg ok';
     } catch (e) { S.histDot.pop(); pintarDeshacerDot(); m.textContent = e.message; m.className = 'msg bad'; }
     setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerDot', 'click', deshacerDot);
+  on('#btnPlantillas', 'click', () => {
+    const pop = $('#masPop'); if (pop) pop.hidden = true;   // cerrar el «···»
+    pintarModelos();
+    $('#dlgPlant').showModal();
+  });
+  on('#pCerrar', 'click', () => $('#dlgPlant').close());
   on('#btnPasarMalla', 'click', pasarALaMalla);
   on('#btnRepartir', 'click', repartirSemana);
   conectarTN();
