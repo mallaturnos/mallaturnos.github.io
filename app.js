@@ -4018,14 +4018,43 @@ function pintarCobertura() {
        encontró Pedro (msg 3772): quien trabaja 08:00–16:30 contaba como
        cobertura de la Tarde 13:00–21:30, así que con UNA persona los dos
        turnos salían cubiertos y a las 17:00 no había nadie. */
-    const celdas = ts.map(t => {
-      const total = ps.reduce((n,x) => n + asignados(fe, t.id, x), 0);
-      return `<div class="cobcel dato"><b>${esc(t.nombre)}</b>`
-        + `<span>${total ? total + (total === 1 ? ' persona' : ' personas') : '—'}</span></div>`;
+    /* 07-10: ESTO ERA UNA COLUMNA POR TURNO —«Apertura · 9 personas»— y Pedro
+       lo mando cambiar (msg 4784, «si, la tira por horas»). Tenia dos
+       problemas, y el segundo lo destapo el solo:
+
+       1. La tarjeta YA DECIA en su texto que va por hora, y arriba enseñaba
+          turnos. Decia una cosa y mostraba otra.
+       2. Entre las columnas le salia **«Apertura (copia)»**: el nombre que
+          queda al copiar una plantilla. Como columna no significa nada, y
+          ocupaba el mismo lugar que Apertura.
+
+       Y contar por turno miente cuando se pisan: Apertura 08:00–16:30 y
+       almuerzo 11:00–15:30 dan «9 y 9» y parece cubierto, cuando a las 14:00
+       puede haber 3. Es el mismo defecto que ya habia cazado Pedro (msg 3772).
+
+       Se reusan las clases `.hncel` de la vista de Dia: misma tira, mismo
+       lenguaje visual, cero CSS nuevo. */
+    const base = franja();
+    const porHora = [];
+    for (let h = base.h0; h < base.h1; h++) {
+      let hay = 0, req = 0;
+      ps.forEach(pu => { hay += asignadosHora(fe, pu, h); req += necesitaHora(String(d), pu, h); });
+      porHora.push({ h, hay, req });
+    }
+    /* Un dia sin gente Y sin necesidad se dice en una linea, no en diecisiete
+       casillas de «0/0». Con la semana a medio llenar quedaban seis filas
+       identicas de ceros ahogando al unico dia que tenia algo: el ruido movia
+       el ojo justo al lado del dato. Mismo criterio que ya se aplico a la lista
+       de huecos cuando no hay nadie asignado. */
+    const vacio = porHora.every(x => !x.hay && !x.req);
+    const celdas = vacio ? '' : porHora.map(x => {
+      const cls = x.hay < x.req ? 'falta' : (x.req && x.hay > x.req ? 'sobra' : 'justo');
+      return `<div class="hncel ${cls}" title="${hhmm(x.h)}–${hhmm(x.h + 1)}: hay ${x.hay}`
+        + `, se necesita${x.req === 1 ? '' : 'n'} ${x.req}">`
+        + `<span class="hnh">${hhmm(x.h).slice(0,2)}</span><b>${x.hay}</b><i>/${x.req}</i></div>`;
     }).join('');
 
     // Los huecos del día, por hora y por puesto, dichos en palabras.
-    const base = franja();
     const trozos = [];
     let faltaDia = 0;
     ps.forEach(pu => {
@@ -4062,7 +4091,9 @@ function pintarCobertura() {
         : trozos.map(x => `falta${x.falta === 1 ? '' : 'n'} <b>${x.falta} ${esc(x.pu.toLowerCase())}</b>`
             + ` de ${hhmm(x.desde)} a ${hhmm(x.hasta)}`).join(' · ');
     cont.appendChild(el('div','cobfila', `<div class="covday">${DIAS[d]} <span class="num">${ddmm(fe)}</span></div>
-      <div class="cobcels" style="grid-template-columns:repeat(${ts.length},1fr)">${celdas}</div>`
+      ` + (vacio
+            ? `<p class="cobnada">sin gente ni necesidad</p>`
+            : `<div class="hnfila" style="grid-template-columns:repeat(${porHora.length},1fr)">${celdas}</div>`)
       + (dice ? `<p class="cobfalta">${dice}</p>` : '')));
   });
 
