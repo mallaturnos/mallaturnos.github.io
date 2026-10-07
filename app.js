@@ -1060,14 +1060,33 @@ function pintarSemanaPorPuesto() {
            click y su arrastre. Lo unico que cambia es que la hora se escribe una
            vez y los nombres van debajo. Agrupar de verdad —un bloque para varios—
            habria roto el arrastre, que mueve UNA asignacion. */
+        /* El nombre es un DESPLEGABLE, con «sin asignar» al final de la lista.
+           De las capturas de Skello que mando Pedro (07-10): cambiar quien cubre
+           un turno es el gesto mas repetido de la semana, y hoy cuesta tres
+           clics —abrir el dialogo, cambiar, guardar—. Aqui es uno.
+
+           No decide nada por su cuenta: al cambiar llama a `soltarTurno()`, el
+           mismo camino del arrastre, que ya pregunta antes de quitarle el turno
+           a alguien, revisa ausencias y choques de horario, y deja paso atras.
+           Duplicar esas reglas aqui seria tener dos versiones de cada una.
+
+           El atributo va como `data-cubre` y NO como `data-asig`: ese ultimo
+           significa «soy un bloque de turno» para media docena de
+           `closest('[data-asig]')`, y ponerselo tambien al <select> hacia que
+           esos closest devolvieran el select —sin `data-p` ni `data-fecha`— en
+           vez del bloque. Lo caza la prueba que cuenta los bloques del grupo. */
         const pedazo = ({ p, a }, conHora) => {
           const ci = colorDe(a);
+          const ops = ['<option value="">— sin asignar —</option>'].concat(
+            S.personas.map(x => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>`
+                              + `${esc(x.nombre.split(' ')[0])}</option>`)).join('');
           return `<span class="bloque${p ? '' : ' libre'}" data-c="${ci}" data-asig="${a.id}"
             data-fecha="${fe}" data-p="${p ? p.id : ''}" draggable="true" role="button" tabindex="0"
             title="${esc((p ? p.nombre : 'Sin asignar') + ' · ' + hhmm(a.inicio) + '–' + hhmm(a.fin)
               + ' · arrástralo a otro puesto o día')}">
             ${conHora ? `<b>${hhmm(a.inicio)}–${hhmm(a.fin)}</b>` : ''}
-            <em>${esc(p ? p.nombre.split(' ')[0] : 'sin asignar')}</em></span>`;
+            <select class="qcubre" data-cubre="${a.id}" draggable="false"
+                    aria-label="Quién cubre este turno">${ops}</select></span>`;
         };
         const porHorario = new Map();
         aqui.forEach(x => {
@@ -1113,6 +1132,20 @@ function pintarSemanaPorPuesto() {
     const cel = ev.target.closest('td.cell[data-fecha][data-puesto]'); if (!cel) return;
     abrirTurno(null, cel.dataset.fecha, null, cel.dataset.puesto);
   };
+  /* El clic en el desplegable NO debe abrir el dialogo del turno ni arrancar un
+     arrastre: la casilla entera escucha los dos. */
+  cuerpo.querySelectorAll('select.qcubre').forEach(sel => {
+    ['click', 'pointerdown', 'mousedown'].forEach(ev =>
+      sel.addEventListener(ev, e => e.stopPropagation()));
+    sel.addEventListener('change', async e => {
+      e.stopPropagation();
+      await soltarTurno(sel.dataset.cubre, { persona: sel.value || null });
+      // Si dijo que no en la confirmacion, el desplegable se quedo con el nombre
+      // nuevo y el dato con el viejo. Repintar los vuelve a juntar.
+      pintarPlan();
+    });
+  });
+
   engancharArrastre($('#tablaSem'));
   engancharSeleccion($('#tablaSem'));
   pintarSeleccion();
