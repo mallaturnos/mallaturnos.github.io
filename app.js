@@ -422,6 +422,23 @@ const equipos = () => [...new Set(S.personas.map(p => (p.equipo||'').trim()).fil
 const personasVisibles = () => S.personas.filter(p =>
   (!S.filtro  || ((p.rol||'').trim() || 'Sin puesto') === S.filtro) &&
   (!S.filtroE || (p.equipo||'').trim() === S.filtroE));
+/* Numero de semana del año, ISO-8601: la semana 1 es la del primer jueves.
+   Pedro lo pidio mirando Skello, que lo muestra como «Semaine 33» al lado de
+   las fechas (msg 4826). Sirve para hablar con otra gente —«la 41»— sin tener
+   que leer dos fechas.
+
+   Se calcula en UTC a proposito: con fechas locales, el cambio de hora de
+   septiembre en Chile mueve la medianoche y una semana del limite puede salir
+   corrida por un dia. */
+function semanaISO(fechaIso) {
+  const [a, m, d] = String(fechaIso).slice(0, 10).split('-').map(Number);
+  const x = new Date(Date.UTC(a, m - 1, d));
+  x.setUTCDate(x.getUTCDate() - ((x.getUTCDay() + 6) % 7) + 3);   // el jueves de esa semana
+  const ene4 = new Date(Date.UTC(x.getUTCFullYear(), 0, 4));
+  ene4.setUTCDate(ene4.getUTCDate() - ((ene4.getUTCDay() + 6) % 7) + 3);
+  return 1 + Math.round((x - ene4) / 604800000);
+}
+
 const fechas = () => Array.from({length:7}, (_,i) => iso(masDias(S.lunes, i)));
 
 // El rango que hay que traer de la base depende de la vista: un dia, una
@@ -1972,7 +1989,8 @@ document.addEventListener('keydown', ev => {
 function pintarSemana() {
   if (S.agrupar === 'puestos') return pintarSemanaPorPuesto();
   const f = fechas();
-  $('#semTitulo').textContent = ddmm(f[0]) + ' al ' + ddmm(f[6]);
+  $('#semTitulo').innerHTML = esc(ddmm(f[0]) + ' al ' + ddmm(f[6]))
+    + `<span class="numsem">Semana ${semanaISO(f[0])}</span>`;
   $('#semCab').innerHTML = '<th>Persona</th>' +
     DIAS.map((d,i) => `<th class="${i>=4?'fin':''}">${d}<span class="num">${ddmm(f[i])}</span></th>`).join('') + '<th>Horas</th>';
 
@@ -2456,7 +2474,8 @@ function engancharArrastreDia(caja) {
 function pintarDia() {
   const fe = iso(S.dia);
   const i = (S.dia.getDay() + 6) % 7;
-  $('#semTitulo').textContent = DIAS[i] + ' ' + ddmm(fe);
+  $('#semTitulo').innerHTML = esc(DIAS[i] + ' ' + ddmm(fe))
+    + `<span class="numsem">Semana ${semanaISO(fe)}</span>`;
 
   const caja = $('#cajaDia'); caja.innerHTML = '';
   pintarNecesidadDia(fe, caja);

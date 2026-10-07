@@ -798,6 +798,10 @@ table.tramos.nt td:last-child{width:104px}
 /* «quitar puesto» en la cabecera del bloque. Apagado a proposito: es
    destructivo y vive al lado de «cambiar», que no lo es. Se enciende al
    acercarse, para que no compita con el nombre. */
+/* El numero de semana, al lado de las fechas. Apagado: acompaña, no compite
+   con el rango que es lo que se lee primero. */
+.numsem{margin-left:10px;font:inherit;font-size:.75rem;font-weight:400;color:var(--fg-faint)}
+
 .trtit .pquit{margin-left:auto;font:inherit;font-size:.6875rem;color:var(--fg-faint);
   background:none;border:0;padding:2px 4px;border-radius:5px;cursor:pointer}
 .trtit .pquit:hover,.trtit .pquit:focus{color:var(--bad);background:var(--surface-2)}
