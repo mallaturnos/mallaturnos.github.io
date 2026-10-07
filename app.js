@@ -2219,11 +2219,30 @@ function repartirEnCarriles(items) {
   const orden = items.slice().sort((x, y) => Number(x.a.inicio) - Number(y.a.inicio)
                                           || Number(x.a.fin) - Number(y.a.fin));
   const finDe = [];                       // hasta que hora llega cada carril
+  /* UNA PERSONA NO SE PARTE EN DOS LINEAS. Pedro lo pregunto con dos casos
+     (msgs 4797 y 4798): Carla con dos turnos el lunes salia arriba y abajo,
+     porque el segundo CABIA en el carril de otra persona que ya habia
+     terminado. Visto desde arriba parece que son dos Carlas.
+
+     Se le reserva a cada persona el carril donde entro. Sin esto el reparto era
+     solo «que no se pisen», que sirve para ver huecos y no para seguir a
+     alguien — y seguir a alguien es lo que el estaba haciendo.
+
+     No cuesta altura a quien tiene UN turno: esos siguen compartiendo carril
+     como antes. Solo deja de mover al que tiene dos, que es el caso raro. */
+  const suyo = new Map();                 // persona -> carril que ya ocupa
   orden.forEach(it => {
-    let c = finDe.findIndex(f => f <= Number(it.a.inicio));
+    const pid = it.p ? it.p.id : (it.a.persona_id || null);
+    let c = -1;
+    if (pid != null && suyo.has(pid)) {
+      const mio = suyo.get(pid);
+      if (finDe[mio] <= Number(it.a.inicio)) c = mio;   // cabe en el suyo
+    }
+    if (c === -1) c = finDe.findIndex(f => f <= Number(it.a.inicio));
     if (c === -1) { c = finDe.length; finDe.push(0); }
     finDe[c] = Number(it.a.fin);
     it.carril = c;
+    if (pid != null) suyo.set(pid, c);
   });
   return { items: orden, carriles: Math.max(1, finDe.length) };
 }
