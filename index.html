@@ -236,11 +236,14 @@
 
       <div id="s-nec" role="tabpanel" aria-labelledby="sub-nec" hidden>
         <div class="card">
-          <!-- El boton arriba a la derecha, pedido por Pedro (msg 4547): crear un
-               turno es lo que uno viene a hacer a esta pantalla, y estaba al
-               final de todo, debajo de las barras. -->
+          <!-- El boton de la cabecera: aqui vivio «+ Turno nuevo» hasta el 07-10,
+               cuando salio por mezclar crear una plantilla con decir cuanta gente
+               falta (msg 4751). Lo que esta ahora SI es de esta pantalla: es lo
+               que ella devuelve. Pedro, 02-10: una pantalla que pide 84 casillas
+               y no entrega nada se siente debil. -->
           <div class="cabcard">
             <h2>Cuánta gente necesito</h2>
+            <button class="act primary" id="btnRepartir">Repartir la semana</button>
           </div>
           <p class="hint">Una línea por cada grupo de gente que necesitas. Cada línea puede ser
             <b>desde qué hora, hasta qué hora y cuántas personas</b>. <b>Todas las líneas se
@@ -622,7 +625,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=72"></script>
-<script src="app.js?v=112"></script>
+<script src="app.js?v=113"></script>
 
 
 </body>

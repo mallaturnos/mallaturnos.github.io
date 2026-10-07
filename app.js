@@ -3575,6 +3575,74 @@ function diceMotivos(motivos) {
     : motivos[k] + ' ' + MOTIVOS[k]).join(', ');
 }
 
+/* ---------- el boton del repartidor ----------
+   `proponer()` existia desde el 05-10, con 25 pruebas en verde, y **no la
+   llamaba nadie**: logica escrita y enterrada. Pedro lo pidio el 07-10
+   («sigamos con todo lo que falta»).
+
+   Va en «Cuanta gente necesito» a proposito: es lo que esa pantalla DEVUELVE.
+   Hasta hoy pedia las horas de cada puesto y no entregaba nada visible, que es
+   lo que Pedro viene diciendo que le hace ruido.
+
+   PROPONE Y PREGUNTA, no escribe de una. Y cuando no puede cubrir algo lo dice
+   con su motivo —«2 ya tienen turno ese dia, 1 esta de ausencia»—, que es la
+   unica exigencia que se le puso desde el principio: tiene que ser explicable.
+   Una maquina que reparte sin decir por que, en algo que promete cumplimiento
+   laboral, convierte cada duda en una revision a mano. */
+async function repartirSemana() {
+  const m = $('#msgDot');
+  const decir = (t, c) => { if (!m) return; m.textContent = t; m.className = 'msg ' + c;
+                            setTimeout(() => { if (m.textContent === t) m.textContent = ''; }, 9000); };
+  const f7 = fechas();
+  const r = proponer({
+    fechas: f7,
+    turnos: S.turnos.map(t => ({ id: t.id, nombre: t.nombre, inicio: Number(t.inicio),
+                                 fin: Number(t.fin), colacion: Number(t.colacion || 0) })),
+    puestos: puestos(),
+    dotacion: S.dotacion,
+    tramos: S.tramos,
+    personas: S.personas.map(p => ({ id: p.id, nombre: p.nombre, rol: p.rol,
+                                     horas_contrato: Number(p.horas_contrato) || 0,
+                                     no_disponible: p.no_disponible || [] })),
+    asign: S.asign,
+    sinDueno: S.abiertos.filter(a => f7.includes(a.fecha) && a.inicio != null)
+                        .map(a => ({ fecha: a.fecha, inicio: Number(a.inicio),
+                                     fin: Number(a.fin), puesto: (a.puesto || '').trim() })),
+  });
+
+  if (!r.filas.length) {
+    return decir(r.nadie
+      ? 'No puedo poner a nadie más: ' + (diceMotivos((r.huecos[0] || {}).motivos) || 'no queda gente disponible') + '.'
+      : 'No falta nadie esta semana: no hay nada que repartir.', r.nadie ? 'bad' : 'ok');
+  }
+
+  /* Lo que queda sin cubrir se cuenta en PERSONA-HORAS y no en turnos: cuando
+     dos turnos se pisan, contar turnos da por cubierto lo que no lo esta. */
+  const faltan = r.huecos.slice(0, 3).map(h =>
+    `${h.falta} de ${h.puesto} el ${DIAS[h.dia]} de ${hhmm(h.desde)} a ${hhmm(h.hasta)}`
+    + (diceMotivos(h.motivos) ? ` (${diceMotivos(h.motivos)})` : ''));
+
+  if (!confirm(`Voy a poner ${r.filas.length} ${r.filas.length === 1 ? 'turno' : 'turnos'} en la semana.`
+    + (r.nadie ? `\n\nQuedan ${hfmt(r.nadie)} persona-horas sin cubrir:\n· ${faltan.join('\n· ')}`
+               + (r.huecos.length > 3 ? `\n· …y ${r.huecos.length - 3} tramos más` : '') : '')
+    + '\n\nNo se toca nada de lo que ya pusiste. ¿Lo hago?')) return;
+
+  try {
+    recordar('repartir la semana');
+    await DATOS.crearAsignacionesLote(S.local.id, r.filas.map(x => ({
+      persona_id: x.persona_id, fecha: x.fecha, turno_id: x.turno_id,
+      inicio: x.inicio, fin: x.fin, colacion: x.colacion, puesto: x.puesto, nota: '',
+    })));
+    await refrescar();
+    decir(`Puestos ${r.filas.length} turnos.`
+      + (r.nadie ? ` Quedan ${hfmt(r.nadie)} persona-horas sin cubrir.` : ' Semana cubierta.')
+      + ' Si fue sin querer, aprieta Deshacer.', r.nadie ? 'bad' : 'ok');
+  } catch (e) {
+    S.hist.pop(); pintarDeshacer();
+    decir(e.message, 'bad');
+  }
+}
+
 /* ================= CUANTA GENTE NECESITO, POR TRAMO =================
    Reemplaza a la tabla de puesto x turno. El caso que la mato lo trajo Pedro
    (msg 3892): con un corrido de 8 h y un refuerzo de 4 h, el mismo numero
@@ -5661,6 +5729,7 @@ function conectarApp() {
     setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerDot', 'click', deshacerDot);
+  on('#btnRepartir', 'click', repartirSemana);
   conectarTN();
 
   // sacar a todo el equipo de la lista. No borra: los deja inactivos, igual que
