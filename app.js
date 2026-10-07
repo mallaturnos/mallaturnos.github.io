@@ -146,6 +146,12 @@ async function deshacerDot() {
     // Un mismo boton para los dos modelos: mientras el SQL de tramos no este
     // aplicado se sigue deshaciendo la dotacion vieja.
     if (h.renombre) await DATOS.renombrarPuesto(h.renombre.id, h.renombre.de);
+    // Las dos juntas van PRIMERO: con `h.tramos` arriba, una entrada que lleva
+    // las dos repondria solo los tramos y daria el paso por hecho.
+    else if (h.tramos && h.filas) {
+      await reponerTramos(h.tramos);
+      await DATOS.reponerDotacion(S.local.id, h.filas);
+    }
     else if (h.tramos) await reponerTramos(h.tramos);
     else await DATOS.reponerDotacion(S.local.id, h.filas);
     await refrescar();
@@ -172,6 +178,16 @@ function fotoTramos() {
           cantidad: Number(t.cantidad) }));
   return filas;
 }
+/* Las dos clases de linea de una vez. Desde el 06-10 «Cuanta gente necesito»
+   muestra junto lo que por debajo vive en DOS tablas —`dotacion` para las
+   lineas que vinieron de un turno, `dotacion_tramos` para las demas—, asi que
+   una operacion que las borra a las dos necesita una foto de las dos. */
+function recordarAmbos(que) {
+  S.histDot.push({ tramos: fotoTramos(), filas: fotoDotacion(), que: que || 'el ultimo cambio' });
+  if (S.histDot.length > MAX_HIST) S.histDot.shift();
+  pintarDeshacerDot();
+}
+
 function recordarTr(que) {
   S.histDot.push({ tramos: fotoTramos(), que: que || 'el ultimo cambio' });
   if (S.histDot.length > MAX_HIST) S.histDot.shift();
@@ -5710,14 +5726,27 @@ function conectarApp() {
   on('#btnLimpiarDot', 'click', async () => {
     const dia = DIAS[Number(S.cobDia)];
     if (!S.sinTablaTramos) {
-      const n = Object.values(S.tramos[S.cobDia] || {}).reduce((k, l) => k + l.length, 0);
+      /* 🔴 Limpiaba SOLO los tramos. Pedro: «el limpiar no limpió» (07-10,
+         msg 4786), con tres lineas de Garzon intactas despues de apretarlo.
+
+         La pantalla muestra junto lo que vive en dos tablas: la linea que
+         venia de un turno esta en `dotacion` con su `turno_id`, y las demas en
+         `dotacion_tramos`. Borrar una sola deja la otra en pantalla, y como se
+         ven IGUALES —a proposito, desde el 06-10— parece que el boton no hizo
+         nada. Hacia justo la mitad de su trabajo, que es peor que no hacerlo:
+         el que mira cree que fallo y vuelve a apretar. */
+      const nT = Object.values(S.tramos[S.cobDia] || {}).reduce((k, l) => k + l.length, 0);
+      const hoy = S.dotacion[S.cobDia] || {};
+      const nD = Object.keys(hoy).reduce((k, pu) => k + Object.keys(hoy[pu]).length, 0);
+      const n = nT + nD;
       if (!n) return alert(`${dia} ya está en blanco.`);
-      if (!confirm(`Borrar los ${n} ${n === 1 ? 'tramo' : 'tramos'} de ${dia}.\n\n`
+      if (!confirm(`Borrar las ${n} ${n === 1 ? 'línea' : 'líneas'} de ${dia}.\n\n`
         + 'Los otros días no se tocan, y lo puedes deshacer.')) return;
       const msg = $('#msgDot');
-      recordarTr('limpiar ' + dia);
+      recordarAmbos('limpiar ' + dia);
       try {
         await DATOS.borrarTramos(S.local.id, S.cobDia);
+        await DATOS.borrarDotacion(S.local.id, S.cobDia);
         await refrescar();
         verSub('nec');
         msg.textContent = dia + ' en blanco. Si fue sin querer, aprieta Deshacer.'; msg.className = 'msg ok';
