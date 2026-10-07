@@ -85,6 +85,7 @@
     <nav role="tablist" aria-label="Secciones">
       <button role="tab" id="tab-sem"  aria-selected="true"  aria-controls="p-sem">Planificación</button>
       <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
+      <button role="tab" id="tab-tn"   aria-selected="false" aria-controls="p-tn">Turnos</button>
       <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
       <button role="tab" id="tab-conf" aria-selected="false" aria-controls="p-conf">Control horario</button>
       <button role="tab" id="tab-link" aria-selected="false" aria-controls="p-link">Links</button>
@@ -240,7 +241,6 @@
                final de todo, debajo de las barras. -->
           <div class="cabcard">
             <h2>Cuánta gente necesito</h2>
-            <button class="act primary" id="btnTurnoNuevoNec">+ Turno nuevo</button>
           </div>
           <p class="hint">Una línea por cada grupo de gente que necesitas. Cada línea puede ser
             <b>desde qué hora, hasta qué hora y cuántas personas</b>. <b>Todas las líneas se
@@ -314,6 +314,22 @@
         <p class="hint" style="margin-top:8px">«Cerrar la semana al saldo» suma a cada persona la diferencia entre las horas que le planificaste y las de su contrato. Hazlo <b>una vez por semana</b>.</p>
       </div>
       <div class="card">
+        <h2>Puestos del local</h2>
+        <p class="hint">Barra, Cocina, Garzón… Al cambiarle el nombre a uno,
+          <b>se cambia también en toda la gente y en todos los turnos</b> que lo tengan.</p>
+        <div id="eqPuestos"></div>
+        <div class="acciones" style="margin-top:14px"><button class="act" id="btnPuesto">Agregar puesto</button></div>
+        <p class="msg" id="msgPuestos"></p>
+      </div>
+    </div>
+
+    <!-- Gestion de turnos como lugar propio. Pedro, 07-10 (msg 4748): su flujo es
+         «Autenticacion · Gestion de trabajadores · Gestion de turnos», y el tercer
+         bloque vivia dentro de Equipo, que parece configuracion. El dialogo ya hacia
+         sus tres pasos —nombre, cuando es, quien lo trabaja—; lo que faltaba era que
+         se viera. -->
+    <div class="panel" id="p-tn" role="tabpanel" aria-labelledby="tab-tn" hidden>
+      <div class="card">
         <h2>Turnos del local</h2>
         <!-- El aviso de la medianoche vivia aca cuando las horas se editaban en esta
              lista. Ahora se editan en el dialogo, que lo dice ahi mismo cuando pasa. -->
@@ -325,14 +341,6 @@
           <span>No dejar que alguien tome un turno sin asignar si <b>se pasa de sus horas contratadas</b>.
           <i>Si lo dejas apagado, lo puede tomar igual.</i></span>
         </label>
-      </div>
-      <div class="card">
-        <h2>Puestos del local</h2>
-        <p class="hint">Barra, Cocina, Garzón… Al cambiarle el nombre a uno,
-          <b>se cambia también en toda la gente y en todos los turnos</b> que lo tengan.</p>
-        <div id="eqPuestos"></div>
-        <div class="acciones" style="margin-top:14px"><button class="act" id="btnPuesto">Agregar puesto</button></div>
-        <p class="msg" id="msgPuestos"></p>
       </div>
     </div>
 
@@ -614,7 +622,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=72"></script>
-<script src="app.js?v=110"></script>
+<script src="app.js?v=111"></script>
 
 
 </body>

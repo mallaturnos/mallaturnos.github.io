@@ -3903,11 +3903,12 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     });
   });
 
-  /* El boton de crear un turno estaba AQUI, al final de todo, debajo de las
-     barras de cada puesto. Pedro lo pidio arriba a la derecha (msg 4547) y
-     tiene razon: crear un turno es a lo que uno viene a esta pantalla, no lo
-     ultimo que encuentra despues de bajar. Ahora vive en la cabecera de la
-     tarjeta, en `#btnTurnoNuevoNec`. */
+  /* Aqui hubo un boton de crear turno, y despues dejo de haberlo.
+     El 05-10 Pedro lo pidio arriba a la derecha de esta tarjeta (msg 4547),
+     porque bajar hasta el final para crear no tiene sentido. El 07-10 lo mando
+     fuera de esta pantalla entera (msg 4751): crear una PLANTILLA de turno no
+     es lo mismo que decir cuanta gente necesitas, y tenerlos juntos confundia.
+     Vive ahora en su propia pestaña, «Turnos». */
 }
 
 /* ================= COBERTURA Y COSTO ================= */
@@ -5145,7 +5146,9 @@ function conectarApp() {
   // addEventListener sin red, reventaba y SE CAÍA TODO LO DEMÁS de conectarApp.
   // Es la segunda vez hoy que un elemento que falta se lleva por delante a los
   // que venían después; que no vuelva a pasar por esta vía.
-  const TABS = ['sem','eq','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
+  // 'tn' = Turnos. Salio de Equipo el 07-10 a pestaña propia: para Pedro la
+  // gestion de turnos es un bloque en si, no un rincon de la configuracion.
+  const TABS = ['sem','eq','tn','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
   TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
     TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
   }));
@@ -5625,7 +5628,6 @@ function conectarApp() {
     setTimeout(() => { const x = $('#msgDot'); if (x) x.textContent = ''; }, 6000);
   });
   on('#btnDeshacerDot', 'click', deshacerDot);
-  on('#btnTurnoNuevoNec', 'click', () => abrirTN(null));
   conectarTN();
 
   // sacar a todo el equipo de la lista. No borra: los deja inactivos, igual que
