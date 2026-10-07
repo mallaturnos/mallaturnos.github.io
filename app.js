@@ -370,44 +370,28 @@ const puestoCat = nombre => S.puestos.find(x =>
 // ni las confirmaciones: el reparto tiene que considerar SIEMPRE a todo el
 // equipo, aunque en pantalla estés mirando solo la cocina.
 /* ---------- el color de un turno ----------
-   Sale de LAS HORAS, no de la plantilla. Antes salia del `turno_id`, y eso se
-   rompia solo: un turno creado desde «Apertura 08:00–16:30» al que despues le
-   cambiaban las horas a 13:30–22:00 se quedaba apuntando a Apertura, asi que
-   salia del color de la apertura. Pedro lo vio dos veces —«por que Ana y Carla
-   quedaron en el mismo color?»— y la segunda insistio con razon: arreglar que
-   los NUEVOS se suelten de la plantilla no corrige los que ya estaban mal.
+   Sale del PUESTO, que es su color guardado en el catalogo.
 
-   Sacandolo de las horas, el color dice lo que el bloque muestra y los turnos
-   viejos se acomodan solos, sin tocarle los datos a nadie.
+   Hasta el 07-10 salia de LAS HORAS: dos bloques del mismo color eran dos
+   bloques del mismo horario. Eso venia de arreglar algo real —antes salia de la
+   plantilla, y un turno al que le cambiaban las horas se quedaba con el color
+   viejo, que Pedro cazo dos veces— pero elegia la dimension equivocada.
 
-   Se ordenan por hora de entrada para que la apertura, la tarde y el cierre
-   caigan siempre en ese orden. El mapa se arma una vez por carga: `cargar()`
-   lo borra. */
-let MAPA_COLOR = null;
+   Lo decidio el 07-10 (msg 4779, «debe ser por puesto») mirando Skello, donde
+   Manager es azul y Ronde verde a cualquier hora. Las dos lecturas se
+   defienden: por horario ves de un vistazo quien abre y quien cierra; por
+   puesto ves cuanta cocina y cuanta barra hay. Esta es la suya.
 
-function mapaDeColores() {
-  if (MAPA_COLOR) return MAPA_COLOR;
-  const clave = (i, f) => Number(i).toFixed(2) + '|' + Number(f).toFixed(2);
-  const vistos = new Set();
-  // las plantillas primero, para que su orden mande cuando existan
-  S.turnos.slice().sort((a, b) => Number(a.inicio) - Number(b.inicio))
-    .forEach(t => vistos.add(clave(t.inicio, t.fin)));
-  const sueltos = [];
-  Object.values(S.asign).flat().concat(S.abiertos).forEach(a => {
-    if (a.inicio == null || a.fin == null) return;
-    const k = clave(a.inicio, a.fin);
-    if (!vistos.has(k)) { vistos.add(k); sueltos.push({ k, i: Number(a.inicio) }); }
-  });
-  sueltos.sort((a, b) => a.i - b.i);
-  MAPA_COLOR = new Map();
-  [...vistos].forEach((k, n) => MAPA_COLOR.set(k, (n % 4) + 1));
-  return MAPA_COLOR;
-}
-
-function colorDe(a) {
+   El puesto de la ASIGNACION manda sobre el habitual de la persona: si Camila
+   hace barra el lunes, ese bloque es de barra aunque ella sea garzona. Un
+   puesto fuera del catalogo —o un turno sin puesto— cae en el neutro, que no
+   es un error: es no tener con que pintarlo. */
+function colorDe(a, p) {
   if (!a || a.inicio == null || a.fin == null) return 5;
-  const k = Number(a.inicio).toFixed(2) + '|' + Number(a.fin).toFixed(2);
-  return mapaDeColores().get(k) || 5;
+  const nom = ((a.puesto || '').trim()) || ((p && p.rol || '').trim());
+  const q = nom ? puestoCat(nom) : null;
+  const c = q ? Number(q.color) : 0;
+  return (c >= 1 && c <= 4) ? c : 5;
 }
 
 const puestos = () => {
@@ -568,7 +552,6 @@ async function cargar() {
   ]);
   S.personas = personas || []; S.turnos = turnos || []; S.abiertos = abiertos || [];
   S.puestos = puestosCat || [];
-  MAPA_COLOR = null;          // los horarios pueden haber cambiado
   S.modelos = modelos || [];
   // Un dia puede traer VARIOS turnos de la misma persona (turno partido), asi
   // que cada casilla guarda una LISTA, no una fila.
@@ -993,7 +976,7 @@ function pintarCasilla(p, fe) {
   const ts = turnosDe(p.id, fe);
   const bloques = ts.map(a => {
     const t = a.turno_id ? turnoDe(a.turno_id) : null;
-    const ci = colorDe(a);
+    const ci = colorDe(a, p);
     const pu = puestoDe(a, p);
     return `<span class="bloque" data-c="${ci}" data-asig="${a.id}" data-fecha="${fe}"
               draggable="true" role="button" tabindex="0"
@@ -1076,7 +1059,7 @@ function pintarSemanaPorPuesto() {
            esos closest devolvieran el select —sin `data-p` ni `data-fecha`— en
            vez del bloque. Lo caza la prueba que cuenta los bloques del grupo. */
         const pedazo = ({ p, a }, conHora) => {
-          const ci = colorDe(a);
+          const ci = colorDe(a, p);
           const ops = ['<option value="">— sin asignar —</option>'].concat(
             S.personas.map(x => `<option value="${x.id}"${p && x.id === p.id ? ' selected' : ''}>`
                               + `${esc(x.nombre.split(' ')[0])}</option>`)).join('');
@@ -2519,7 +2502,7 @@ function pintarDia() {
             ${horas.map(h => `<span class="hlinea" style="left:${pos(h)}%"></span>`).join('')}
             ${rep.items.map(({ a, p, carril }) => {
               const t = a.turno_id ? turnoDe(a.turno_id) : null;
-              const ci = colorDe(a);
+              const ci = colorDe(a, p);
               const iz = pos(Number(a.inicio)), an = pos(Number(a.fin)) - iz;
               const m = marcaAsig(a);
               // Agrupado por puesto, lo util en la barra es QUIEN lo cubre; por
@@ -2673,7 +2656,7 @@ function pintarMes() {
         // no se ve nada.
         return `<td class="mcel" data-p="${p.id}" data-fecha="${f}">` + ts.map(x => {
           const pl = x.turno_id ? turnoDe(x.turno_id) : null;
-          const ci = colorDe(x);
+          const ci = colorDe(x, p);
           const pu = puestoDe(x, p);
           return `<span class="mbl" data-c="${ci}" data-asig="${x.id}" draggable="true"
             role="button" tabindex="0"
