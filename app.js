@@ -3090,6 +3090,20 @@ function pintarEquipo() {
   });
 }
 
+/* ---------- los puestos del local ----------
+   Eran campos sueltos siempre abiertos: por cada puesto, Nombre + Color +
+   Colacion + Quitar, uno debajo de otro. Cuatro puestos llenaban la pantalla y
+   no se veian de un vistazo. Justo debajo, la lista de TURNOS ya era una linea
+   por turno que se abre. **Dos listas de lo mismo con dos estilos distintos en
+   la misma pagina**, y Pedro lo vio: «es mejor con puestos» (07-10).
+
+   Ahora es la misma forma que los turnos —se reusa su clase `.tnfila`, no hay
+   CSS nuevo— y editar abre el MISMO dialogo con el que se crea. De paso se cae
+   el `prompt()` de «Agregar puesto», que es lo que ya se habia quitado en los
+   turnos.
+
+   El renombrado desde «Cuanta gente necesito» sigue donde estaba: Pedro lo
+   pidio tres veces ahi. Esto no lo reemplaza. */
 function pintarPuestos() {
   const bq = $('#bloqTope');
   if (bq && document.activeElement !== bq) bq.checked = !!(S.local && S.local.bloquear_sobre_tope);
@@ -3101,54 +3115,78 @@ function pintarPuestos() {
     return;
   }
   S.puestos.forEach(q => {
-    const row = el('div','rowline', `
-      ${filaCampo('Nombre','text',q.nombre,'data-k="nombre"')}
-      <div class="fld"><label>Color</label>
-        <select data-k="color">${[1,2,3,4].map(c =>
-          `<option value="${c}"${Number(q.color) === c ? ' selected' : ''}>Color ${c}</option>`).join('')}</select></div>
-      ${filaCampo('Colación (min)','number',q.colacion == null ? '' : Math.round(q.colacion*60),
-                  'data-k="colacion" class="n" min="0" max="120" step="15" placeholder="la del turno"')}
-      <button class="mini" data-del="1">Quitar</button>
-      <div class="muestra" data-c="${q.color}">${esc(q.nombre)}</div>`);
-    row.dataset.puesto = q.id;
-    box.appendChild(row);
-
-    const m = $('#msgPuestos');
-    row.querySelectorAll('[data-k]').forEach(inp => {
-      let t = null;
-      const guardar = async () => {
-        const k = inp.dataset.k;
-        try {
-          if (k === 'nombre') {
-            const v = inp.value.trim();
-            if (!v || v === q.nombre) return;
-            // Renombrar lo hace la base de una vez, porque tiene que arrastrar
-            // a la gente y a los turnos ya asignados.
-            await DATOS.renombrarPuesto(q.id, v);
-            await refrescar();
-            m.textContent = 'Listo: se renombró también en la gente y en los turnos.'; m.className = 'msg ok';
-            setTimeout(() => { m.textContent = ''; }, 5000);
-          } else {
-            const v = k === 'colacion'
-              ? (inp.value === '' ? null : (Number(inp.value) || 0) / 60)
-              : Number(inp.value);
-            Object.assign(q, await DATOS.guardarPuesto(q.id, { [k]: v }));
-            pintarPuestos(); pintarTodo();
-          }
-        } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
-      };
-      inp.addEventListener(inp.tagName === 'SELECT' ? 'change' : 'input',
-        () => { clearTimeout(t); t = setTimeout(guardar, 700); });
-    });
-    row.querySelector('[data-del]').addEventListener('click', async () => {
-      const usan = S.personas.filter(p => normal(p.rol) === normal(q.nombre)).length;
-      if (!confirm(`¿Quitar el puesto «${q.nombre}»?\n\n`
-        + (usan ? `Lo tienen ${usan} ${usan === 1 ? 'persona' : 'personas'}. No se les borra: `
-                + 'siguen con ese puesto escrito, pero deja de ofrecerse en las listas.\n\n' : '')
-        + 'No se borra nada de lo ya planificado.')) return;
-      try { await DATOS.quitarPuesto(q.id); await refrescar(); } catch (e) { error(e); }
-    });
+    const col = q.colacion == null ? 'la del turno' : Math.round(q.colacion * 60) + ' min';
+    const fila = el('button', 'tnfila');
+    fila.type = 'button';
+    fila.dataset.puesto = q.id;
+    /* El nombre va DENTRO de su pastilla de color, una sola vez. Al pasar de
+       campos sueltos a lista quedaba escrito dos veces —como texto y otra vez
+       en la muestra—, que ahi tenia sentido (era la vista previa del color
+       mientras lo elegias) y en una lista es ruido. */
+    fila.innerHTML = `<span class="tnf-nom muestra" data-c="${q.color}">${esc(q.nombre)}</span>`
+      + `<span class="tnf-dias"></span>`
+      + `<span class="tnf-h">${esc(col)}</span>`;
+    fila.addEventListener('click', () => abrirPQ(q));
+    box.appendChild(fila);
   });
+}
+
+/* Abre el dialogo. Sin `q` es uno nuevo. */
+function abrirPQ(q) {
+  S.pqEdit = q || null;
+  $('#pqTit').textContent = q ? 'Editar el puesto' : 'Puesto nuevo';
+  $('#pqNombre').value   = q ? q.nombre : '';
+  $('#pqColor').value    = String(q ? q.color : (S.puestos.length % 4) + 1);
+  $('#pqColacion').value = q && q.colacion != null ? String(Math.round(q.colacion * 60)) : '';
+  $('#pqBorrar').hidden  = !q;
+  const m = $('#pqMsg'); m.textContent = ''; m.className = 'msg';
+  $('#dlgPQ').showModal();
+  $('#pqNombre').focus();
+}
+
+async function guardarPQ() {
+  const q = S.pqEdit;
+  const m = $('#pqMsg');
+  const nombre = $('#pqNombre').value.trim();
+  if (!nombre) { m.textContent = 'Ponle un nombre.'; m.className = 'msg bad'; return; }
+  const color    = Number($('#pqColor').value);
+  const colacion = $('#pqColacion').value === ''
+    ? null : (Number($('#pqColacion').value) || 0) / 60;
+  try {
+    if (!q) {
+      await DATOS.crearPuesto(S.local.id, { nombre, color, colacion,
+        orden: S.puestos.length + 1 });
+    } else {
+      /* El nombre va por `renombrar_puesto`, que arrastra a la gente y a los
+         turnos ya asignados, y deja su paso atras —el mismo Deshacer que se
+         hizo esta mañana para «Cuanta gente necesito»—. El color y la colacion
+         son del puesto y nada mas, asi que van por el camino corto. */
+      if (nombre !== q.nombre) {
+        recordarRen(q.id, q.nombre, nombre);
+        try { await DATOS.renombrarPuesto(q.id, nombre); }
+        catch (e) { S.histDot.pop(); pintarDeshacerDot(); throw e; }
+      }
+      if (color !== Number(q.color) || colacion !== (q.colacion == null ? null : Number(q.colacion)))
+        await DATOS.guardarPuesto(q.id, { color, colacion });
+    }
+    await refrescar();
+    $('#dlgPQ').close();
+  } catch (e) {
+    m.textContent = /duplicate|unicos/i.test(e.message)
+      ? 'Ya hay un puesto con ese nombre.' : e.message;
+    m.className = 'msg bad';
+  }
+}
+
+async function borrarPQ() {
+  const q = S.pqEdit; if (!q) return;
+  const usan = S.personas.filter(p => normal(p.rol) === normal(q.nombre)).length;
+  if (!confirm(`¿Quitar el puesto «${q.nombre}»?\n\n`
+    + (usan ? `Lo tienen ${usan} ${usan === 1 ? 'persona' : 'personas'}. No se les borra: `
+            + 'siguen con ese puesto escrito, pero deja de ofrecerse en las listas.\n\n' : '')
+    + 'No se borra nada de lo ya planificado.')) return;
+  try { await DATOS.quitarPuesto(q.id); await refrescar(); $('#dlgPQ').close(); }
+  catch (e) { const m = $('#pqMsg'); m.textContent = e.message; m.className = 'msg bad'; }
 }
 
 /* ---------- la lista de turnos del local ----------
@@ -5642,19 +5680,10 @@ function conectarApp() {
     } catch (e) { m.textContent = e.message; m.className = 'msg bad'; }
   });
 
-  on('#btnPuesto', 'click', async () => {
-    const nombre = prompt('¿Cómo se llama el puesto?\n\nPor ejemplo: Barra, Cocina, Garzón.');
-    if (!nombre || !nombre.trim()) return;
-    try {
-      await DATOS.crearPuesto(S.local.id, { nombre: nombre.trim(),
-        color: (S.puestos.length % 4) + 1, orden: S.puestos.length + 1 });
-      await refrescar();
-    } catch (e) {
-      $('#msgPuestos').textContent = /duplicate|unicos/i.test(e.message)
-        ? 'Ya tienes un puesto con ese nombre.' : e.message;
-      $('#msgPuestos').className = 'msg bad';
-    }
-  });
+  on('#btnPuesto', 'click', () => abrirPQ(null));
+  on('#pqGuardar', 'click', guardarPQ);
+  on('#pqBorrar',  'click', borrarPQ);
+  on('#pqCerrar',  'click', () => $('#dlgPQ').close());
 
   on('#btnPlantilla', 'click', () => {
     // Punto y coma: es lo que Excel en Chile espera, y así se abre en columnas

@@ -5,7 +5,7 @@
 <meta name="viewport" content="width=device-width,initial-scale=1,viewport-fit=cover">
 <title>Malla de Turnos</title>
 <link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Archivo:wght@500;600;700&family=IBM+Plex+Mono:wght@400;500;600&family=IBM+Plex+Sans:wght@400;500;600&display=swap">
-<link rel="stylesheet" href="estilo.css?v=76">
+<link rel="stylesheet" href="estilo.css?v=77">
 </head>
 <body>
 
@@ -407,6 +407,39 @@
 </div>
 
 
+<!-- El puesto se edita en el MISMO dialogo con el que se crea, igual que el
+     turno. Antes eran campos sueltos siempre abiertos en la pagina, y crear
+     uno pedia el nombre por `prompt()`. Pedro, 07-10: «es mejor con puestos».
+     El renombrado sigue viviendo tambien en «Cuanta gente necesito», que es
+     donde lo pidio tres veces: este dialogo no se lo lleva, lo acompaña. -->
+<dialog id="dlgPQ" class="dlg">
+  <form method="dialog">
+    <h3 id="pqTit">Puesto nuevo</h3>
+    <p class="hint">Al cambiarle el nombre a uno, <b>se cambia también en toda la gente
+      y en todos los turnos</b> que lo tengan.</p>
+
+    <div class="fld"><label for="pqNombre">Nombre</label>
+      <input type="text" id="pqNombre" maxlength="40" placeholder="Barra" autocomplete="off"></div>
+
+    <div class="fld"><label for="pqColor">Color</label>
+      <select id="pqColor">
+        <option value="1">Color 1</option><option value="2">Color 2</option>
+        <option value="3">Color 3</option><option value="4">Color 4</option>
+      </select></div>
+
+    <div class="fld"><label for="pqColacion">Colación (min)</label>
+      <input type="number" id="pqColacion" class="n" min="0" max="120" step="15"
+             placeholder="la del turno"></div>
+
+    <p class="msg" id="pqMsg"></p>
+    <div class="acciones dlgpie">
+      <button type="button" class="act" id="pqBorrar" hidden>Quitar el puesto</button>
+      <button type="button" class="act" id="pqCerrar">Cancelar</button>
+      <button type="button" class="act primary" id="pqGuardar">Guardar</button>
+    </div>
+  </form>
+</dialog>
+
 <dialog id="dlgCopiar" class="dlg">
   <form method="dialog" id="formCopiar">
     <h3 id="cTit">Copiar</h3>
@@ -581,7 +614,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=72"></script>
-<script src="app.js?v=109"></script>
+<script src="app.js?v=110"></script>
 
 
 </body>
