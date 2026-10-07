@@ -2647,7 +2647,8 @@ function pintarMes() {
 
   $('#mesCab').innerHTML = '<th>Persona</th>' + ds.map((f,n) => {
     const d = new Date(f + 'T00:00:00'), i = (d.getDay() + 6) % 7;
-    const sem = cierra[n] ? '<th class="semcol">sem</th>' : '';
+    const sem = cierra[n]
+      ? `<th class="semcol" title="Semana ${semanaISO(f)} del año">S${semanaISO(f)}</th>` : '';
     return `<th class="${i>=5?'fin':''}">${d.getDate()}<span class="dsem">${DIAS[i][0]}</span></th>` + sem;
   }).join('') + '<th>Horas</th>';
 
