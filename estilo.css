@@ -663,6 +663,13 @@ table.reloj td.marcar .mini{margin-right:4px}
    diecisiete ceros. */
 .cobnada{margin:0;padding:6px 2px;font-size:.75rem;color:var(--fg-faint);font-style:italic}
 
+/* «+ línea» vivia en la columna de «quitar»: un boton para AGREGAR alineado
+   debajo de los de BORRAR, al extremo derecho. Va a la izquierda, donde empieza
+   la linea que vas a crear. */
+tr.ntmasfila td{padding-top:6px}
+.ntmasno{margin-left:10px;font-size:.75rem;color:var(--bad)}
+tr.ntmasfila .ntmas{display:inline-block}
+
 .bloque[draggable="true"]{cursor:grab}
 .bloque.llevando{opacity:.4;cursor:grabbing}
 td.cell.encima,td.mcel.encima{outline:2px solid var(--accent);outline-offset:-2px;background:var(--accent-soft)}

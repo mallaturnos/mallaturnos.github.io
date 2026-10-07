@@ -3844,7 +3844,7 @@ function pintarNecesidadPorTurno(box, ps, ts) {
     const filas = usados.map(filaTurno).join('') + libres.map(filaLibre).join('');
     const q = puestoCat(puesto);
     const btnMas = `<button type="button" class="act ntmas">+ línea</button>`;
-    const filaMas = `<tr class="ntmasfila"><td></td><td></td><td></td><td></td><td>${btnMas}</td></tr>`;
+    const filaMas = `<tr class="ntmasfila"><td colspan="5">${btnMas}</td></tr>`;
     const hay = usados.length || libres.length;
     const caja = el('div', 'trpuesto', `
       <div class="trtit"><b class="pnom"${q ? ' title="Pincha para cambiarle el nombre"'
@@ -3993,9 +3993,21 @@ function pintarNecesidadPorTurno(box, ps, ts) {
       const desde = ult && ult.hasta != null ? Number(ult.hasta) : h.h0;
       if (desde >= h.h1) {
         const m = $('#msgDot');
-        if (m) { m.textContent = 'Ya hay líneas hasta el cierre (' + hhmm(h.h1)
-               + '). Cambia una hora de término, o quita una, para agregar otra.';
-                 m.className = 'msg bad'; }
+        /* El aviso iba SOLO al pie de la tarjeta, lejos del boton que se acaba
+           de apretar. Desde arriba, apretar «+ linea» y que no pase nada se ve
+           identico a un boton roto — y asi lo reporto Pedro (msg 4793). Un
+           «no» que no se lee es un «no funciona».
+
+           Se dice ademas AL LADO del boton, que es donde esta mirando. */
+        const razon = 'Ya hay líneas hasta el cierre (' + hhmm(h.h1)
+                    + '). Cambia una hora de término, o quita una, para agregar otra.';
+        if (m) { m.textContent = razon; m.className = 'msg bad'; }
+        const fila = mas.closest('td');
+        if (fila && !fila.querySelector('.ntmasno')) {
+          const aviso = el('span', 'ntmasno', esc(razon));
+          fila.appendChild(aviso);
+          setTimeout(() => aviso.remove(), 6000);
+        }
         return;
       }
       l.push({ desde, hasta: Math.min(desde + 4, h.h1), cantidad: 1 });
@@ -5589,14 +5601,34 @@ function conectarApp() {
     // Con tramos es otra cosa que copiar: se copian las FILAS del día, no las
     // casillas. La rama vieja se queda para mientras falte el SQL.
     if (!S.sinTablaTramos) {
-      const mios = Object.values(S.tramos[S.cobDia] || {}).reduce((n, l) => n + l.length, 0);
-      if (!mios) return alert(`${dia} no tiene ningún tramo todavía.\n\nDefínelo primero y después cópialo.`);
+      /* 🔴 Contaba y copiaba SOLO los tramos. Mismo defecto que tenia «Limpiar»
+         (Pedro, msg 4793: «aca +linea tambien esta malo», y antes el de
+         limpiar): desde el 06-10 esta pantalla muestra junto lo que vive en dos
+         tablas, y los botones se quedaron mirando una.
+
+         Con un dia cuyas lineas vienen todas de turnos —o sea en `dotacion`—
+         `mios` daba 0 y el boton contestaba «no tiene ningún tramo todavía».
+         Decia que no habia nada teniendo la pantalla llena. */
+      const nT = Object.values(S.tramos[S.cobDia] || {}).reduce((n, l) => n + l.length, 0);
+      const hoyD = S.dotacion[S.cobDia] || {};
+      const nD = Object.keys(hoyD).reduce((n, pu) => n + Object.keys(hoyD[pu]).length, 0);
+      if (!nT && !nD) return alert(`${dia} no tiene ninguna línea todavía.\n\nDefínelo primero y después cópialo.`);
       const destinos = [...Array(7).keys()].map(String).filter(d => d !== S.cobDia);
-      if (!confirm(`Copiar los tramos de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
+      if (!confirm(`Copiar las ${nT + nD} líneas de ${dia} a los otros seis días.\n\nSe pisa lo que tengan.`)) return;
       const bt = $('#btnCopiarDotacion'); bt.disabled = true;
-      recordarTr('copiar ' + dia + ' a los demás');
+      recordarAmbos('copiar ' + dia + ' a los demás');
       try {
-        await DATOS.copiarTramosDia(S.local.id, S.cobDia, destinos);
+        if (nT) await DATOS.copiarTramosDia(S.local.id, S.cobDia, destinos);
+        if (nD) {
+          // Las lineas que vienen de un turno viven en `dotacion` y se copian
+          // aqui: `copiarTramosDia` solo sabe de la otra tabla.
+          const filas = [];
+          destinos.forEach(d => Object.keys(hoyD).forEach(pu =>
+            Object.keys(hoyD[pu]).forEach(tid => filas.push({
+              local_id: S.local.id, perfil: d, puesto: pu,
+              turno_id: tid, cantidad: hoyD[pu][tid] }))));
+          if (filas.length) await DATOS.guardarDotacionLote(filas);
+        }
         await refrescar();
         verSub('nec');
       } catch (e) { S.histDot.pop(); pintarDeshacerDot(); error(e); }
