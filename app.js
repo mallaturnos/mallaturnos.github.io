@@ -256,11 +256,36 @@ async function deshacerEq() {
 
 // La franja horaria no se fija a mano: sale de los turnos que tenga el local.
 // Un café que cierra a las 19 no tiene por qué mirar columnas hasta la 1 AM.
+/* ---------- la franja horaria del local ----------
+   De que hora a que hora se dibujan las pantallas.
+
+   Salia SOLO de los turnos guardados, y eso se cayo con el catalogo el 07-10:
+   en el modelo de Skello no hay una lista de horarios sueltos de donde sacarla.
+   Ahora sale de lo que de verdad hay, en este orden de evidencia:
+
+     1. lo que escribiste en «Cuanta gente necesito» —es lo que planificas—
+     2. los turnos que ya estan puestos en la malla
+     3. los turnos guardados, si todavia quedan de antes
+     4. y si no hay nada, 08:00–24:00
+
+   Mirar las tres fuentes y no una sola importa: un local que todavia no tiene
+   nada planificado pero ya tiene gente puesta a mano no puede quedarse con la
+   franja por defecto, porque sus turnos caerian fuera del dibujo. */
 function franja() {
-  if (!S.turnos.length) return { h0: 8, h1: 24 };
-  const ini = Math.floor(Math.min(...S.turnos.map(t => Number(t.inicio))));
-  const fin = Math.ceil(Math.max(...S.turnos.map(t => Number(t.fin))));
-  return { h0: Math.max(0, ini), h1: Math.min(ini + 24, Math.max(fin, ini + 1)) };
+  const ini = [], fin = [];
+  Object.values(S.tramos || {}).forEach(porPuesto =>
+    Object.values(porPuesto || {}).forEach(lista =>
+      (lista || []).forEach(t => { ini.push(Number(t.desde)); fin.push(Number(t.hasta)); })));
+  Object.values(S.asign || {}).flat().concat(S.abiertos || []).forEach(a => {
+    if (a.inicio == null || a.fin == null) return;
+    ini.push(Number(a.inicio)); fin.push(Number(a.fin));
+  });
+  (S.turnos || []).forEach(t => { ini.push(Number(t.inicio)); fin.push(Number(t.fin)); });
+  const limpios = ini.filter(x => Number.isFinite(x));
+  if (!limpios.length) return { h0: 8, h1: 24 };
+  const h0 = Math.floor(Math.min(...limpios));
+  const h1 = Math.ceil(Math.max(...fin.filter(x => Number.isFinite(x))));
+  return { h0: Math.max(0, h0), h1: Math.min(h0 + 24, Math.max(h1, h0 + 1)) };
 }
 // Un perfil por día de la semana: 0 = lunes … 6 = domingo. Viernes, sábado y
 // domingo no se parecen en nada, y meterlos en un mismo "fin de semana"
@@ -3728,6 +3753,39 @@ async function pasarALaMalla() {
    unica exigencia que se le puso desde el principio: tiene que ser explicable.
    Una maquina que reparte sin decir por que, en algo que promete cumplimiento
    laboral, convierte cada duda en una revision a mano. */
+/* Los bloques de horario sobre los que reparte el automatico.
+
+   `proponer()` recorre una lista de bloques y va metiendo gente en cada uno.
+   Esa lista era el CATALOGO de turnos, y el catalogo se fue el 07-10: en el
+   modelo de Skello no existe. Ahora sale de lo que escribiste en «Cuanta gente
+   necesito» —un bloque por cada rango distinto— mas los turnos guardados que
+   queden de antes.
+
+   Los rangos escritos no tienen id de turno, asi que llevan una marca `tr:…`
+   que NO es un id de la base: sirve para distinguirlos dentro del reparto y se
+   convierte en NULL al guardar. Escribirla como `turno_id` reventaria, porque
+   esa columna apunta a `turnos`. */
+function bloquesParaRepartir() {
+  const vistos = new Map();
+  const clave = (i, f) => Number(i).toFixed(2) + '|' + Number(f).toFixed(2);
+  Object.values(S.tramos || {}).forEach(porPuesto =>
+    Object.values(porPuesto || {}).forEach(lista =>
+      (lista || []).forEach(t => {
+        const k = clave(t.desde, t.hasta);
+        if (!vistos.has(k)) vistos.set(k, {
+          id: 'tr:' + k, nombre: hhmm(t.desde) + '–' + hhmm(t.hasta),
+          inicio: Number(t.desde), fin: Number(t.hasta), colacion: 0 });
+      })));
+  (S.turnos || []).forEach(t => {
+    const k = clave(t.inicio, t.fin);
+    // el turno guardado PISA al rango suelto con las mismas horas: trae nombre
+    // y colacion de verdad
+    vistos.set(k, { id: t.id, nombre: t.nombre, inicio: Number(t.inicio),
+                    fin: Number(t.fin), colacion: Number(t.colacion || 0) });
+  });
+  return [...vistos.values()].sort((a, b) => a.inicio - b.inicio);
+}
+
 async function repartirSemana() {
   const m = $('#msgDot');
   const decir = (t, c) => { if (!m) return; m.textContent = t; m.className = 'msg ' + c;
@@ -3735,8 +3793,7 @@ async function repartirSemana() {
   const f7 = fechas();
   const r = proponer({
     fechas: f7,
-    turnos: S.turnos.map(t => ({ id: t.id, nombre: t.nombre, inicio: Number(t.inicio),
-                                 fin: Number(t.fin), colacion: Number(t.colacion || 0) })),
+    turnos: bloquesParaRepartir(),
     puestos: puestos(),
     dotacion: S.dotacion,
     tramos: S.tramos,
@@ -3769,7 +3826,9 @@ async function repartirSemana() {
   try {
     recordar('repartir la semana');
     await DATOS.crearAsignacionesLote(S.local.id, r.filas.map(x => ({
-      persona_id: x.persona_id, fecha: x.fecha, turno_id: x.turno_id,
+      // `tr:…` no es un id de la base: es un rango escrito a mano
+      persona_id: x.persona_id, fecha: x.fecha,
+      turno_id: String(x.turno_id || '').startsWith('tr:') ? null : x.turno_id,
       inicio: x.inicio, fin: x.fin, colacion: x.colacion, puesto: x.puesto, nota: '',
     })));
     await refrescar();
