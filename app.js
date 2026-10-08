@@ -368,7 +368,25 @@ const hayTramos = () => Object.keys(S.tramos || {}).length > 0;
 
 // El puesto que se trabaja ESE turno. Si la asignacion no lo trae (una vieja,
 // de antes del cambio), vale el habitual de la persona.
-const puestoDe = (a, p) => ((a && a.puesto) || '').trim() || ((p && p.rol) || '').trim();
+/* El nombre del puesto de una fila.
+
+   MANDA EL ID. El texto guardado es una COPIA del nombre, y una copia puede
+   quedar vieja: hasta el 07-10, renombrar un puesto obligaba a perseguir esa
+   copia por cinco tablas —y si una se escapaba, quedaba apuntando a un nombre
+   que ya no existe—. Siguiendo el id, el nombre sale siempre del catalogo y
+   renombrar pasa a ser cambiar una palabra en un solo lugar.
+
+   El texto queda de respaldo para las filas viejas que todavia no tienen id, y
+   para que nada se rompa mientras conviven las dos cosas. */
+const puestoDe = (a, p) => {
+  const porId = (x) => {
+    if (!x || !x.puesto_id) return '';
+    const q = (S.puestos || []).find(y => y.id === x.puesto_id);
+    return q ? String(q.nombre).trim() : '';
+  };
+  return porId(a) || ((a && a.puesto) || '').trim()
+      || porId(p) || ((p && p.rol) || '').trim();
+};
 const puestoRot = (a, p) => puestoDe(a, p) || 'Sin puesto';
 
 // cuánta gente de ese puesto tiene ese turno asignado ese día. Cuenta el puesto
@@ -5515,7 +5533,32 @@ function conectarTN() {
   on('#tnBorrar', 'click', borrarTN);
 }
 
+/* ---------- el id del puesto se estampa aqui, y solo aqui ----------
+   Doce sitios de este archivo crean o editan asignaciones. Tocarlos uno por uno
+   es como se cuelan los defectos de «la mitad de los sitios» —paso tres veces
+   el 07-10 con los botones de «Cuanta gente necesito»—, asi que se envuelve la
+   capa de datos UNA vez y todos quedan cubiertos.
+
+   El nombre se sigue escribiendo igual: el id se agrega al lado. Mientras las
+   dos cosas convivan, una fila nueva queda bien para la app vieja y para la
+   nueva. */
+function estamparPuestoId() {
+  if (!window.DATOS || DATOS.__conId) return;
+  const marca = f => {
+    if (!f || typeof f !== 'object' || !('puesto' in f)) return f;
+    const q = puestoCat(String(f.puesto || '').trim());
+    return q ? Object.assign({}, f, { puesto_id: q.id }) : f;
+  };
+  const crear = DATOS.crearAsignacion, lote = DATOS.crearAsignacionesLote,
+        edit = DATOS.editarAsignacion;
+  DATOS.crearAsignacion = (l, pid, fecha, campos) => crear(l, pid, fecha, marca(campos));
+  DATOS.crearAsignacionesLote = (l, filas) => lote(l, (filas || []).map(marca));
+  DATOS.editarAsignacion = (id, campos) => edit(id, marca(campos));
+  DATOS.__conId = true;
+}
+
 function conectarApp() {
+  estamparPuestoId();
   // Pestañas. Se filtran las que existen de verdad: al sacar «Turnos abiertos»
   // esta lista quedó nombrando una que ya no está, y como aquí se llamaba a
   // addEventListener sin red, reventaba y SE CAÍA TODO LO DEMÁS de conectarApp.
