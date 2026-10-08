@@ -5195,7 +5195,7 @@ function abrirTN(turno) {
         .map(t => `<option value="${t.id}">${esc(t.nombre)} · ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
   $('#tnCopiar').closest('.fld').hidden = !!turno || !S.turnos.length;
 
-  $('#tnPuesto').innerHTML = '<option value="">— cualquiera —</option>'
+  $('#tnPuesto').innerHTML = '<option value="">— elige el puesto —</option>'
     + puestosConocidos().sort().map(q => `<option value="${esc(q)}">${esc(q)}</option>`).join('');
 
   $('#tnColacion').innerHTML = COLACIONES.map(m =>
@@ -5380,7 +5380,13 @@ async function guardarTN() {
 
   const campos = { nombre, inicio: d.inicio, fin: d.fin, colacion: d.colacion,
                    dias: TN.patron ? TN.patron.join('') : '' };
-  const puesto = $('#tnPuesto').value;
+  /* El puesto es OBLIGATORIO desde el 07-10. Antes el desplegable ofrecia
+     «— cualquiera —» y se podia guardar un turno sin puesto: un rango de horas
+     suelto, que es justo lo que Pedro mando sacar. Un turno sin puesto no se
+     puede dibujar en la vista por puestos ni contar en la cobertura — aparecia,
+     pero en ninguna parte. */
+  const puesto = $('#tnPuesto').value.trim();
+  if (!puesto) return aviso('Elige para qué puesto es este turno.', 'bad');
 
   $('#tnCrear').disabled = true;
   aviso('Guardando…');
