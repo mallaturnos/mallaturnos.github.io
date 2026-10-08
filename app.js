@@ -5458,7 +5458,9 @@ function conectarApp() {
   // que venían después; que no vuelva a pasar por esta vía.
   // 'tn' = Turnos. Salio de Equipo el 07-10 a pestaña propia: para Pedro la
   // gestion de turnos es un bloque en si, no un rincon de la configuracion.
-  const TABS = ['sem','eq','tn','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
+  // 'tn' salio el 07-10: el catalogo de horarios sueltos no existe en el modelo
+  // de Skello, donde el turno nace con su puesto sobre la malla.
+  const TABS = ['sem','eq','prop','conf','link'].filter(t => $('#tab-'+t) && $('#p-'+t));
   TABS.forEach(t => $('#tab-'+t).addEventListener('click', () => {
     TABS.forEach(o => { $('#tab-'+o).setAttribute('aria-selected', String(o===t)); $('#p-'+o).hidden = (o!==t); });
   }));
@@ -6180,7 +6182,10 @@ function conectarApp() {
   // Antes creaba «Turno 4» de 9:00 a 17:00 sin preguntar nada y te dejaba
   // corrigiendo campos sueltos. Es la decision 6: el mismo boton en los dos
   // sitios donde uno lo busca, Equipo y «Cuanta gente necesito».
-  on('#btnTurno', 'click', () => abrirTN(null));
+  on('#btnTurnoRepite', 'click', () => {
+    const pop = $('#masPop'); if (pop) pop.hidden = true;
+    abrirTN(null);
+  });
   on('#bloqTope', 'change', async ev => {
     try { S.local = await DATOS.guardarLocal(S.local.id, { bloquear_sobre_tope: ev.target.checked }); }
     catch (e) { error(e); }

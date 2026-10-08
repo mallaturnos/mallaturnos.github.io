@@ -85,7 +85,6 @@
     <nav role="tablist" aria-label="Secciones">
       <button role="tab" id="tab-sem"  aria-selected="true"  aria-controls="p-sem">Planificación</button>
       <button role="tab" id="tab-eq"   aria-selected="false" aria-controls="p-eq">Equipo</button>
-      <button role="tab" id="tab-tn"   aria-selected="false" aria-controls="p-tn">Turnos</button>
       <button role="tab" id="tab-prop" aria-selected="false" aria-controls="p-prop">Propinas</button>
       <button role="tab" id="tab-conf" aria-selected="false" aria-controls="p-conf">Control horario</button>
       <button role="tab" id="tab-link" aria-selected="false" aria-controls="p-link">Links</button>
@@ -146,6 +145,7 @@
               <label class="maslbl" for="filtroEquipo" id="lblEquipo" hidden>Filtrar por equipo</label>
               <select id="filtroEquipo" aria-label="Filtrar por equipo" hidden></select>
               <hr>
+              <button class="act" id="btnTurnoRepite">Turno que se repite…</button>
               <button class="act" id="btnPlantillas">Plantillas de semana…</button>
               <button class="act" id="btnImprimir">Imprimir</button>
               <button class="act" id="btnLimpiarSem">Limpiar la semana</button>
@@ -281,21 +281,11 @@
         <div class="acciones" style="margin-top:14px"><button class="act" id="btnPuesto">Agregar puesto</button></div>
         <p class="msg" id="msgPuestos"></p>
       </div>
-    </div>
 
-    <!-- Gestion de turnos como lugar propio. Pedro, 07-10 (msg 4748): su flujo es
-         «Autenticacion · Gestion de trabajadores · Gestion de turnos», y el tercer
-         bloque vivia dentro de Equipo, que parece configuracion. El dialogo ya hacia
-         sus tres pasos —nombre, cuando es, quien lo trabaja—; lo que faltaba era que
-         se viera. -->
-    <div class="panel" id="p-tn" role="tabpanel" aria-labelledby="tab-tn" hidden>
+      <!-- Esto no es un turno: es una regla del local sobre lo que la gente
+           puede tomar. Vivia en la pestaña «Turnos», que salio el 07-10. -->
       <div class="card">
-        <h2>Turnos del local</h2>
-        <!-- El aviso de la medianoche vivia aca cuando las horas se editaban en esta
-             lista. Ahora se editan en el dialogo, que lo dice ahi mismo cuando pasa. -->
-        <p class="hint"><b>Aprieta un turno para abrirlo</b>: nombre, días, horas y quién lo trabaja.</p>
-        <div id="eqTurnos"></div>
-        <div class="acciones" style="margin-top:14px"><button class="act" id="btnTurno">Agregar turno</button></div>
+        <h2>Qué pueden tomar</h2>
         <label class="ctrl" style="margin-top:14px;display:flex;gap:8px;align-items:flex-start;max-width:60ch">
           <input type="checkbox" id="bloqTope" style="width:auto;margin-top:3px">
           <span>No dejar que alguien tome un turno sin asignar si <b>se pasa de sus horas contratadas</b>.
@@ -304,6 +294,11 @@
       </div>
     </div>
 
+    <!-- Gestion de turnos como lugar propio. Pedro, 07-10 (msg 4748): su flujo es
+         «Autenticacion · Gestion de trabajadores · Gestion de turnos», y el tercer
+         bloque vivia dentro de Equipo, que parece configuracion. El dialogo ya hacia
+         sus tres pasos —nombre, cuando es, quien lo trabaja—; lo que faltaba era que
+         se viera. -->
     <div class="panel" id="p-prop" role="tabpanel" aria-labelledby="tab-prop" hidden>
       <p class="note"><b>Esto no lo decide el jefe.</b> Por el <b>art. 64</b> del Código del Trabajo, cómo se reparte la propina lo acuerdan los trabajadores. Esta pantalla solo aplica el acuerdo: horas × factor, día por día.</p>
       <div class="card">
@@ -641,7 +636,7 @@
 <script src="https://cdn.jsdelivr.net/npm/@supabase/supabase-js@2.45.4/dist/umd/supabase.min.js"></script>
 <script src="config.js?v=30"></script>
 <script src="datos.js?v=72"></script>
-<script src="app.js?v=124"></script>
+<script src="app.js?v=125"></script>
 
 
 </body>
