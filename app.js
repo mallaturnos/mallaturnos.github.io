@@ -4288,6 +4288,18 @@ function pintarCobertura() {
   const box = $('#needDia'); box.innerHTML = '';
   pintarNecesidadBox(box, ps, ts);
 
+  /* Si desde aqui se puede QUITAR un puesto, tiene que poder AGREGARSE. Pedro,
+     07-10 (msg 4857): «asi como sale quitar puesto, deberia poder agregar».
+     Un atajo que solo destruye es una media simetria que obliga a irse a otra
+     pantalla justo cuando estas armando la semana.
+
+     Abre el MISMO dialogo que «Puestos del local», en modo nuevo: una sola
+     forma de crear un puesto en toda la app. */
+  const mas = el('button', 'act npmas', '+ puesto');
+  mas.type = 'button';
+  mas.addEventListener('click', () => abrirPQ(null));
+  box.appendChild(mas);
+
   /* ---- costo sobre venta ---- */
   const obj = Number(S.local.objetivo_pct) || 30;
   const oi = $('#objetivoPct');

@@ -802,6 +802,9 @@ table.tramos.nt td:last-child{width:104px}
    con el rango que es lo que se lee primero. */
 /* Los dos botones de la cabecera van juntos y en el orden del recorrido:
    pasar a la malla, y despues repartir. */
+/* «+ puesto» al final de los bloques: la pareja de «quitar puesto». */
+.npmas{margin-top:12px}
+
 .cabacc{display:flex;gap:8px;flex-wrap:wrap}
 
 .numsem{margin-left:10px;font:inherit;font-size:.75rem;font-weight:400;color:var(--fg-faint)}
