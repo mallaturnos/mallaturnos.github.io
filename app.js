@@ -389,6 +389,23 @@ const puestoDe = (a, p) => {
 };
 const puestoRot = (a, p) => puestoDe(a, p) || 'Sin puesto';
 
+/* El puesto de un TURNO (la plantilla), no el de una asignacion.
+
+   Hasta el 08-10 la plantilla no tenia puesto: `turnos` era nombre + horas, o
+   sea un rango suelto, y por eso el desplegable «Copiar de» seguia mostrando
+   el catalogo que se suponia eliminado —Pedro lo pillo con una captura, msg
+   4886—. Sacar la pantalla no habia sacado el concepto.
+
+   Manda el id, igual que en `puestoDe`: el nombre sale del catalogo siguiendo
+   `puesto_id`, asi que renombrar un puesto tambien arrastra a los turnos sin
+   tocarlos uno por uno. Un turno viejo sin id devuelve '' y se sigue pudiendo
+   usar; lo que no se hace es inventarle un puesto. */
+const puestoDeTurno = (t) => {
+  if (!t || !t.puesto_id) return '';
+  const q = (S.puestos || []).find(y => y.id === t.puesto_id);
+  return q ? String(q.nombre).trim() : '';
+};
+
 // cuánta gente de ese puesto tiene ese turno asignado ese día. Cuenta el puesto
 // DE LA ASIGNACION: si Camila hace barra el lunes, cuenta en barra ese lunes
 // aunque su puesto habitual sea garzón.
@@ -5207,14 +5224,28 @@ function abrirTN(turno) {
 
   // «Copiar de»: solo al crear. Editar un turno copiando otro encima es un
   // caso que nadie pidio y que se presta a pisar sin querer.
+  //
+  // Cada opcion dice SU PUESTO, y esa es la diferencia entre una lista de
+  // turnos y el catalogo de horarios sueltos que Pedro mando eliminar: antes
+  // decia «Cena · 11:00–15:03» —un rango de horas sin dueño ni sitio— y ahora
+  // dice «Cena · Barra · 11:00–15:03». Los turnos viejos que todavia no tienen
+  // puesto se marcan como tales en vez de disimularlo.
   $('#tnCopiar').innerHTML = '<option value="">— empezar en blanco —</option>'
     + S.turnos.filter(t => !turno || t.id !== turno.id)
         .slice().sort((a, b) => Number(a.inicio) - Number(b.inicio))   // por hora, como la otra lista
-        .map(t => `<option value="${t.id}">${esc(t.nombre)} · ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`).join('');
+        .map(t => {
+          const q = puestoDeTurno(t);
+          return `<option value="${t.id}">${esc(t.nombre)} · ${esc(q || 'sin puesto')}`
+               + ` · ${hhmm(t.inicio)}–${hhmm(t.fin)}</option>`;
+        }).join('');
   $('#tnCopiar').closest('.fld').hidden = !!turno || !S.turnos.length;
 
   $('#tnPuesto').innerHTML = '<option value="">— elige el puesto —</option>'
     + puestosConocidos().sort().map(q => `<option value="${esc(q)}">${esc(q)}</option>`).join('');
+  // Al editar, el puesto guardado queda elegido. Si no se repone, el
+  // desplegable vuelve a «— elige el puesto —» y guardar sin tocarlo cambiaria
+  // el turno de puesto sin que nadie lo pidiera.
+  if (turno) $('#tnPuesto').value = puestoDeTurno(turno);
 
   $('#tnColacion').innerHTML = COLACIONES.map(m =>
     `<option value="${m}"${turno && Math.round(turno.colacion * 60) === m ? ' selected' : ''}>${m} min</option>`).join('');
@@ -5406,6 +5437,23 @@ async function guardarTN() {
   const puesto = $('#tnPuesto').value.trim();
   if (!puesto) return aviso('Elige para qué puesto es este turno.', 'bad');
 
+  /* El puesto se guarda EN LA PLANTILLA desde el 08-10 (Pedro eligio la opcion
+     «A», msg 4888), y se guarda como ID, no como texto: es el mismo criterio
+     del paso 3 de los ids. Asi renombrar un puesto tambien arrastra a los
+     turnos, sin perseguir copias del nombre.
+
+     Si el puesto elegido no esta en el catalogo no se guarda un id nulo en
+     silencio: el turno quedaria diciendo «sin puesto» en la lista justo
+     despues de que la persona eligio uno, que es exactamente la clase de
+     mentira callada que nos trajo hasta aca. Se para y se dice que falta.
+     El desplegable ofrece los puestos EN USO, que no son forzosamente los del
+     catalogo: es el mismo hueco que freno a Pedro la mañana del 07-10. */
+  const qCat = puestoCat(puesto);
+  if (!qCat) return aviso(
+    `«${puesto}» no está en el catálogo de puestos, así que no puedo dejarlo `
+    + 'guardado en el turno. Agrégalo en Propiedades → Puestos y vuelve.', 'bad');
+  campos.puesto_id = qCat.id;
+
   $('#tnCrear').disabled = true;
   aviso('Guardando…');
   try {
@@ -5510,11 +5558,20 @@ function conectarTN() {
 
   // Copiar de otro turno: trae horas, colacion y puesto. NO trae los dias:
   // el calendario es de este turno y copiar fechas de otro no significa nada.
+  //
+  // Lo del PUESTO estaba escrito aqui desde el principio y era mentira: el
+  // codigo nunca lo tocaba, y no podia —la plantilla no guardaba puesto hasta
+  // el 08-10—. Un comentario que promete lo que el codigo no hace es peor que
+  // no tener comentario, porque se lee como verificacion.
+  // Si el turno copiado no tiene puesto (es de los viejos), no se pisa lo que
+  // hubiera elegido: se deja que lo elija, que para eso es obligatorio.
   on('#tnCopiar', 'change', () => {
     const t = turnoDe($('#tnCopiar').value); if (!t) return;
     $('#tnEntra').value = hhmm(t.inicio);
     $('#tnSale').value  = hhmm(t.fin);
     $('#tnColacion').value = String(Math.round((t.colacion || 0) * 60));
+    const q = puestoDeTurno(t);
+    if (q) $('#tnPuesto').value = q;
     if (!$('#tnNombre').value.trim()) $('#tnNombre').value = t.nombre + ' (copia)';
     pintarTNHoras(); pintarTNResumen();
   });
